@@ -68,7 +68,3 @@ All commands and the configuration keys are in `docs/reference.md`.
 - The quote rule proves a quote exists in the source, not that the title is a fair reading of it.
 - Extraction accuracy and the commit matcher have not been measured.
 - macOS paths are assumed.
-
-## License
-
-Not yet chosen.
