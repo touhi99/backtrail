@@ -1,0 +1,7 @@
+/target
+*.db
+*.db-*
+app/node_modules
+app/dist
+app/tsconfig.tsbuildinfo
+.DS_Store
