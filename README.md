@@ -27,6 +27,15 @@ Status: prototype. Tested on macOS only.
 - Network: none from the binary unless `embeddings` is configured, which sends passage and query text to the
   configured URL. `compile.sh` runs the `claude` CLI, which sends session text to the model provider.
 
+## Screenshots
+
+Taken from the demo store (`backtrail demo`), which holds invented content.
+
+| | |
+| --- | --- |
+| ![Today](docs/demo/today.png) | ![Graph](docs/demo/graph.png) |
+| ![Project](docs/demo/thread.png) | ![Graph with an entity selected](docs/demo/graph-selected.png) |
+
 ## Requirements
 
 - Rust toolchain (edition 2024) and Node.js

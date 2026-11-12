@@ -99,8 +99,8 @@ Written from the steps used on the development machine. Not yet run on a second 
      It does not call a model. Setting `BACKTRAIL_COMPILE_ON_END=1` in the hook's environment also compiles the
      session with a small model, which costs tokens.
 
-A demo store with invented content: `BACKTRAIL_HOME=/tmp/tm-demo backtrail demo`, then
-`BACKTRAIL_HOME=/tmp/tm-demo backtrail serve --port 8800`. Screenshots from it are in `docs/demo/`.
+A demo store with invented content: `BACKTRAIL_HOME=/tmp/bt-demo backtrail demo`, then
+`BACKTRAIL_HOME=/tmp/bt-demo backtrail serve --port 8800`. Screenshots from it are in `docs/demo/`.
 
 ## Scale limits
 
@@ -113,6 +113,12 @@ unchanged: vectors are compared by brute force over an in-memory copy (about 36 
 passages, a few hundred thousand passages at most before it needs an index); `graph()` rebuilds the whole graph per
 request with one FTS query per thread; the item index is rebuilt in memory whenever items change. None of these has
 been measured beyond the present store.
+
+## Source layout
+
+Rust code is formatted with `cargo fmt`. Longer SQL statements are in `src/sql/*.sql` and loaded with `include_str!`; the
+first line of each file names the function that uses it. A few use `{where}`, `{limit}`, `{exclude}` or `{ids}` markers
+that the caller replaces. Short statements stay inline.
 
 ## Other limits
 
