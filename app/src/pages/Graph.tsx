@@ -4,7 +4,7 @@ import { Minus, Plus, Search as SearchIcon, X, Maximize2 } from 'lucide-react'
 import { dayFmt, post, useApi } from '@/lib/api'
 import '@/next.css'
 
-const KIND_C: Record<string, string> = { project: '#60a5fa', service: '#c084fc', tool: '#fbbf24', site: '#34d399' }
+const KIND_C: Record<string, string> = { project: '#60a5fa', service: '#c084fc', tool: '#fbbf24', site: '#34d399', topic: '#f472b6' }
 const STATUS_C: Record<string, string> = { active: '#34d399', proposed: '#8b8b95', superseded: '#fbbf24', retracted: '#fb7185' }
 const STATUS_L: Record<string, string> = { active: 'kept', proposed: 'suggested', superseded: 'replaced', retracted: 'rejected' }
 const WHO: Record<string, string> = { owner: 'You', assistant: 'Claude', unknown: 'Unknown' }
@@ -13,7 +13,11 @@ const W = 880, H = 700
 /** Fixed-seed force layout: repulsion between nodes, springs along shared-claim edges, a weak pull to the centre. */
 function layout(nodes: any[], edges: any[]) {
   const pos = new Map<string, { x: number; y: number }>()
-  nodes.forEach((n, i) => { const a = (i / nodes.length) * Math.PI * 2; pos.set(n.id, { x: W / 2 + Math.cos(a) * 300, y: H / 2 + Math.sin(a) * 250 }) })
+  const topics = nodes.filter((n) => n.kind === 'topic'), main = nodes.filter((n) => n.kind !== 'topic')
+  const isTopic = new Set(topics.map((n) => n.id))
+  main.forEach((n, i) => { const a = (i / main.length) * Math.PI * 2; pos.set(n.id, { x: W / 2 + Math.cos(a) * 200, y: H / 2 + Math.sin(a) * 170 }) })
+  topics.forEach((n, i) => { const a = (i / topics.length) * Math.PI * 2 - Math.PI / 2; pos.set(n.id, { x: W / 2 + Math.cos(a) * 390, y: H / 2 + 30 + Math.sin(a) * 285 }) })
+  edges = edges.filter((e) => !isTopic.has(e.a) && !isTopic.has(e.b))
   for (let it = 0; it < 360; it++) {
     const f = new Map<string, { x: number; y: number }>(nodes.map((n) => [n.id, { x: 0, y: 0 }]))
     for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
@@ -27,7 +31,7 @@ function layout(nodes: any[], edges: any[]) {
       const dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) || 1, k = (d - 165) * 0.008 * Math.min(1 + Math.log(e.w), 3)
       f.get(e.a)!.x += (dx / d) * k; f.get(e.a)!.y += (dy / d) * k; f.get(e.b)!.x -= (dx / d) * k; f.get(e.b)!.y -= (dy / d) * k
     }
-    for (const n of nodes) {
+    for (const n of main) {
       const p = pos.get(n.id)!, g = f.get(n.id)!
       g.x += (W / 2 - p.x) * 0.0035; g.y += (H / 2 - p.y) * 0.007
       p.x = Math.min(W - 70, Math.max(70, p.x + Math.max(-10, Math.min(10, g.x)))); p.y = Math.min(H - 50, Math.max(40, p.y + Math.max(-10, Math.min(10, g.y))))
@@ -116,6 +120,7 @@ export default function Graph() {
           {(g?.edges ?? []).map((e: any, i: number) => {
             const a = pos.get(e.a), b = pos.get(e.b); if (!a || !b) return null
             const on = focus && (e.a === focus || e.b === focus)
+            if (!on && (byId.get(e.a)?.kind === 'topic' || byId.get(e.b)?.kind === 'topic')) return null
             return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={on ? '#34d399' : '#a1a1aa'} strokeOpacity={on ? 0.85 : focus ? 0.05 : 0.16} strokeWidth={(on ? 1.4 : 0.8) + Math.log(1 + e.w) * 0.8} />
           })}
           {nodes.map((n: any) => {
@@ -195,7 +200,7 @@ export default function Graph() {
               ))}
               {sug.entities.slice(0, 12).map((e: any) => (
                 <div key={e.term} className="mt-1.5 flex items-center gap-2 text-[12.5px]"><span className="flex-1 truncate">{e.term} <span className="text-mut">{e.turns} turns</span></span>
-                  {['project', 'service', 'tool'].map((k) => <button key={k} className="btn sm" onClick={() => addEntity(e.term, k)}>{k}</button>)}</div>
+                  {['topic', 'project', 'tool', 'service'].map((k) => <button key={k} className="btn sm" onClick={() => addEntity(e.term, k)}>{k}</button>)}<button className="btn sm" title="Hide this suggestion" onClick={() => addEntity(e.term, 'ignore')}>✕</button></div>
               ))}
             </details>
           )}
