@@ -1,18 +1,18 @@
-import { Route, Routes, useSearchParams } from 'react-router-dom'
+import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom'
 import Shell from '@/components/Shell'
 import Today from '@/pages/Today'
-import MapOverview from '@/pages/MapOverview'
 import MapPage from '@/pages/MapPage'
 import Thread from '@/pages/Thread'
 import Source from '@/pages/Source'
 import Search from '@/pages/Search'
 import Items from '@/pages/Items'
 import Log from '@/pages/Log'
+import Graph from '@/pages/Graph'
 
-/** The graph of threads; a project's own focus view (notes as cards) is still MapPage. */
+/** The project overview map is gone: /map goes to the Graph. A project's own focus view (notes as cards) is still MapPage. */
 function MapRoute() {
   const [sp] = useSearchParams()
-  return sp.get('thread') ? <MapPage /> : <MapOverview />
+  return sp.get('thread') ? <MapPage /> : <Navigate to="/graph" replace />
 }
 
 export default function App() {
@@ -26,6 +26,7 @@ export default function App() {
         <Route path="/search" element={<Search />} />
         <Route path="/items" element={<Items />} />
         <Route path="/log" element={<Log />} />
+        <Route path="/graph" element={<Graph />} />
         <Route path="*" element={<Today />} />
       </Routes>
     </Shell>

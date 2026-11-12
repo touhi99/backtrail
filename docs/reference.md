@@ -30,16 +30,30 @@ hooks, and the parts that do not scale unchanged.
 | `compile-log <ref> [--failed 1] --detail "..."` | Record one compile run and its cost |
 | `log [--n N]` | Print the append-only change log |
 | `backup` | Copy the store to `BacktrailBackups` (also daily on rescan, 14 kept) |
+| `kg [migrate]` | Print graph table counts; `migrate` copies thread relations that have a quote from `links` into claims (idempotent, `links` unchanged) |
+| `kg import` | Seed the configured entities (`config.json` key `entities`) and copy decisions into claims with their quote; entities are matched by whole-word name or alias |
+| `kg find "<question>"` | Router for history questions: lineage trace, entity page, claim lookup, then passages. Prints "no record" on a miss |
+| `kg page <entity> [--budget N]` | Entity page within a token budget: newest claims in full, older ones rolled up by month |
+| `kg trace <entity>` / `kg why <words>` / `kg neighbors <entity>` / `kg passage <words> [--entity E --from DATE]` | Dated lineage, claim lookup, shared-claim neighbours (2 hops, capped), full-text with a prefilter |
+| `kg claims -` | Add claims from a JSON array through the write rule (verbatim quote, known entities; speaker and date come from the passage) |
+| `kg extract-queue [--limit N --entity E]`, `kg extract-input <ref>`, `kg log <ref>` | Inputs for `skill/kg-extract.sh`, which runs one small-model call per session (8 a day at most) |
+| `kg suggest` / `kg entity add <name> [--kind K --alias A]` | Suggest new entities and alias spellings (nothing is written); add one by hand |
+| `kg state` | Thread state suggested from session activity alone (nothing is changed) |
+| `kg lint` | Graph checks (also part of `check`) |
+| `kg export <file>` / `kg restore <file>` | Backup as JSONL; evidence is re-located by source and quote on restore |
+| `build` | Fresh machine: ingest all sources, then build the graph from them |
 | `demo` | Write a demo store (requires `BACKTRAIL_HOME`) |
 
 `relate <A> <B> <kind> --source <ref> --quote "..." [--state proposed]` files a relation between two threads
 (`spun out of`, `forked from`, `built on`, `replaced by`) with a quote from a source. `relate-input <ref>` prints the
 packet for a model to propose relations.
 
-App screens: Today, thread, source (cited passage highlighted), search, items, log, and the map. The map shows each
-thread as a bar from its first to its last session, with an arrow where one thread came out of, or was built on,
-another; selecting an arrow shows its quote. The app can tick a step, confirm or dismiss `looks done?`, answer a
-question, add an idea, and accept or reject suggested items.
+App screens: Today, thread, source (cited passage highlighted), search, items, log, and the graph. The graph shows
+entities as nodes (size is the number of claims, a line means claims about both). Selecting a node opens its
+lineage, shared-claim neighbours and claims, each with date, speaker, quote and a link to the source passage. The
+panel also lists suggested entities and aliases that can be added with one click. A project page still has a map of
+its own notes. The app can tick a step, confirm or dismiss `looks done?`, answer a question, add an idea, and accept
+or reject suggested items. Thread lineage drawn on the graph comes from relation claims (`relate` writes them).
 
 ## Configuration
 
@@ -89,6 +103,10 @@ A demo store with invented content: `BACKTRAIL_HOME=/tmp/tm-demo backtrail demo`
 `BACKTRAIL_HOME=/tmp/tm-demo backtrail serve --port 8800`. Screenshots from it are in `docs/demo/`.
 
 ## Scale limits
+
+Graph queries (entity lookup, claim filter, two-hop) were timed on a scratch store of up to 4 million passages and
+stayed under 1 ms at p95; full-text search grew linearly to a p95 of about 650 ms at 4 million passages, so it needs
+an entity or time prefilter past about 2 million.
 
 Keyword search uses SQLite FTS5, which handles far more than the present 11,800 passages. Parts that do not scale
 unchanged: vectors are compared by brute force over an in-memory copy (about 36 MB at 768 dimensions and 11,800

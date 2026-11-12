@@ -2,6 +2,7 @@ mod compile;
 mod db;
 mod embed;
 mod ingest;
+mod kg;
 mod server;
 
 use db::*;
@@ -11,12 +12,8 @@ fn arg(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let cmd = args.first().map(|s| s.as_str()).unwrap_or("help");
-    let c = open();
-    match cmd {
-        "ingest" => {
+fn do_ingest(c: &rusqlite::Connection) {
+    let c = c;
             if home().join(".demo").exists() { eprintln!("demo store: ingest is disabled"); std::process::exit(1); }
             ingest::seed_threads(&c);
             let (a, sa) = ingest::ingest_sessions(&c);
@@ -29,6 +26,21 @@ fn main() {
             println!("items relinked {ok}, quote no longer found {lost}");
             if a + b + d + g > 0 { logw(&c, "ingest", "ingest", "sources", &format!("sessions {a}, notes {b}, artifacts {d}, git repos {g}")); }
             println!("sessions {a} new/changed ({sa} unchanged), notes {b} ({sb}), artifacts {d} ({sd})");
+        }
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let cmd = args.first().map(|s| s.as_str()).unwrap_or("help");
+    let c = open();
+    match cmd {
+        "ingest" => do_ingest(&c),
+        "build" => {
+            // a fresh machine: index every source, then build the graph from them
+            do_ingest(&c);
+            let (n, l, b) = kg::import_decisions(&c);
+            println!("graph: {n} claims from decisions ({l} linked to entities, {b} about no entity)");
+            kg::migrate_links(&c);
+            embed::run_cli(&c, usize::MAX);
         }
         "add" => {
             // backtrail add <type> --thread T --title X --source REF --quote Q [--body B] [--state S] [--origin O]
@@ -146,6 +158,30 @@ fn main() {
         }
         "pending" => server::pending(&c, arg(&args, "--days").and_then(|d| d.parse().ok()).unwrap_or(3)),
         "show" => server::show(&c, args.get(1).expect("source ref")),
+        "kg" => match args.get(1).map(|s| s.as_str()) {
+            Some("migrate") => { let (d, s) = kg::migrate_links(&c); logw(&c, "claude", "kg-migrate", "links", &format!("{d} copied, {s} left out")); println!("claims from links: {d} copied, {s} left out (item links or no quote)"); kg::stats(&c) }
+            Some("state") => kg::state(&c),
+            Some("claims") => { let mut raw = String::new(); std::io::Read::read_to_string(&mut std::io::stdin(), &mut raw).ok(); let (ok, bad) = kg::import_claims(&c, &raw); println!("claims added {ok}, rejected {bad}") }
+            Some("extract-queue") => for r in kg::extract_queue(&c, arg(&args, "--limit").and_then(|d| d.parse().ok()).unwrap_or(3), arg(&args, "--entity").as_deref(), arg(&args, "--session").as_deref()) { println!("{r}") },
+            Some("extract-input") => kg::extract_input(&c, args.get(2).expect("session ref")),
+            Some("export") => { kg::export(&c, args.get(2).expect("file")).expect("write"); println!("ok") }
+            Some("restore") => { let (n, o) = kg::restore(&c, args.get(2).expect("file")); println!("restored {n} rows, {o} evidence rows left out (source or quote not found)") }
+            Some("lint") => kg::lint(&c),
+            Some("log") => { let ok = arg(&args, "--failed").is_none(); logw(&c, "compile", if ok { "kg-extract" } else { "kg-extract-failed" }, args.get(2).expect("session ref"), &arg(&args, "--detail").unwrap_or_default()); println!("ok") }
+            Some("suggest") => kg::suggest(&c),
+            Some("entity") => {
+                let mut al = vec![]; let mut i = 0; while i < args.len() { if args[i] == "--alias" { if let Some(a) = args.get(i + 1) { al.push(a.clone()) } } i += 1 }
+                kg::entity_add(&c, args.get(3).expect("name"), &arg(&args, "--kind").unwrap_or("project".into()), &al)
+            }
+            Some("page") => kg::page(&c, args.get(2).expect("entity"), arg(&args, "--budget").and_then(|d| d.parse().ok()).unwrap_or(2000)),
+            Some("trace") => kg::trace(&c, args.get(2).expect("entity")),
+            Some("why") => { kg::why(&c, &args[2..].join(" ")); }
+            Some("neighbors") => kg::neighbors(&c, args.get(2).expect("entity")),
+            Some("passage") => kg::passage(&c, args.get(2).expect("query"), arg(&args, "--entity").as_deref(), arg(&args, "--from").as_deref()),
+            Some("find") => kg::find(&c, &args[2..].join(" ")),
+            Some("import") => { let (n, l, b) = kg::import_decisions(&c); logw(&c, "claude", "kg-import", "decisions", &format!("{n} claims, {l} linked to entities, {b} without")); println!("decisions to claims: {n} ({l} linked to entities, {b} about no entity)"); kg::stats(&c) }
+            _ => kg::stats(&c),
+        },
         "demo" => server::demo(&c),
         "serve" => server::serve(c, arg(&args, "--port").and_then(|p| p.parse().ok()).unwrap_or(ingest::cfg().port)),
         _ => println!("backtrail ingest | check | match | artifacts | search <q> [--thread --kind --state --from --to --text] | embed [--limit N] | log | link A B kind | pending [--days N] | show <ref> | demo (needs BACKTRAIL_HOME) | add <type> --thread --title --source --quote | import <items.json> | set-thread | compile-input <ref> | compile-queue [--session ID] | compile-log <ref> | retire <id> --by <id> --reason | assign <ref> <thread> | reply <q> --text TEXT | built <step> --evidence TEXT | flag <id> --as live|in_effect|superseded|done --reason | brief [--thread T] | serve [--port N]"),

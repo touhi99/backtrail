@@ -39,3 +39,10 @@
 .nx-card { position: absolute; transition: opacity .18s; pointer-events: none; border-radius: 12px; padding: 8px 11px; max-width: 220px;
   background: rgba(24, 24, 28, .92); border: 1px solid var(--color-line2); box-shadow: 0 10px 28px rgba(0, 0, 0, .4); backdrop-filter: blur(8px); }
 @media (prefers-reduced-motion: reduce) { .nx-in { animation: none; } }
+
+/* graph page: like .nx-map, but icons inside it keep their size */
+.nx-gmap { position: relative; height: 100%; min-height: 640px; overflow: hidden; background:
+  radial-gradient(700px 420px at 62% 20%, rgba(96, 165, 250, .08), transparent 60%),
+  radial-gradient(700px 420px at 20% 80%, rgba(52, 211, 153, .06), transparent 60%), var(--color-bg); }
+.nx-gmap .nx-canvas { position: absolute; left: 0; top: 0; bottom: 0; right: 440px; width: calc(100% - 440px); height: 100%; }
+@media (max-width: 900px) { .nx-gmap .nx-canvas { right: 0; width: 100%; } }

@@ -112,7 +112,7 @@ fn rows(c: &Connection, sql: &str, p: &[&dyn rusqlite::ToSql]) -> Vec<Value> {
     .collect()
 }
 
-fn days_ago(ts: &str) -> i64 {
+pub fn days_ago(ts: &str) -> i64 {
     let now = chrono_now();
     let d = |s: &str| -> i64 {
         let out = std::process::Command::new("date").args(["-u", "-j", "-f", "%Y-%m-%d", s.get(..10).unwrap_or("1970-01-01"), "+%s"]).output().unwrap();
@@ -322,6 +322,8 @@ pub fn rescan(c: &Connection) {
     crate::ingest::rethread(c);
     crate::ingest::relink(c);
     match_inner(c, false);
+    crate::kg::import_decisions(c);
+    crate::kg::migrate_links(c);
     if !home().join(".demo").exists() { backup(c); }
 }
 
@@ -367,6 +369,7 @@ pub fn check(c: &Connection) {
     }
     let ld = rows(c, "SELECT COUNT(*) AS n FROM nodes WHERE state='looks_done'", &[]);
     println!("steps waiting on the owner as 'looks done?': {}", ld[0]["n"]);
+    crate::kg::lint(c);
 }
 
 /// Step 5 input: recent real sessions in live threads that no item cites yet.
@@ -561,7 +564,15 @@ fn graph(c: &Connection) -> Value {
         }
     }
     for ((a, b), n) in w { if n >= 12 { edges.push(json!({"a": format!("T:{a}"), "b": format!("T:{b}"), "kind": "mentions", "w": n})); } }
-    for l in rows(c, "SELECT l.a, l.b, l.kind, l.quote, l.ts, l.state, l.chunk_id, s.ref AS source, s.title AS source_title, s.id AS source_id FROM links l LEFT JOIN sources s ON s.id=l.source_id WHERE ifnull(l.state,'') != 'rejected'", &[]) {
+    // thread lineage is drawn from relation claims; links that carry no evidence, and item links, are read from `links`
+    for l in rows(c, "SELECT 'T:'||ea.name AS a, 'T:'||eb.name AS b, substr(c.type, 10) AS kind, v.quote, v.ts, CASE c.status WHEN 'proposed' THEN 'proposed' ELSE NULL END AS state, v.chunk_id, s.ref AS source, s.title AS source_title, s.id AS source_id
+        FROM claims c JOIN claim_about sa ON sa.claim_id=c.id AND sa.role='subject' JOIN entities ea ON ea.id=sa.entity_id
+        JOIN claim_about ob ON ob.claim_id=c.id AND ob.role='object' JOIN entities eb ON eb.id=ob.entity_id
+        JOIN claim_evidence v ON v.claim_id=c.id LEFT JOIN sources s ON s.id=v.source_id
+        WHERE c.type IN ('relation:spun out of','relation:forked from','relation:built on','relation:replaced by') AND c.status!='retracted'", &[]) {
+        edges.push(json!({"a": l["a"], "b": l["b"], "kind": l["kind"], "w": 1, "quote": l["quote"], "ts": l["ts"], "state": l["state"], "chunk_id": l["chunk_id"], "source": l["source"], "source_title": l["source_title"], "source_id": l["source_id"]}));
+    }
+    for l in rows(c, "SELECT l.a, l.b, l.kind, l.quote, l.ts, l.state, l.chunk_id, s.ref AS source, s.title AS source_title, s.id AS source_id FROM links l LEFT JOIN sources s ON s.id=l.source_id WHERE ifnull(l.state,'') != 'rejected' AND NOT (l.a LIKE 'T:%' AND l.b LIKE 'T:%' AND l.chunk_id IS NOT NULL AND l.quote IS NOT NULL)", &[]) {
         edges.push(json!({"a": l["a"], "b": l["b"], "kind": l["kind"], "w": 1, "quote": l["quote"], "ts": l["ts"], "state": l["state"], "chunk_id": l["chunk_id"], "source": l["source"], "source_title": l["source_title"], "source_id": l["source_id"]}));
     }
     // items and the sources they come from
@@ -676,6 +687,42 @@ pub fn serve(c: Connection, port: u16) {
                 json_resp(json!({"kind": kind, "text": text}))
             }
             (Method::Get, "/api/graph") => json_resp(graph_cached(&c)),
+            (Method::Get, "/api/kg") => json_resp(json!(rows(&c, "SELECT e.id, e.name, e.kind, (SELECT group_concat(alias, ', ') FROM entity_aliases a WHERE a.entity_id=e.id AND a.alias != lower(e.name)) AS aliases, (SELECT COUNT(*) FROM claim_about x WHERE x.entity_id=e.id) AS claims FROM entities e ORDER BY claims DESC, e.name", &[]))),
+            (Method::Get, "/api/kg/graph") => json_resp(json!({
+                "nodes": rows(&c, "SELECT e.id, e.name, e.kind, (SELECT group_concat(alias, ', ') FROM entity_aliases a WHERE a.entity_id=e.id AND a.alias != lower(e.name)) AS aliases, (SELECT COUNT(*) FROM claim_about x WHERE x.entity_id=e.id) AS claims FROM entities e", &[]),
+                "edges": rows(&c, "SELECT x.entity_id AS a, y.entity_id AS b, COUNT(*) AS w FROM claim_about x JOIN claim_about y ON x.claim_id=y.claim_id AND x.entity_id<y.entity_id GROUP BY 1,2", &[]),
+                "none": rows(&c, "SELECT COUNT(*) AS n FROM claims c WHERE NOT EXISTS (SELECT 1 FROM claim_about z WHERE z.claim_id=c.id)", &[]),
+            })),
+            (Method::Get, "/api/kg/suggest") => {
+                let (al, ca) = crate::kg::suggest_data(&c);
+                json_resp(json!({"aliases": al.iter().map(|(w, k, n)| json!({"alias": w, "entity": k, "turns": n})).collect::<Vec<_>>(),
+                                 "entities": ca.iter().map(|(w, n, s)| json!({"term": w, "turns": n, "sessions": s})).collect::<Vec<_>>()}))
+            }
+            (Method::Post, "/api/kg/entity") => {
+                let v = &b;
+                let (name, kind, alias_of) = (v["name"].as_str().unwrap_or("").trim().to_string(), v["kind"].as_str().unwrap_or("project").to_string(), v["alias_of"].as_str().unwrap_or("").to_string());
+                if name.is_empty() { json_resp(json!({"ok": false})) } else {
+                    let ok = if alias_of.is_empty() { crate::kg::entity_add(&c, &name, &kind, &[name.to_lowercase()]); true } else { crate::kg::alias_add(&c, &alias_of, &name) };
+                    if ok { crate::kg::import_decisions(&c); }
+                    json_resp(json!({"ok": ok}))
+                }
+            }
+            (Method::Get, "/api/kg/lineage") => json_resp(json!(rows(&c, "SELECT c.id, c.type, c.text, c.speaker, c.asserted_at, c.status,
+                (SELECT group_concat(name, ' → ') FROM (SELECT e.name FROM claim_about x JOIN entities e ON e.id=x.entity_id WHERE x.claim_id=c.id ORDER BY x.role='object')) AS path,
+                v.quote, v.stated, v.source_id, s.title AS source_title
+                FROM claims c JOIN claim_evidence v ON v.claim_id=c.id AND v.rowid=(SELECT MIN(rowid) FROM claim_evidence WHERE claim_id=c.id) LEFT JOIN sources s ON s.id=v.source_id
+                WHERE c.type LIKE 'relation:%' AND c.status!='retracted' ORDER BY c.asserted_at ASC", &[]))),
+            (Method::Get, "/api/kg/claims") => {
+                let (ent, q, st, sp) = (qparam(&url, "entity"), qparam(&url, "q"), qparam(&url, "status"), qparam(&url, "speaker"));
+                let where_ = "(?1='' OR (?1='_none' AND NOT EXISTS (SELECT 1 FROM claim_about z WHERE z.claim_id=c.id)) OR EXISTS (SELECT 1 FROM claim_about z WHERE z.claim_id=c.id AND z.entity_id=?1))
+                    AND (?2='' OR c.text LIKE '%'||?2||'%' OR ifnull(c.body,'') LIKE '%'||?2||'%' OR EXISTS (SELECT 1 FROM claim_evidence v WHERE v.claim_id=c.id AND v.quote LIKE '%'||?2||'%'))
+                    AND (?3='' OR c.status=?3) AND (?4='' OR c.speaker=?4)";
+                let total = rows(&c, &format!("SELECT COUNT(*) AS n FROM claims c WHERE {where_}"), &[&ent, &q, &st, &sp]);
+                let claims = rows(&c, &format!("SELECT c.id, c.type, c.text, c.body, c.speaker, c.asserted_at, c.status, (SELECT group_concat(o.name, ' | ') FROM claim_about x JOIN entities o ON o.id=x.entity_id WHERE x.claim_id=c.id) AS entities FROM claims c WHERE {where_} ORDER BY c.asserted_at DESC LIMIT 150"), &[&ent, &q, &st, &sp]);
+                let ids: Vec<String> = claims.iter().filter_map(|x| x["id"].as_str()).filter(|i| i.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-')).map(|i| format!("'{i}'")).collect();
+                let ev = if ids.is_empty() { vec![] } else { rows(&c, &format!("SELECT v.claim_id, v.quote, v.stated, v.ts, v.source_id, s.ref AS source, s.title AS source_title FROM claim_evidence v LEFT JOIN sources s ON s.id=v.source_id WHERE v.claim_id IN ({})", ids.join(",")), &[]) };
+                json_resp(json!({"total": total.get(0).map(|t| t["n"].clone()), "claims": claims, "evidence": ev}))
+            }
             (Method::Get, "/api/items") => json_resp(items_list(&c, &qparam(&url, "type"), &qparam(&url, "state"), &qparam(&url, "thread"), &qparam(&url, "kind"))),
             (Method::Get, "/api/log") => json_resp(json!(rows(&c, "SELECT ts, actor, action, target, detail FROM log ORDER BY id DESC LIMIT 80", &[]))),
             (Method::Post, "/api/doing") => {
@@ -761,6 +808,7 @@ pub fn serve(c: Connection, port: u16) {
                 let (a, bb, k) = (b["a"].as_str().unwrap_or(""), b["b"].as_str().unwrap_or(""), b["kind"].as_str().unwrap_or(""));
                 let st = if b["accept"].as_bool() == Some(true) { "accepted" } else { "rejected" };
                 let n = c.execute("UPDATE links SET state=?4 WHERE a=?1 AND b=?2 AND kind=?3 AND state='proposed'", params![a, bb, k, st]).unwrap_or(0);
+                if n > 0 { crate::kg::migrate_links(&c); }
                 if n == 1 { logw(&c, "owner", if st == "accepted" { "accept" } else { "reject" }, &format!("{a} {k} {bb}"), ""); }
                 json_resp(json!({"ok": n == 1}))
             }

@@ -14,6 +14,8 @@ Status: prototype. Tested on macOS only.
 - Items (decision, step, question, turn) are filed with `add` or `import`. An item is rejected if its source is not
   indexed, its quote is not found in that source, or its title (110 characters) or body (320) is too long.
 - Search is keyword ranking (BM25), merged with vector similarity when embeddings are configured.
+- A graph of entities and claims is built from filed decisions and thread relations (`kg import`, `kg migrate`). A claim
+  carries its quote, speaker and date; `kg find "<question>"` answers history questions from claims, then passages.
 - `backtrail serve` runs the app at `http://127.0.0.1:8799` (loopback only) and rescans every 5 minutes.
 - The binary never calls a model. Compiling sessions into proposed items is done by a Claude Code session following
   `skill/SKILL.md`, or by `skill/compile.sh`. Suggested items stay `proposed` until accepted in the app.
@@ -66,5 +68,5 @@ All commands and the configuration keys are in `docs/reference.md`.
   do not scale unchanged are listed in `docs/reference.md`. Nothing has been measured beyond the present store.
 - Ranking weights are set by hand and not tuned. `nomic-embed-text` is the only embedding model tried.
 - The quote rule proves a quote exists in the source, not that the title is a fair reading of it.
-- Extraction accuracy and the commit matcher have not been measured.
+- Claim extraction ran on a handful of sessions; its accuracy and the commit matcher have not been measured.
 - macOS paths are assumed.

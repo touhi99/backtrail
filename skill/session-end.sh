@@ -1,7 +1,8 @@
 #!/bin/bash
 # SessionEnd hook: index the session that just ended, then embed new passages when embeddings are configured.
 # Runs in the background and never calls a model for extraction. To also compile the session with a small
-# model (costs tokens), set BACKTRAIL_COMPILE_ON_END=1 in the environment of the hook.
+# model (costs tokens), set BACKTRAIL_COMPILE_ON_END=1 in the environment of the hook; that also extracts claims
+# (kg-extract.sh, at most 8 sessions a day).
 # Reads the hook JSON on stdin (needs session_id).
 [ -n "${BACKTRAIL_COMPILE:-}" ] && exit 0
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -11,9 +12,14 @@ sid="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_id",
 (
   "$TM" ingest >/dev/null 2>&1
   "$TM" embed >/dev/null 2>&1
+  # Graph: copy changed items and relations into claims. Idempotent; claims are read per entity on demand, so
+  # nothing else needs re-reducing. Extraction with a model stays opt-in below.
+  "$TM" kg import >/dev/null 2>&1
+  "$TM" kg migrate >/dev/null 2>&1
   if [ "${BACKTRAIL_COMPILE_ON_END:-}" = "1" ]; then
     refs="$("$TM" compile-queue --session "$sid" --limit 1)"
     [ -n "$refs" ] && "$DIR/compile.sh" $refs >> "${TMPDIR:-/tmp}/backtrail-compile.log" 2>&1
+    "$DIR/kg-extract.sh" --session "$sid" --limit 1 >> "${TMPDIR:-/tmp}/backtrail-compile.log" 2>&1
   fi
 ) >/dev/null 2>&1 &
 disown 2>/dev/null

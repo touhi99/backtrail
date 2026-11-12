@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { CalendarCheck, ChevronRight, FileSearch, ListChecks, Network, Plus, ScrollText, Search, Waypoints } from 'lucide-react'
+import { CalendarCheck, ChevronRight, FileSearch, ListChecks, Network, Plus, ScrollText, Search, Share2, Waypoints } from 'lucide-react'
 import { STATE, useApi } from '@/lib/api'
 import Capture from '@/components/Capture'
 
@@ -10,7 +10,7 @@ export const useShell = () => useContext(ShellCtx)
 
 const NAV = [
   { to: '/', label: 'Today', icon: CalendarCheck, end: true },
-  { to: '/map', label: 'Map', icon: Network },
+  { to: '/graph', label: 'Graph', icon: Share2 },
 ]
 const MORE = [
   { to: '/items', label: 'Items', icon: ListChecks },
@@ -24,7 +24,7 @@ export default function Shell({ children }: { children: ReactNode }) {
   const nav = useNavigate()
   const loc = useLocation()
   useEffect(() => { if (new URLSearchParams(loc.search).get('add')) setCap({ open: true, thread: new URLSearchParams(loc.search).get('thread') ?? undefined }) }, [loc.search])
-  const title = ({ map: 'Map', thread: 'Project', source: 'Source', search: 'Search', items: 'Items', log: 'Log' } as any)[loc.pathname.split('/')[1]] ?? 'Today'
+  const title = ({ map: 'Map', graph: 'Graph', thread: 'Project', source: 'Source', search: 'Search', items: 'Items', log: 'Log' } as any)[loc.pathname.split('/')[1]] ?? 'Today'
   const live = (today?.threads ?? []).filter((t: any) => t.state === 'moving')
   const others = (today?.threads ?? []).filter((t: any) => t.state !== 'moving' && t.name !== 'Unsorted')
   const [showOthers, setShowOthers] = useState(() => { try { return localStorage.getItem('bt-others') === '1' } catch { return false } })

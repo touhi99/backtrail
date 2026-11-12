@@ -101,5 +101,6 @@ pub fn relate(c: &Connection, a: &str, b: &str, kind: &str, source: &str, quote:
         ON CONFLICT(a,b,kind) DO UPDATE SET source_id=?4, chunk_id=?5, quote=?6, ts=?7, state=?8",
         params![format!("T:{a}"), format!("T:{b}"), kind, sid, cid, quote, ts, state]).map_err(|e| e.to_string())?;
     logw(c, if state == "proposed" { "claude-suggest" } else { "claude" }, "relate", &format!("{a} {kind} {b}"), quote);
+    crate::kg::migrate_links(c);
     Ok(())
 }

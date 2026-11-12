@@ -45,6 +45,7 @@ pub fn open() -> Connection {
         let _ = c.execute(&format!("ALTER TABLE links ADD COLUMN {col}"), []);
     }
     crate::embed::ensure(&c);
+    crate::kg::ensure(&c);
     c
 }
 
