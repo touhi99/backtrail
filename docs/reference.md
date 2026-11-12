@@ -36,9 +36,10 @@ hooks, and the parts that do not scale unchanged.
 | `kg page <entity> [--budget N]` | Entity page within a token budget: newest claims in full, older ones rolled up by month |
 | `kg trace <entity>` / `kg why <words>` / `kg neighbors <entity>` / `kg passage <words> [--entity E --from DATE]` | Dated lineage, claim lookup, shared-claim neighbours (2 hops, capped), full-text with a prefilter |
 | `kg claims -` | Add claims from a JSON array through the write rule (verbatim quote, known entities; speaker and date come from the passage) |
-| `kg extract-queue [--limit N --entity E]`, `kg extract-input <ref>`, `kg log <ref>` | Inputs for `skill/kg-extract.sh`, which runs one small-model call per session (8 a day at most) |
+| `kg extract-queue [--limit N --entity E]`, `kg extract-input <ref>`, `kg log <ref>` | Inputs for `skill/kg-extract.sh`, which runs one small-model call per session (8 a day at most; `BACKTRAIL_KG_CAP=N` changes the limit for one run) |
 | `kg suggest` / `kg entity add <name> [--kind K --alias A]` | Suggest new entities and alias spellings (nothing is written); add one by hand |
 | `kg state` | Thread state suggested from session activity alone (nothing is changed) |
+| `kg merge <keep id> <drop id>` | Merge a duplicate claim into another: evidence and entities move over and the duplicate is closed as superseded |
 | `kg lint` | Graph checks (also part of `check`) |
 | `kg export <file>` / `kg restore <file>` | Backup as JSONL; evidence is re-located by source and quote on restore |
 | `build` | Fresh machine: ingest all sources, then build the graph from them |

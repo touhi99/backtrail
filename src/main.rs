@@ -425,6 +425,16 @@ fn main() {
                 println!("ok")
             }
             Some("suggest") => kg::suggest(&c),
+            Some("merge") => {
+                match kg::merge(
+                    &c,
+                    args.get(2).expect("keep id"),
+                    args.get(3).expect("drop id"),
+                ) {
+                    Ok(()) => println!("ok"),
+                    Err(e) => eprintln!("{e}"),
+                }
+            }
             Some("entity") if args.get(2).map(|a| a.as_str()) == Some("ignore") => {
                 kg::ignore_term(&c, args.get(3).expect("term"));
                 println!("ok")

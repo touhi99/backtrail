@@ -450,7 +450,22 @@ pub fn mentions(c: &Connection, text: &str) -> Vec<(String, String)> {
 
 /// An entity by exact name or alias (case-insensitive).
 pub fn find_entity(c: &Connection, name: &str) -> Option<(String, String)> {
-    c.query_row("SELECT e.id, e.name FROM entity_aliases a JOIN entities e ON e.id=a.entity_id WHERE a.alias=?1", params![norm(name)], |r| Ok((r.get(0)?, r.get(1)?))).ok()
+    let look = |n: &str| {
+        c.query_row(
+            "SELECT e.id, e.name FROM entity_aliases a JOIN entities e ON e.id=a.entity_id WHERE a.alias=?1",
+            params![norm(n)],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok()
+    };
+    // The extraction packet lists entities as "Name (kind)"; a model may copy the suffix.
+    look(name).or_else(|| {
+        let n = name.trim_end();
+        ["project", "topic", "tool", "service", "site"]
+            .iter()
+            .find_map(|k| n.strip_suffix(&format!(" ({k})")))
+            .and_then(look)
+    })
 }
 
 // ---------------------------------------------------------------- KG-11 tier 0: state from activity
@@ -633,7 +648,11 @@ pub fn extract_queue(
 ) -> Vec<String> {
     let today = crate::db::chrono_now()[..10].to_string();
     let used: i64 = c.query_row("SELECT COUNT(*) FROM log WHERE action IN ('kg-extract','kg-extract-failed') AND ts LIKE ?1", params![format!("{today}%")], |x| x.get(0)).unwrap_or(0);
-    let room = (8 - used).max(0) as usize;
+    let cap: i64 = std::env::var("BACKTRAIL_KG_CAP")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8);
+    let room = (cap - used).max(0) as usize;
     let only = session_id.map(|s| format!("session:{}", s.chars().take(8).collect::<String>()));
     let mut st = c.prepare(include_str!("sql/kg_extract_queue.sql")).unwrap();
     let want: Option<Vec<String>> = entity.and_then(|e| find_entity(c, e)).map(|(id, _)| {
@@ -1392,7 +1411,7 @@ pub fn lint(c: &Connection) {
             let uni = toks[i].union(&toks[j]).count() as f64;
             if uni > 0.0 && inter / uni >= 0.6 {
                 dups += 1;
-                if dups <= 5 {
+                if dups <= 20 {
                     println!(
                         "  probable duplicate: \"{}\" / \"{}\"",
                         clip(&all[i].1, 60),
@@ -1596,6 +1615,36 @@ pub fn restore(c: &Connection, path: &str) -> (usize, usize) {
 }
 
 /// Add an alias to an existing entity (by name or alias), then relink claims. Returns false when the entity is unknown.
+/// Merge a duplicate claim into the one to keep: its evidence and entities move over, and it is closed as superseded.
+pub fn merge(c: &Connection, keep: &str, drop: &str) -> Result<(), String> {
+    let has = |id: &str| -> bool {
+        c.query_row("SELECT 1 FROM claims WHERE id=?1", params![id], |_| Ok(()))
+            .is_ok()
+    };
+    if keep == drop || !has(keep) || !has(drop) {
+        return Err("both ids must be existing, different claims".into());
+    }
+    c.execute(
+        "INSERT OR IGNORE INTO claim_evidence(claim_id,source_id,chunk_id,quote,stated,ts)
+         SELECT ?1,source_id,chunk_id,quote,stated,ts FROM claim_evidence WHERE claim_id=?2",
+        params![keep, drop],
+    )
+    .unwrap();
+    c.execute(
+        "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role)
+         SELECT ?1,entity_id,role FROM claim_about WHERE claim_id=?2",
+        params![keep, drop],
+    )
+    .unwrap();
+    c.execute(
+        "UPDATE claims SET status='superseded', superseded_by=?1, valid_to=?3 WHERE id=?2",
+        params![keep, drop, crate::db::chrono_now()],
+    )
+    .unwrap();
+    logw(c, "owner", "kg-merge", drop, &format!("merged into {keep}"));
+    Ok(())
+}
+
 /// Hide a term from the entity suggestions.
 pub fn ignore_term(c: &Connection, term: &str) {
     c.execute(

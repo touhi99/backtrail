@@ -14,4 +14,4 @@ SELECT
     )
   )
 FROM claims c
-WHERE c.status!='retracted'
+WHERE c.status NOT IN ('retracted','superseded')

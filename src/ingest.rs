@@ -289,6 +289,30 @@ pub fn ingest_sessions(c: &Connection) -> (usize, usize) {
     let Ok(dirs) = fs::read_dir(&root) else {
         return (0, 0);
     };
+    // The same session id can exist in two project folders (a folder was renamed or copied). Read only the larger
+    // copy; otherwise each run swaps the stored text between the two and claim evidence loses its passage.
+    let mut largest: std::collections::HashMap<String, (u64, std::path::PathBuf)> =
+        Default::default();
+    for d in fs::read_dir(&root).into_iter().flatten().flatten() {
+        for f in fs::read_dir(d.path()).into_iter().flatten().flatten() {
+            let p = f.path();
+            if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let id8: String = p
+                .file_stem()
+                .unwrap()
+                .to_string_lossy()
+                .chars()
+                .take(8)
+                .collect();
+            let size = f.metadata().map(|m| m.len()).unwrap_or(0);
+            let e = largest.entry(id8).or_insert((size, p.clone()));
+            if size > e.0 {
+                *e = (size, p.clone());
+            }
+        }
+    }
     c.execute_batch("BEGIN").unwrap();
     for d in dirs.flatten() {
         let dn = d.file_name().to_string_lossy().to_string();
@@ -321,6 +345,9 @@ pub fn ingest_sessions(c: &Connection) -> (usize, usize) {
                 .chars()
                 .take(8)
                 .collect();
+            if largest.get(&id8).is_some_and(|(_, best)| *best != p) {
+                continue;
+            }
             let r = format!("session:{}", id8);
             let mt = mtime(&p);
             let known: Option<i64> = c
@@ -729,7 +756,54 @@ pub fn relink(c: &Connection) -> (usize, usize) {
             }
         }
     }
+    relink_claims(c);
     (ok, lost)
+}
+
+/// Claim evidence is located by source and quote, so it follows a re-read source the same way items do.
+fn relink_claims(c: &Connection) {
+    let rows: Vec<(String, i64, i64, String)> = {
+        let mut st = c
+            .prepare(
+                "SELECT v.claim_id, v.source_id, v.chunk_id, v.quote FROM claim_evidence v
+                 LEFT JOIN chunks k ON k.id=v.chunk_id WHERE k.id IS NULL",
+            )
+            .unwrap();
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .flatten()
+            .collect()
+    };
+    let mut by_source: std::collections::HashMap<i64, Vec<(i64, String)>> = Default::default();
+    for (claim, sid, old, quote) in rows {
+        let chunks = by_source.entry(sid).or_insert_with(|| {
+            let mut st = c
+                .prepare("SELECT id, text FROM chunks WHERE source_id=?1 ORDER BY seq")
+                .unwrap();
+            st.query_map(params![sid], |r| {
+                Ok((r.get::<_, i64>(0)?, norm(&r.get::<_, String>(1)?)))
+            })
+            .unwrap()
+            .flatten()
+            .collect()
+        });
+        let q = norm(&quote);
+        if let Some((cid, _)) = chunks.iter().find(|(_, t)| t.contains(&q)) {
+            c.execute(
+                "UPDATE OR IGNORE claim_evidence SET chunk_id=?3 WHERE claim_id=?1 AND chunk_id=?2 AND quote=?4",
+                params![claim, old, cid, quote],
+            )
+            .unwrap();
+        }
+    }
+    // A stale row is dropped when the same quote already has a row on a chunk that exists.
+    c.execute(
+        "DELETE FROM claim_evidence WHERE chunk_id NOT IN (SELECT id FROM chunks) AND EXISTS (
+           SELECT 1 FROM claim_evidence o WHERE o.claim_id=claim_evidence.claim_id AND o.quote=claim_evidence.quote
+             AND o.chunk_id IN (SELECT id FROM chunks))",
+        [],
+    )
+    .unwrap();
 }
 
 /// Thread for a session: the title decides first; the project folder is the fallback.
