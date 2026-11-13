@@ -8,6 +8,7 @@ import { Ring, SegRing, Spark } from '@/components/Viz'
 import ItemActions, { Who } from '@/components/ItemActions'
 import Paged from '@/components/Paged'
 import { whoActor } from '@/lib/api'
+import { TrailCard } from '@/pages/Trail'
 import '@/next.css'
 
 const PALETTE = ['#60a5fa', '#34d399', '#fbbf24', '#c084fc', '#fb7185', '#2dd4bf', '#8b8b95']
@@ -47,19 +48,16 @@ export default function Today() {
   const done = threads.reduce((a, t) => a + (t.done_s ?? 0), 0), open = threads.reduce((a, t) => a + (t.open_s ?? 0), 0)
 
   const [later, setLater] = useState<number[]>(() => { try { return JSON.parse(localStorage.getItem('bt-later') ?? '[]') } catch { return [] } })
-  const [picked, setPicked] = useState<number | null>(null)
+  const [openQ, setOpenQ] = useState<number | null>(null)
+  const [allQ, setAllQ] = useState(false)
   const saveLater = (v: number[]) => { setLater(v); try { localStorage.setItem('bt-later', JSON.stringify(v)) } catch {} }
   const ordered = [...waiting.filter((x) => !later.includes(x.id)), ...later.map((id) => waiting.find((x) => x.id === id)).filter(Boolean)]
-  const q = ordered.find((x) => x.id === picked) ?? ordered[0]
-  const skip = () => { if (!q) return; setPicked(null); saveLater([...later.filter((id) => id !== q.id), q.id]) }
-  const qThread = threads.find((t) => t.name === q?.thread)
-  const glow = STATE_HEX[qThread?.state ?? 'moving']
+  const skip = (id: number) => { setOpenQ(null); setAns(''); saveLater([...later.filter((x) => x !== id), id]) }
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent, id: number) => {
     e.preventDefault()
-    if (!q) return
-    const r = await post('/api/answer', { id: q.id, text: ans })
-    if (r.ok) { setAns(''); reload() }
+    const r = await post('/api/answer', { id, text: ans })
+    if (r.ok) { setAns(''); setOpenQ(null); reload() }
   }
 
   const when = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
@@ -79,40 +77,41 @@ export default function Today() {
         <p className="mt-1 text-[14px] text-soft">{nothing ? 'Nothing is waiting on you.' : `Waiting on you: ${parts.join(' · ')}.`}</p>
       </div>
 
-      {q && (
-        <section className="nx-now nx-in mt-5" style={{ ['--g' as any]: glow + '38', ['--d' as any]: '240ms' }}>
-          <div className="relative flex items-start gap-4">
-            <span className="nx-glyph size-12" style={{ background: glow + '22', color: glow }}><MessageCircleQuestion size={22} /></span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 text-[13px] text-mut"><span className="nx-chip !h-[18px] !px-2 !text-[11px]" style={{ background: '#60a5fa1f', color: '#60a5fa' }}>Claude asks you</span><span className="size-2 rounded-full" style={{ background: glow }} />{q.thread}<span>·</span>{dayFmt(q.created)}</div>
-              <h3 className="mt-1 max-w-[30ch] text-[27px] font-semibold leading-[1.15] tracking-tight">{q.title}</h3>
-              {q.body && <p className="mt-2 line-clamp-2 max-w-[60ch] text-[14px] text-soft">{q.body}</p>}
-              <form onSubmit={submit} className="mt-5 flex max-w-[560px] gap-2.5">
-                <input className="nx-input" placeholder="Type your answer" value={ans} maxLength={320} onChange={(e) => setAns(e.target.value)} />
-                <button className="nx-btn" type="submit">Answer</button>
-                {ordered.length > 1 && <button className="btn" type="button" onClick={skip} title="Moves this question to the back of the list">Not now</button>}
-              </form>
-            </div>
-            <div className="hidden shrink-0 text-right text-[12.5px] text-mut lg:block">{waiting.length - 1} more waiting</div>
-          </div>
-          {ordered.length > 1 && (
-            <details className="relative mt-4 border-t border-line pt-3">
-              <summary className="cursor-pointer text-[12.5px] text-mut hover:text-ink">Other questions ({ordered.length - 1})</summary>
-              {ordered.filter((x) => x.id !== q.id).map((x) => (
-                <button key={x.id} type="button" onClick={() => setPicked(x.id)} className="row-hover flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-[13.5px]">
-                  <span className="min-w-0 flex-1 truncate">{x.title}</span>
-                  <span className="shrink-0 text-[12px] text-mut">{x.thread}{later.includes(x.id) ? ' · later' : ''}</span>
-                </button>
-              ))}
-            </details>
-          )}
-        </section>
-      )}
-      {!q && nothing && (
+      {nothing && (
         <section className="nx-panel nx-in grid place-items-center px-5 py-10 text-center">
           <CheckCheck size={26} className="text-accent" />
           <div className="mt-3 text-[16px] font-semibold">All clear</div>
           <div className="mt-1 text-[13px] text-mut">Claude files new questions and suggestions after each session.</div>
+        </section>
+      )}
+      <TrailCard />
+      {ordered.length > 0 && (
+        <section className="nx-panel nx-in mt-5" style={{ ['--d' as any]: '300ms' }}>
+          <div className="flex items-baseline justify-between px-5 pb-1 pt-4"><h3 className="text-[15px] font-semibold">Questions for you</h3><span className="text-[12.5px] text-mut">{ordered.length}</span></div>
+          {(allQ ? ordered : ordered.slice(0, 4)).map((x) => {
+            const c = STATE_HEX[threads.find((t) => t.name === x.thread)?.state ?? 'moving'], isOpen = openQ === x.id
+            return (
+              <div key={x.id} className="border-t border-line first-of-type:border-t-0">
+                <button type="button" onClick={() => { setOpenQ(isOpen ? null : x.id); setAns('') }} className="row-hover flex w-full items-center gap-3 px-5 py-3 text-left">
+                  <MessageCircleQuestion size={16} className="shrink-0 text-mut" />
+                  <span className={`min-w-0 flex-1 text-[14px] ${isOpen ? 'font-semibold' : ''}`}>{x.title}</span>
+                  <span className="flex shrink-0 items-center gap-1.5 text-[12px] text-mut"><span className="size-2 rounded-full" style={{ background: c }} />{x.thread}{later.includes(x.id) ? ', later' : ''}</span>
+                </button>
+                {isOpen && (
+                  <div className="px-5 pb-4 pl-12">
+                    {x.body && <p className="max-w-[70ch] text-[13.5px] text-soft">{x.body}</p>}
+                    <div className="mt-1 text-[12px] text-mut">Asked {dayFmt(x.created)}</div>
+                    <form onSubmit={(e) => submit(e, x.id)} className="mt-3 flex max-w-[620px] gap-2.5">
+                      <input autoFocus className="nx-input" placeholder="Type your answer" value={ans} maxLength={320} onChange={(e) => setAns(e.target.value)} />
+                      <button className="nx-btn" type="submit">Answer</button>
+                      <button className="btn" type="button" onClick={() => skip(x.id)} title="Moves this question to the end of the list">Not now</button>
+                    </form>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {ordered.length > 4 && <button type="button" onClick={() => setAllQ(!allQ)} className="w-full border-t border-line px-5 py-2.5 text-left text-[12.5px] font-medium text-accent hover:underline">{allQ ? 'Show fewer' : `Show all ${ordered.length}`}</button>}
         </section>
       )}
         <div className="mt-5 grid grid-cols-2 items-start gap-4 max-[1100px]:grid-cols-1">
