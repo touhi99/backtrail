@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Search as SearchIcon } from 'lucide-react'
 import { dayFmt, get } from '@/lib/api'
 import { useShell } from '@/components/Shell'
+import Paged from '@/components/Paged'
 import '@/next.css'
 
 const KIND = [['', 'Any source'], ['session', 'Conversations'], ['note', 'Notes'], ['artifact', 'Artifacts'], ['commit', 'Commits']]
@@ -45,11 +46,11 @@ export default function Search() {
       {r && <div className="text-[12px] text-mut">{r.mode === 'hybrid' ? 'Meaning and keyword match' : 'Keyword match'}{r.note ? ` · ${r.note}` : ''}</div>}
       {r && r.items.length > 0 && <section className="nx-panel nx-in overflow-hidden"><div className="px-5 pb-2 pt-4 text-[15px] font-semibold">Filed items</div>{r.items.map((i: any) => <Link key={i.id} to={`/thread/${encodeURIComponent(i.thread)}`} className="nx-row !block"><div className="flex items-center gap-2 text-[12px] text-mut"><span className="chip !h-[20px] !text-[11px]">{i.type}</span>{i.thread}<span className="ml-auto flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: STATE_C[i.state] ?? '#52525b' }} />{i.state.replace('_', ' ')}</span></div><div className="text-[14px] font-medium">{i.title}</div></Link>)}</section>}
       {r && <section className="nx-panel nx-in overflow-hidden" style={{ ['--d' as any]: '60ms' }}><div className="px-5 pb-2 pt-4 text-[15px] font-semibold">Passages <span className="text-[12px] font-normal text-mut">{r.results.length} best matches</span></div>
-        {r.results.map((x: any) => <Link key={x.chunk_id} to={`/source/${x.source_id}?c=${x.chunk_id}`} className="nx-row !block"><div className="flex items-center gap-2 text-[12px] text-mut"><span className="chip !h-[20px] !text-[11px] capitalize">{x.kind}</span>{x.thread && <span>{x.thread}</span>}<span className="ml-auto">{dayFmt(x.last_ts)}</span></div><div className="text-[14px] font-medium">{x.title}</div><div className="mt-0.5 text-[13px] text-soft [&_mark]:rounded [&_mark]:bg-open/30 [&_mark]:px-0.5 [&_mark]:text-ink" dangerouslySetInnerHTML={{ __html: x.snip }} />
+        <Paged resetKey={qs} items={r.results} size={10}>{(pageRows: any[]) => pageRows.map((x: any) => <Link key={x.chunk_id} to={`/source/${x.source_id}?c=${x.chunk_id}`} className="nx-row !block"><div className="flex items-center gap-2 text-[12px] text-mut"><span className="chip !h-[20px] !text-[11px] capitalize">{x.kind}</span>{x.thread && <span>{x.thread}</span>}<span className="ml-auto">{dayFmt(x.last_ts)}</span></div><div className="text-[14px] font-medium">{x.title}</div><div className="mt-0.5 line-clamp-2 text-[13px] text-soft [&_mark]:rounded [&_mark]:bg-open/30 [&_mark]:px-0.5 [&_mark]:text-ink" dangerouslySetInnerHTML={{ __html: x.snip }} />
           {(x.why?.length > 0 || x.items?.length > 0) && <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11.5px] text-mut">{x.why.map((w: string) => <span key={w} className="chip !h-[20px] !text-[11px]">{w}</span>)}{x.items.slice(0, 2).map((i: any) => <span key={i.id} className="flex items-center gap-1.5"><span className="size-1.5 rounded-full" style={{ background: i.dead ? '#fb7185' : STATE_C[i.state] ?? '#52525b' }} />{i.type}: {i.title.length > 60 ? i.title.slice(0, 60) + '…' : i.title}</span>)}</div>}
-        </Link>)}
+        </Link>)}</Paged>
         {r.results.length === 0 && <div className="px-5 pb-4 text-[13px] text-mut">No match.</div>}</section>}
-      {!q && <div className="text-[13.5px] text-mut">Try: sandbox, phone app, backups. Questions in plain words work too when embeddings are on.</div>}
+      {!q && <div className="text-[13.5px] text-mut">Type a word or a question.</div>}
     </div>
   )
 }

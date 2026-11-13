@@ -403,12 +403,12 @@ fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
     if !semantic {
         res["note"] = json!("keyword search only (requested)");
     } else if !crate::embed::enabled() {
-        res["note"] = json!("keyword search only: embeddings are not configured");
+        res["note"] = json!("keyword search only: embeddings are turned off in config.json");
     } else {
         match crate::embed::nearest(c, q, 200) {
             Err(e) => {
                 res["note"] = json!(format!(
-                    "keyword search only: embedding server not reachable ({e})"
+                    "keyword search only: the embedding server did not answer ({e}). Start Ollama and run `ollama pull nomic-embed-text` once."
                 ))
             }
             Ok(near) => {
@@ -557,9 +557,15 @@ fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
     res
 }
 
-/// Daily copy of the store (answers, ticks and accepts exist nowhere else). Keeps 14, written next to the data folder.
+/// Daily copy of the store (answers, ticks and accepts exist nowhere else). Keeps 14, in `<data dir>/backups`.
 pub fn backup(c: &Connection) -> Option<String> {
-    let dir = home().parent()?.join("BacktrailBackups");
+    let dir = home().join("backups");
+    // Older versions wrote to a `BacktrailBackups` folder next to the data folder; move it once.
+    if std::env::var("BACKTRAIL_HOME").is_err() && !dir.exists() {
+        if let Some(old) = home().parent().map(|p| p.join("BacktrailBackups")) {
+            std::fs::rename(old, &dir).ok();
+        }
+    }
     std::fs::create_dir_all(&dir).ok()?;
     let name = format!("backtrail-{}.db", &chrono_now()[..10]);
     let path = dir.join(&name);
@@ -1566,15 +1572,21 @@ pub fn serve(c: Connection, port: u16) {
     println!("backtrail on http://127.0.0.1:{}", port);
     if !home().join(".demo").exists() {
         std::thread::spawn(|| {
+            let mut warned = false;
             loop {
-                std::thread::sleep(Duration::from_secs(300));
                 let c = open();
                 rescan(&c);
                 if crate::embed::enabled() {
-                    if let Err(e) = crate::embed::run(&c, crate::ingest::cfg().emb.4) {
-                        eprintln!("embed: {e}");
+                    match crate::embed::run(&c, crate::ingest::cfg().emb.4) {
+                        Err(e) if !warned => {
+                            warned = true;
+                            eprintln!("embed: {e} (further errors are not printed)");
+                        }
+                        Ok(_) => warned = false,
+                        _ => {}
                     }
                 }
+                std::thread::sleep(Duration::from_secs(300));
             }
         });
     }
@@ -1624,6 +1636,11 @@ pub fn serve(c: Connection, port: u16) {
                 "edges": rows(&c, include_str!("sql/server_api_kg_graph_2.sql"), &[]),
                 "none": rows(&c, include_str!("sql/server_api_kg_graph_3.sql"), &[]),
             })),
+            (Method::Get, "/api/kg/growth") => json_resp(json!(rows(
+                &c,
+                include_str!("sql/server_api_kg_growth.sql"),
+                &[]
+            ))),
             (Method::Get, "/api/kg/suggest") => {
                 let (al, ca) = crate::kg::suggest_data(&c);
                 json_resp(

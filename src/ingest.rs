@@ -21,7 +21,8 @@ pub struct Cfg {
     pub aliases: std::collections::HashMap<String, Vec<String>>,
     pub generic_projects: Vec<String>,
     pub port: u16,
-    /// Optional embeddings: (base url, model, query prefix, document prefix, passages per background run). Empty url = off.
+    /// Embeddings: (base url, model, query prefix, document prefix, passages per background run). On by default with a
+    /// local Ollama server; `"embeddings": false` in config.json turns them off. Empty url = off.
     pub emb: (String, String, String, String, usize),
 }
 
@@ -39,7 +40,13 @@ pub fn cfg() -> &'static Cfg {
             aliases: Default::default(),
             generic_projects: vec!["home".into()],
             port: 8799,
-            emb: Default::default(),
+            emb: (
+                "http://127.0.0.1:11434".into(),
+                "nomic-embed-text".into(),
+                "search_query: ".into(),
+                "search_document: ".into(),
+                2000,
+            ),
         };
         let thread = |x: &Value| {
             let g = |k: &str| x[k].as_str().unwrap_or("").to_string();
@@ -98,13 +105,15 @@ pub fn cfg() -> &'static Cfg {
                 if let Some(n) = v["port"].as_u64() {
                     c.port = n as u16;
                 }
-                if let Some(e) = v["embeddings"].as_object() {
+                if v.get("embeddings") == Some(&Value::Bool(false)) {
+                    c.emb = Default::default();
+                } else if let Some(e) = v["embeddings"].as_object() {
                     let g = |k: &str| e.get(k).and_then(|x| x.as_str()).map(String::from);
-                    let model = g("model").unwrap_or_default();
+                    let model = g("model").unwrap_or_else(|| "nomic-embed-text".into());
                     let nomic = model.contains("nomic");
                     c.emb = (
                         g("url")
-                            .unwrap_or_default()
+                            .unwrap_or_else(|| "http://127.0.0.1:11434".into())
                             .trim_end_matches('/')
                             .to_string(),
                         model,
@@ -502,25 +511,34 @@ pub fn ingest_notes(c: &Connection) -> (usize, usize) {
 
 fn ingest_notes_inner(c: &Connection) -> (usize, usize) {
     let coding = cfg().workspace.clone();
-    if coding.as_os_str().is_empty() {
-        return (0, 0);
-    }
     let mut files = vec![];
-    for sub in &cfg().note_dirs {
-        walk(&coding.join(sub), &mut files, "md");
+    // Claude Code memory folders: the workspace's own when one is configured, otherwise every project's.
+    let mut mems: Vec<(PathBuf, String)> = vec![];
+    if coding.as_os_str().is_empty() {
+        let root = home_dir().join(".claude/projects");
+        for d in fs::read_dir(&root).into_iter().flatten().flatten() {
+            let label = format!("memory/{}", d.file_name().to_string_lossy());
+            mems.push((d.path().join("memory"), label));
+        }
+    } else {
+        for sub in &cfg().note_dirs {
+            walk(&coding.join(sub), &mut files, "md");
+        }
+        let mem = home_dir()
+            .join(".claude/projects")
+            .join(slug(&coding))
+            .join("memory");
+        mems.push((mem, "memory".to_string()));
     }
-    let mem = home_dir()
-        .join(".claude/projects")
-        .join(slug(&coding))
-        .join("memory");
-    walk(&mem, &mut files, "md");
+    for (mem, _) in &mems {
+        walk(mem, &mut files, "md");
+    }
     let (mut n, mut skipped) = (0, 0);
     c.execute_batch("BEGIN").unwrap();
     for p in files {
-        let rel = if p.starts_with(&mem) {
-            format!("memory/{}", p.strip_prefix(&mem).unwrap().display())
-        } else {
-            p.strip_prefix(&coding).unwrap().display().to_string()
+        let rel = match mems.iter().find(|(m, _)| p.starts_with(m)) {
+            Some((m, label)) => format!("{}/{}", label, p.strip_prefix(m).unwrap().display()),
+            None => p.strip_prefix(&coding).unwrap().display().to_string(),
         };
         let r = format!("note:{}", rel);
         let mt = mtime(&p);
@@ -832,6 +850,10 @@ fn session_thread(
                 return tl[i].1.clone();
             }
         }
+        // No thread rules configured: one thread per project folder.
+        if tl.is_empty() && !proj.is_empty() {
+            return proj.to_string();
+        }
     }
     CATCHALL.to_string()
 }
@@ -863,11 +885,26 @@ pub fn rethread(c: &Connection) {
             .collect()
     };
     c.execute_batch("BEGIN").unwrap();
+    let now = chrono_now();
     for (id, proj, title, n) in rows {
         let t = pinned
             .get(&id)
             .cloned()
             .unwrap_or_else(|| session_thread(&tl, &rules, &proj, &title, n));
+        if tl.is_empty() && t == proj {
+            c.execute(
+                include_str!("sql/ingest_seed_threads.sql"),
+                params![
+                    format!("t-{:x}", fxhash(&t)),
+                    t,
+                    "Sessions from this project folder.",
+                    "open",
+                    "Other",
+                    now
+                ],
+            )
+            .unwrap();
+        }
         c.execute("UPDATE sources SET thread=?2 WHERE id=?1", params![id, t])
             .unwrap();
     }

@@ -5,7 +5,7 @@ import { get } from '@/lib/api'
 export const STATE_HEX: Record<string, string> = {
   moving: '#60a5fa', built: '#34d399', parked: '#8b8b95', dropped: '#fb7185', open: '#fbbf24', unsorted: '#52525b',
 }
-export const STATE_NAME: Record<string, string> = { moving: 'Moving', built: 'Built', parked: 'Parked', dropped: 'Dropped', open: 'Open idea' }
+export const STATE_NAME: Record<string, string> = { moving: 'In development', built: 'Built', parked: 'Parked', dropped: 'Dropped', open: 'Open idea' }
 
 /** Thread detail (sources with dates, steps) for a list of thread names, fetched in parallel. */
 export function useDetails(names: string[]) {

@@ -9,8 +9,14 @@ pub fn home() -> PathBuf {
     if let Ok(p) = std::env::var("BACKTRAIL_HOME") {
         return PathBuf::from(p);
     }
-    let h = std::env::var("HOME").unwrap_or_default();
-    PathBuf::from(h).join("Library/Application Support/Backtrail")
+    let h = PathBuf::from(std::env::var("HOME").unwrap_or_default());
+    if cfg!(target_os = "macos") {
+        return h.join("Library/Application Support/Backtrail");
+    }
+    match std::env::var("XDG_DATA_HOME") {
+        Ok(x) if !x.is_empty() => PathBuf::from(x).join("backtrail"),
+        _ => h.join(".local/share/backtrail"),
+    }
 }
 
 pub fn open() -> Connection {

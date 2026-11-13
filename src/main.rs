@@ -1,6 +1,7 @@
 mod compile;
 mod db;
 mod embed;
+mod hooks;
 mod ingest;
 mod kg;
 mod server;
@@ -45,6 +46,9 @@ fn do_ingest(c: &rusqlite::Connection) {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().map(|s| s.as_str()).unwrap_or("help");
+    if cmd == "hooks" {
+        return hooks::run(&args);
+    }
     let c = open();
     match cmd {
         "ingest" => do_ingest(&c),
@@ -56,7 +60,13 @@ fn main() {
                 "graph: {n} claims from decisions ({l} linked to entities, {b} about no entity)"
             );
             kg::migrate_links(&c);
-            embed::run_cli(&c, usize::MAX);
+            match embed::run(&c, usize::MAX) {
+                Ok((n, left)) => println!("embedded {n} passages, {left} pending"),
+                Err(e) => eprintln!(
+                    "embed skipped: {e}\nSearch works by keyword only until the embedding server is reachable. \
+                     Install Ollama, run `ollama pull nomic-embed-text`, then `backtrail embed`."
+                ),
+            }
         }
         "add" => {
             // backtrail add <type> --thread T --title X --source REF --quote Q [--body B] [--state S] [--origin O]

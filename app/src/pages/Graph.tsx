@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Minus, Plus, Search as SearchIcon, X, Maximize2 } from 'lucide-react'
 import { dayFmt, post, useApi } from '@/lib/api'
+import Growth from '@/pages/Growth'
+import More from '@/components/More'
+import Paged from '@/components/Paged'
 import '@/next.css'
 
 const KIND_C: Record<string, string> = { project: '#60a5fa', service: '#c084fc', tool: '#fbbf24', site: '#34d399', topic: '#f472b6' }
@@ -47,19 +50,19 @@ function ClaimCard({ c, ev, showEntities }: { c: any; ev: any[]; showEntities?: 
         <span className="nx-chip" style={{ background: `${STATUS_C[c.status] ?? '#8b8b95'}22`, color: STATUS_C[c.status] ?? '#8b8b95' }}>{STATUS_L[c.status] ?? c.status}</span>
         <span className="text-[11.5px] text-mut">{c.type.replace('relation:', '')} · {dayFmt(c.asserted_at)} · {WHO[c.speaker] ?? c.speaker}</span>
       </div>
-      <div className="mt-1.5 text-[13.5px] leading-snug">{c.text}</div>
-      {ev.slice(0, 2).map((v: any, i: number) => (
+      <div className="mt-1.5 line-clamp-3 text-[13.5px] leading-snug">{c.text}</div>
+      {ev.length > 0 && <More label="Quote" className="mt-1">{ev.slice(0, 2).map((v: any, i: number) => (
         <div key={i} className="mt-1.5 border-l-2 border-line2 pl-2.5 text-[12px] leading-snug text-soft">
           “{v.quote}”
           <div className="mt-0.5 text-[11px] text-mut">{v.stated === 'inferred' ? 'inferred · ' : ''}<Link className="underline decoration-line2" to={`/source/${v.source_id}`}>{v.source_title ?? v.source}</Link></div>
         </div>
-      ))}
+      ))}</More>}
       {showEntities && c.entities && <div className="mt-1.5 truncate text-[11px] text-mut">{c.entities}</div>}
     </div>
   )
 }
 
-export default function Graph() {
+function Network({ tabs }: { tabs: React.ReactNode }) {
   const { data: lin } = useApi('/api/kg/lineage')
   const { data: sug, reload: reloadSug } = useApi('/api/kg/suggest') as { data: any; reload: () => void }
   const { data: g, reload: reloadG } = useApi('/api/kg/graph') as { data: any; reload: () => void }
@@ -141,12 +144,7 @@ export default function Graph() {
       </svg>
 
       <div className="absolute left-5 top-5 flex max-w-[calc(100%-480px)] flex-col gap-2.5">
-        <div><div className="text-[13px] text-mut">Entities and the claims about them</div><h2 className="text-[28px] font-semibold leading-tight tracking-tight">Graph</h2></div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <div className="relative"><SearchIcon size={14} className="absolute left-3 top-[11px] text-mut" /><input className="nx-input !h-9 !w-[240px] !pl-8 !text-[13px]" placeholder="Search claims and quotes" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-          <Chip v="active" cur={status} set={setStatus} label="Kept" /><Chip v="proposed" cur={status} set={setStatus} label="Suggested" /><Chip v="superseded" cur={status} set={setStatus} label="Replaced" />
-          <Chip v="owner" cur={speaker} set={setSpeaker} label="You" /><Chip v="assistant" cur={speaker} set={setSpeaker} label="Claude" />
-        </div>
+        <div><div className="text-[13px] text-mut">Things mentioned in the work and what was said about them</div><div className="flex items-center gap-4"><h2 className="text-[28px] font-semibold leading-tight tracking-tight">Graph</h2>{tabs}</div></div>
         <div className="flex items-center gap-3 text-[11.5px] text-mut">{Object.entries(KIND_C).map(([k, c]) => <span key={k} className="flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: c }} />{k}</span>)}<span>· size = claims · line = claims about both</span></div>
       </div>
 
@@ -174,18 +172,25 @@ export default function Graph() {
               )}
             </>
           ) : (
-            <div><div className="text-[17px] font-semibold tracking-tight">All claims</div><div className="mt-0.5 text-[12px] text-mut">Click a node to see what was said about it, or search above.</div></div>
+            <div><div className="text-[17px] font-semibold tracking-tight">All claims</div><div className="mt-0.5 text-[12px] text-mut">Click a node to narrow the list.</div></div>
           )}
         </div>
         <div className="flex-1 overflow-y-auto px-4 py-3">
-          {entLineage.length > 0 && (
+          <div className="mb-3 grid gap-2 rounded-[12px] border border-line bg-white/[.025] px-3 py-2.5">
+            <div className="text-[11.5px] font-semibold uppercase tracking-wide text-mut">Filter the claims</div>
+            <div className="relative"><SearchIcon size={14} className="absolute left-3 top-[11px] text-mut" /><input className="nx-input !h-9 !w-full !pl-8 !text-[13px]" placeholder="Search the claims below" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+            <div className="flex flex-wrap items-center gap-1.5"><span className="w-[58px] text-[12px] text-mut">Status</span><Chip v="active" cur={status} set={setStatus} label="Kept" /><Chip v="proposed" cur={status} set={setStatus} label="Suggested" /><Chip v="superseded" cur={status} set={setStatus} label="Replaced" /></div>
+            <div className="flex flex-wrap items-center gap-1.5"><span className="w-[58px] text-[12px] text-mut">Said by</span><Chip v="owner" cur={speaker} set={setSpeaker} label="You" /><Chip v="assistant" cur={speaker} set={setSpeaker} label="Claude" /></div>
+            <div className="text-[11.5px] text-mut" title="Kept = accepted. Suggested = awaiting a decision. Replaced = later overruled.">Kept · Suggested · Replaced</div>
+          </div>
+          {entLineage.length > 0 && !q && !status && !speaker && (
             <div className="mb-4">
               <div className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide text-mut">Lineage{cur ? ` of ${cur.name.replace(/ \(.*\)/, '')}` : ''}</div>
               <div className="flex flex-col gap-1.5">
                 {entLineage.slice(0, cur ? 20 : 8).map((l: any) => (
                   <div key={l.id} className="rounded-[12px] border border-line bg-white/[.025] px-3 py-2">
                     <div className="flex flex-wrap items-baseline gap-x-2 text-[12.5px]"><span className="tabular-nums text-mut">{dayFmt(l.asserted_at)}</span><span>{l.path}</span><span className="text-mut">{l.type.replace('relation:', '')}</span></div>
-                    <div className="mt-0.5 text-[11.5px] leading-snug text-soft">“{l.quote}”</div>
+                    <More label="Quote" className="mt-0.5 text-[11.5px] leading-snug text-soft">“{l.quote}”</More>
                   </div>
                 ))}
               </div>
@@ -206,11 +211,25 @@ export default function Graph() {
           )}
           <div className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide text-mut">Claims · {det?.total ?? '…'}{det && det.total > 150 ? ' (newest 150)' : ''}</div>
           <div className="flex flex-col gap-2">
-            {(det?.claims ?? []).map((c: any) => <ClaimCard key={c.id} c={c} ev={(det.evidence ?? []).filter((v: any) => v.claim_id === c.id)} showEntities={!cur} />)}
+            <Paged resetKey={`${sel}|${q}|${status}|${speaker}`} items={det?.claims ?? []} size={8}>{(pageRows: any[]) => pageRows.map((c: any) => <ClaimCard key={c.id} c={c} ev={(det.evidence ?? []).filter((v: any) => v.claim_id === c.id)} showEntities={!cur} />)}</Paged>
             {det && det.claims.length === 0 && <div className="text-[13px] text-mut">Nothing matches.</div>}
           </div>
         </div>
       </aside>
     </div>
   )
+}
+
+export default function Graph() {
+  const [sp, setSp] = useSearchParams()
+  const { data: g } = useApi('/api/kg/graph') as { data: any }
+  const growth = sp.get('view') === 'growth'
+  const tabs = (
+    <div className="flex gap-1.5">
+      {([['', 'Network'], ['growth', 'Over time']] as const).map(([k, l]) => (
+        <button key={k} type="button" onClick={() => { const n = new URLSearchParams(sp); k ? n.set('view', k) : n.delete('view'); setSp(n) }} className="rounded-full px-3 text-[12.5px] font-medium" style={{ height: 28, border: '1px solid var(--color-line2)', background: growth === !!k ? '#34d39926' : 'rgba(255,255,255,.04)', color: growth === !!k ? '#34d399' : 'var(--color-soft)' }}>{l}</button>
+      ))}
+    </div>
+  )
+  return growth ? <Growth nodes={g?.nodes ?? []} tabs={tabs} /> : <Network tabs={tabs} />
 }

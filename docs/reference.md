@@ -5,6 +5,8 @@ hooks, and the parts that do not scale unchanged.
 
 ## Commands
 
+Commands run as `bt <command>`.
+
 | Command | Purpose |
 | --- | --- |
 | `ingest` | Read new or changed sources and re-link items to their quotes |
@@ -19,7 +21,7 @@ hooks, and the parts that do not scale unchanged.
 | `link <A> <B> <kind>` | Record a thread-to-thread relation |
 | `assign <session ref> <thread>` | Pin a session to a thread |
 | `search <words> [--thread T] [--kind session\|note\|artifact\|commit] [--state S] [--from DATE] [--to DATE] [--text]` | Search with filters. `--state` keeps passages whose source has a filed item in that state. `--text` forces keyword-only |
-| `embed [--limit N]` | Embed passages that have no vector yet (needs the `embeddings` key) |
+| `embed [--limit N]` | Embed passages that have no vector yet (needs the embedding server; see the `embeddings` key) |
 | `show <ref>` | Print a source's passages |
 | `check [--pairs]` | Report lost quotes, orphan threads, stale work; `--pairs` lists candidate contradictions |
 | `match` | Mark open steps that a later commit seems to complete as `looks done?` (word-overlap heuristic, unproven) |
@@ -29,7 +31,7 @@ hooks, and the parts that do not scale unchanged.
 | `compile-queue [--session ID] [--limit N]` | List sessions worth compiling |
 | `compile-log <ref> [--failed 1] --detail "..."` | Record one compile run and its cost |
 | `log [--n N]` | Print the append-only change log |
-| `backup` | Copy the store to `BacktrailBackups` (also daily on rescan, 14 kept) |
+| `backup` | Copy the store to `<data dir>/backups` (also daily on rescan, 14 kept) |
 | `kg [migrate]` | Print graph table counts; `migrate` copies thread relations that have a quote from `links` into claims (idempotent, `links` unchanged) |
 | `kg import` | Seed the configured entities (`config.json` key `entities`) and copy decisions into claims with their quote; entities are matched by whole-word name or alias |
 | `kg find "<question>"` | Router for history questions: lineage trace, entity page, claim lookup, then passages. Prints "no record" on a miss |
@@ -42,8 +44,9 @@ hooks, and the parts that do not scale unchanged.
 | `kg merge <keep id> <drop id>` | Merge a duplicate claim into another: evidence and entities move over and the duplicate is closed as superseded |
 | `kg lint` | Graph checks (also part of `check`) |
 | `kg export <file>` / `kg restore <file>` | Backup as JSONL; evidence is re-located by source and quote on restore |
-| `build` | Fresh machine: ingest all sources, then build the graph from them |
+| `build` | Ingest all sources, then build the graph from them (first run) |
 | `demo` | Write a demo store (requires `BACKTRAIL_HOME`) |
+| `hooks [status\|install\|remove]` | Show, add or remove the Claude Code hooks in `~/.claude/settings.json`; the old file is copied to `settings.json.bak-backtrail` first |
 
 `relate <A> <B> <kind> --source <ref> --quote "..." [--state proposed]` files a relation between two threads
 (`spun out of`, `forked from`, `built on`, `replaced by`) with a quote from a source. `relate-input <ref>` prints the
@@ -58,50 +61,52 @@ or reject suggested items. Thread lineage drawn on the graph comes from relation
 
 ## Configuration
 
-`<data dir>/config.json` holds everything specific to one machine:
+`<data dir>/config.json` is optional. Without it, each Claude Code project folder is one thread and only memory notes are
+indexed. It holds custom thread rules, note folders and repositories:
 
 | Key | Content |
 | --- | --- |
 | `workspace` | Root folder that note paths are relative to |
 | `note_dirs` | Folders of Markdown notes to index |
 | `screens_dir` | Folder of HTML design files to index |
-| `threads` | Thread definitions: `name`, `area`, `state`, `summary`, `kind`, `regex` (matches session titles) |
-| `note_rules`, `art_rules` | Regular expressions that assign notes and artifacts to threads |
+| `threads` | Thread definitions: `name`, `area`, `state`, `summary`, `kind`, `regex` (matches session titles and project folders). When set, one thread per project folder is no longer created |
+| `note_rules`, `artifact_rules` | Lists of `[thread name, regex]` pairs that assign notes and artifacts to threads |
+| `generic_projects` | Project folder names that never decide a thread (default `["home"]`) |
 | `repos` | Repository path to thread table, used for commit matching |
 | `aliases` | Alternative names used for mention edges |
 | `compile` | `min_owner_turns` (4), `daily_cap` (8), `max_chars` (24000) |
 | `port` | Server port (8799) |
-| `embeddings` | Optional. `url` (an Ollama-compatible server, `http://` only), `model`, and optionally `query_prefix`, `document_prefix` (default to `search_query: ` and `search_document: ` for `nomic` models, empty otherwise) and `batch_cap` (passages per background run, default 2000). Absent: embeddings are off. Changing `model` discards stored vectors and re-embeds. |
+| `embeddings` | On by default with `url` `http://127.0.0.1:11434` and `model` `nomic-embed-text`. Keys: `url` (an Ollama-compatible server, `http://` only), `model`, and optionally `query_prefix`, `document_prefix` (default to `search_query: ` and `search_document: ` for `nomic` models, empty otherwise) and `batch_cap` (passages per background run, default 2000). `false` turns embeddings off. Changing `model` discards stored vectors and re-embeds. |
 
 ## Search ranking
 
-Search ranks passages by keyword (BM25) and, when embeddings are configured, by vector similarity. The two rankings
+Search ranks passages by keyword (BM25) and, when the embedding server answers, by vector similarity. Otherwise keyword only, with a note in the result. The two rankings
 are merged by reciprocal rank fusion. Each passage's score is then adjusted by what the store knows about it: the
 thread's state (dropped or parked lowers it), and whether a kept, suggested or rejected item cites the passage or its
 source. The result lists these reasons. Filed items are searched in a separate index over title and body.
 
-`backtrail embed` stores one vector per distinct passage text, keyed by a hash of the text, so a session that grows
+`bt embed` stores one vector per distinct passage text, keyed by a hash of the text, so a session that grows
 embeds only its new passages. Vectors come from a local Ollama-compatible server and stay in the same SQLite file.
 
-## First run on a new machine
+## Embeddings
 
-Written from the steps used on the development machine. Not yet run on a second machine.
+Install Ollama, run `ollama pull nomic-embed-text` (274 MB), then run `bt embed`. No config key is needed for the
+default server. Until then, search is keyword only. A first run over 11,473 passages took 472 s on one Apple Silicon
+Mac; later runs embed only new passages.
 
-1. Build as in the README.
-2. Create `<data dir>/config.json` with at least `workspace` and `note_dirs`. Threads are added with `regex` rules.
-3. Run `backtrail ingest`. The first run reads every session log and may take a minute.
-4. Run `backtrail serve` and open `http://127.0.0.1:8799`.
-5. Optional embeddings: install Ollama, run `ollama pull nomic-embed-text` (274 MB), add the `embeddings` key, then run
-   `backtrail embed`. The first full run embedded 11,473 passages in 472 s on one Apple Silicon Mac. Later runs embed
-   only new passages.
-6. Optional hooks, in `~/.claude/settings.json`:
-   - `SessionStart`: `<path>/target/release/backtrail brief` prints open questions and threads in motion.
-   - `SessionEnd`: `<path>/skill/session-end.sh` runs `ingest` and `embed` in the background when a session closes.
-     It does not call a model. Setting `BACKTRAIL_COMPILE_ON_END=1` in the hook's environment also compiles the
-     session with a small model, which costs tokens.
+## Hooks
 
-A demo store with invented content: `BACKTRAIL_HOME=/tmp/bt-demo backtrail demo`, then
-`BACKTRAIL_HOME=/tmp/bt-demo backtrail serve --port 8800`. Screenshots from it are in `docs/demo/`.
+`bt hooks install` adds both hooks to `~/.claude/settings.json`; `bt hooks remove` takes them out. By hand:
+
+- `SessionStart`: `bt brief` prints open questions and threads in motion.
+- `SessionEnd`: `<path>/skill/session-end.sh` runs `ingest` and `embed` in the background when a session closes. It
+  does not call a model. Setting `BACKTRAIL_COMPILE_ON_END=1` in the hook's environment also compiles the session with
+  a small model, which costs tokens.
+
+## Demo store
+
+A store with invented content: `BACKTRAIL_HOME=/tmp/bt-demo bt demo`, then
+`BACKTRAIL_HOME=/tmp/bt-demo bt serve --port 8800`. Screenshots from it are in `docs/demo/`.
 
 ## Scale limits
 
@@ -109,11 +114,11 @@ Graph queries (entity lookup, claim filter, two-hop) were timed on a scratch sto
 stayed under 1 ms at p95; full-text search grew linearly to a p95 of about 650 ms at 4 million passages, so it needs
 an entity or time prefilter past about 2 million.
 
-Keyword search uses SQLite FTS5, which handles far more than the present 11,800 passages. Parts that do not scale
-unchanged: vectors are compared by brute force over an in-memory copy (about 36 MB at 768 dimensions and 11,800
+Keyword search uses SQLite FTS5, which handles far more than the 11,800 passages in the test store.
+Parts that do not scale unchanged: vectors are compared by brute force over an in-memory copy (about 36 MB at 768 dimensions and 11,800
 passages, a few hundred thousand passages at most before it needs an index); `graph()` rebuilds the whole graph per
 request with one FTS query per thread; the item index is rebuilt in memory whenever items change. None of these has
-been measured beyond the present store.
+been measured beyond that size.
 
 ## Source layout
 

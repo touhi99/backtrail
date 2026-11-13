@@ -19,7 +19,7 @@ export function useApi<T = any>(url: string | null) {
 }
 
 export const STATE: Record<string, { label: string; color: string }> = {
-  moving: { label: 'Moving', color: 'var(--color-moving)' },
+  moving: { label: 'In development', color: 'var(--color-moving)' },
   built: { label: 'Built', color: 'var(--color-built)' },
   parked: { label: 'Parked', color: 'var(--color-parked)' },
   dropped: { label: 'Dropped', color: 'var(--color-dropped)' },

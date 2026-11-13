@@ -4,6 +4,7 @@ import { CircleHelp, ListTodo, Scale, Sparkles } from 'lucide-react'
 import { dayFmt, get, STALE_LABEL, staleOf } from '@/lib/api'
 import { useShell } from '@/components/Shell'
 import ItemActions, { Who } from '@/components/ItemActions'
+import Paged from '@/components/Paged'
 import '@/next.css'
 
 const OPT = {
@@ -20,13 +21,17 @@ const HELP: Record<string, string> = {
   step: 'Todos and bugs. Open the project to start, tick or confirm them.',
   question: 'Questions that wait for an answer. Answer them on Today or on the project page.',
 }
+const CLOSED = ['done', 'answered', 'settled', 'rejected', 'parked']
 const STATE_C: Record<string, string> = { open: '#fbbf24', doing: '#60a5fa', done: '#34d399', looks_done: '#34d399', settled: '#c084fc', answered: '#34d399', proposed: '#8b8b95', rejected: '#fb7185', parked: '#8b8b95' }
 
 export default function Items() {
   const { today } = useShell()
   const [sp, setSp] = useSearchParams()
   const f = { type: sp.get('type') ?? '', state: sp.get('state') ?? '', kind: sp.get('kind') ?? '', thread: sp.get('thread') ?? '' }
-  const [rows, setRows] = useState<any[] | null>(null)
+  const [all, setRows] = useState<any[] | null>(null)
+  const showClosed = sp.get('closed') === '1' || f.state !== ''
+  const nClosed = (all ?? []).filter((i) => CLOSED.includes(i.state)).length
+  const rows = all && (showClosed ? all : all.filter((i) => !CLOSED.includes(i.state)))
   const [tick, setTick] = useState(0)
   const reloadAll = () => setTick((t) => t + 1)
   useEffect(() => { get(`/api/items?type=${f.type}&state=${f.state}&kind=${f.kind}&thread=${encodeURIComponent(f.thread)}`).then(setRows) }, [sp, tick]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -35,9 +40,8 @@ export default function Items() {
   const mix = useMemo(() => { const m: Record<string, number> = {}; (rows ?? []).forEach((i) => (m[i.state] = (m[i.state] ?? 0) + 1)); return Object.entries(m).sort((a, b) => b[1] - a[1]) }, [rows])
   return (
     <div className="nx-page">
-      <div className="nx-in flex items-end justify-between"><div><div className="text-[13px] text-mut">Everything filed</div><h2 className="text-[30px] font-semibold leading-tight tracking-tight">Items</h2></div>
+      <div className="nx-in flex items-end justify-between"><div><div className="text-[13px] text-mut">Everything filed</div><h2 className="text-[30px] font-semibold leading-tight tracking-tight" title={HELP[f.type] ?? HELP.all}>Items</h2></div>
         <div className="text-right"><div className="nx-big">{rows?.length ?? 0}</div></div></div>
-      <p className="nx-in mt-2 max-w-[70ch] text-[13.5px] text-soft">{HELP[f.type] ?? HELP.all}</p>
       <div className="nx-in mt-4 flex flex-wrap items-center gap-2" style={{ ['--d' as any]: '40ms' }}>{sel('type')}{sel('state')}{sel('kind')}
         <select className="input !w-auto !rounded-full !px-4" value={f.thread} onChange={(e) => set('thread', e.target.value)}><option value="">All projects</option>{(today?.threads ?? []).map((t: any) => <option key={t.name}>{t.name}</option>)}</select></div>
       {mix.length > 0 && (
@@ -47,14 +51,13 @@ export default function Items() {
         </div>
       )}
       <section className="nx-panel nx-in mt-4 overflow-hidden" style={{ ['--d' as any]: '120ms' }}>
-        {(rows ?? []).map((i) => {
+        <Paged resetKey={sp.toString()} items={rows ?? []} size={15}>{(pageRows: any[]) => pageRows.map((i) => {
           const T = TYPE[i.tag === 'bug' ? 'step' : i.type] ?? TYPE.turn, Icon = T.icon, st = staleOf(i)
           return (
             <div key={i.id} className="nx-row" style={{ gridTemplateColumns: '36px minmax(0,1fr) auto auto', cursor: 'default', opacity: (i.stale ?? '').startsWith('superseded') ? 0.55 : 1 }}>
               <span className="nx-glyph size-9" style={{ background: T.c + '1f', color: T.c }}><Icon size={16} /></span>
               <div className="min-w-0">
-                <Link to={`/thread/${encodeURIComponent(i.thread)}?item=${i.id}`} className="block truncate text-[14px] font-medium hover:underline">{i.title}</Link>
-                {(i.body || i.answer) && <div className="truncate text-[12.5px] text-mut">{i.body}{i.answer ? ` ${i.answer}` : ''}</div>}
+                <Link to={`/thread/${encodeURIComponent(i.thread)}?item=${i.id}`} title={[i.body, i.answer].filter(Boolean).join(" · ")} className="block truncate text-[14px] font-medium hover:underline">{i.title}</Link>
               </div>
               <div className="flex items-center gap-2 text-[12px] text-mut">
                 {st && <span className="nx-chip" style={{ background: '#fbbf2418', color: '#fbbf24' }}>{STALE_LABEL[st.kind]}</span>}
@@ -65,7 +68,9 @@ export default function Items() {
               <div className="flex min-w-[150px] justify-end"><ItemActions i={i} done={reloadAll} /></div>
             </div>
           )
-        })}
+        })}</Paged>
+        {all && !showClosed && nClosed > 0 && <button type="button" className="w-full px-5 py-3 text-left text-[13px] text-mut hover:text-ink" onClick={() => set('closed', '1')}>Show closed ({nClosed}): done, answered, settled, rejected, not valid now</button>}
+        {all && sp.get('closed') === '1' && f.state === '' && <button type="button" className="w-full px-5 py-3 text-left text-[13px] text-mut hover:text-ink" onClick={() => set('closed', '')}>Hide closed</button>}
         {rows && rows.length === 0 && <div className="px-5 py-6 text-[13.5px] text-mut">No items match.</div>}
       </section>
     </div>
