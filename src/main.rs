@@ -64,7 +64,7 @@ fn main() {
                 Ok((n, left)) => println!("embedded {n} passages, {left} pending"),
                 Err(e) => eprintln!(
                     "embed skipped: {e}\nSearch works by keyword only until the embedding server is reachable. \
-                     Install Ollama, run `ollama pull nomic-embed-text`, then `backtrail embed`."
+                     Install Ollama, run `ollama pull embeddinggemma-2:270m`, then `backtrail embed`."
                 ),
             }
         }

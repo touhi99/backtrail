@@ -76,7 +76,7 @@ indexed. It holds custom thread rules, note folders and repositories:
 | `aliases` | Alternative names used for mention edges |
 | `compile` | `min_owner_turns` (4), `daily_cap` (8), `max_chars` (24000) |
 | `port` | Server port (8799) |
-| `embeddings` | On by default with `url` `http://127.0.0.1:11434` and `model` `nomic-embed-text`. Keys: `url` (an Ollama-compatible server, `http://` only), `model`, and optionally `query_prefix`, `document_prefix` (default to `search_query: ` and `search_document: ` for `nomic` models, empty otherwise) and `batch_cap` (passages per background run, default 2000). `false` turns embeddings off. Changing `model` discards stored vectors and re-embeds. |
+| `embeddings` | On by default with `url` `http://127.0.0.1:11434` and `model` `embeddinggemma-2:270m`. Keys: `url` (an Ollama-compatible server, `http://` only), `model`, and optionally `query_prefix`, `document_prefix` (default to `task: search result | query: ` and `title: none | text: ` for `embeddinggemma` models, `search_query: ` and `search_document: ` for `nomic` models, empty otherwise) and `batch_cap` (passages per background run, default 2000). `false` turns embeddings off. Changing `model` discards stored vectors and re-embeds. |
 
 ## Search ranking
 
@@ -90,9 +90,20 @@ embeds only its new passages. Vectors come from a local Ollama-compatible server
 
 ## Embeddings
 
-Install Ollama, run `ollama pull nomic-embed-text` (274 MB), then run `bt embed`. No config key is needed for the
-default server. Until then, search is keyword only. A first run over 11,473 passages took 472 s on one Apple Silicon
+Install Ollama, run `ollama pull embeddinggemma-2:270m` (378 MB), then run `bt embed`. No config key is needed for the
+default server. Until then, search is keyword only. A first run over 11,964 passages took 954 s on one Apple Silicon
 Mac; later runs embed only new passages.
+
+Model comparison, 2026-11-13, on one store of 12,282 passages. Queries are the titles of 519 filed items; the target is
+the passage each item cites. Vector ranking only. "Low overlap" is the 152 queries that share under 30% of their words
+with the target passage.
+
+| Model | Hit@10 | MRR@10 | Hit@10, low overlap | MRR@10, low overlap | Embedding speed |
+| --- | --- | --- | --- | --- | --- |
+| `embeddinggemma-2:270m` | 51.8% | 0.348 | 27.6% | 0.143 | 12.5 passages/s |
+| `nomic-embed-text` | 49.7% | 0.327 | 16.4% | 0.056 | 24 passages/s |
+
+Titles were written by a model from the cited passage, so the queries are not typed by people.
 
 ## Hooks
 
