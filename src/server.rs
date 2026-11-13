@@ -272,7 +272,8 @@ fn thread(c: &Connection, name: &str) -> Value {
     let t = rows(c, include_str!("sql/server_thread.sql"), &[&name]);
     let items = rows(c, include_str!("sql/server_thread_2.sql"), &[&name]);
     let sources = rows(c, include_str!("sql/server_thread_3.sql"), &[&name]);
-    json!({"thread": t.get(0), "items": items, "sources": sources})
+    let claims = rows(c, include_str!("sql/server_thread_claims.sql"), &[&name]);
+    json!({"thread": t.get(0), "items": items, "sources": sources, "claims": claims})
 }
 
 fn source(c: &Connection, id: i64) -> Value {
@@ -1628,6 +1629,12 @@ pub fn serve(c: Connection, port: u16) {
                 json_resp(json!({"kind": kind, "text": text}))
             }
             (Method::Get, "/api/graph") => json_resp(graph_cached(&c)),
+            (Method::Get, "/api/trail") => json_resp(json!({
+                "threads": rows(&c, include_str!("sql/server_trail.sql"), &[]),
+                "sources": rows(&c, include_str!("sql/server_trail_2.sql"), &[]),
+                "items": rows(&c, include_str!("sql/server_trail_3.sql"), &[]),
+                "links": rows(&c, include_str!("sql/server_trail_4.sql"), &[]),
+            })),
             (Method::Get, "/api/kg") => {
                 json_resp(json!(rows(&c, include_str!("sql/server_api_kg.sql"), &[])))
             }

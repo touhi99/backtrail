@@ -18,6 +18,7 @@ SELECT
   ) AS by_actor,
   n.answer,
   n.created,
+  n.updated,
   n.quote,
   n.chunk_id,
   n.source_id,
