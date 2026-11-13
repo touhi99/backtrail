@@ -26,6 +26,19 @@ pub struct Cfg {
     pub emb: (String, String, String, String, usize),
 }
 
+pub const DEFAULT_EMBED_MODEL: &str = "embeddinggemma-2:270m";
+
+/// Query and document prefixes each model family expects; empty for unknown models.
+fn prefixes(model: &str) -> (&'static str, &'static str) {
+    if model.contains("embeddinggemma") {
+        ("task: search result | query: ", "title: none | text: ")
+    } else if model.contains("nomic") {
+        ("search_query: ", "search_document: ")
+    } else {
+        ("", "")
+    }
+}
+
 pub fn cfg() -> &'static Cfg {
     static C: std::sync::OnceLock<Cfg> = std::sync::OnceLock::new();
     C.get_or_init(|| {
@@ -42,9 +55,9 @@ pub fn cfg() -> &'static Cfg {
             port: 8799,
             emb: (
                 "http://127.0.0.1:11434".into(),
-                "nomic-embed-text".into(),
-                "search_query: ".into(),
-                "search_document: ".into(),
+                DEFAULT_EMBED_MODEL.into(),
+                prefixes(DEFAULT_EMBED_MODEL).0.into(),
+                prefixes(DEFAULT_EMBED_MODEL).1.into(),
                 2000,
             ),
         };
@@ -109,24 +122,16 @@ pub fn cfg() -> &'static Cfg {
                     c.emb = Default::default();
                 } else if let Some(e) = v["embeddings"].as_object() {
                     let g = |k: &str| e.get(k).and_then(|x| x.as_str()).map(String::from);
-                    let model = g("model").unwrap_or_else(|| "nomic-embed-text".into());
-                    let nomic = model.contains("nomic");
+                    let model = g("model").unwrap_or_else(|| DEFAULT_EMBED_MODEL.into());
+                    let (qp, dp) = prefixes(&model);
                     c.emb = (
                         g("url")
                             .unwrap_or_else(|| "http://127.0.0.1:11434".into())
                             .trim_end_matches('/')
                             .to_string(),
                         model,
-                        g("query_prefix").unwrap_or(if nomic {
-                            "search_query: ".into()
-                        } else {
-                            String::new()
-                        }),
-                        g("document_prefix").unwrap_or(if nomic {
-                            "search_document: ".into()
-                        } else {
-                            String::new()
-                        }),
+                        g("query_prefix").unwrap_or_else(|| qp.into()),
+                        g("document_prefix").unwrap_or_else(|| dp.into()),
                         e.get("batch_cap").and_then(|x| x.as_u64()).unwrap_or(2000) as usize,
                     );
                 }

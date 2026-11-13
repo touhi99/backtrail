@@ -409,7 +409,7 @@ fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
         match crate::embed::nearest(c, q, 200) {
             Err(e) => {
                 res["note"] = json!(format!(
-                    "keyword search only: the embedding server did not answer ({e}). Start Ollama and run `ollama pull nomic-embed-text` once."
+                    "keyword search only: the embedding server did not answer ({e}). Start Ollama and run `ollama pull embeddinggemma-2:270m` once."
                 ))
             }
             Ok(near) => {

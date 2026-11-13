@@ -1,8 +1,8 @@
 # Backtrail
 
-Local index and web app that organise work done with Claude Code into threads. Session logs, Markdown notes and
-artifact snapshots are read, never modified, and indexed into one SQLite file. Decisions, steps and questions are
-filed against threads (one thread per project or topic), and each must cite an indexed source with a verbatim quote.
+Backtrail indexes Claude Code sessions and Markdown notes into one SQLite file and shows them in a local web app,
+grouped into threads, one per project. Decisions, steps and open questions are recorded on each thread, and each one
+links to the session or note it came from with the exact quote.
 
 Status: prototype. Tested on macOS only.
 
@@ -10,26 +10,24 @@ Status: prototype. Tested on macOS only.
 
 ![Overview](docs/architecture-overview.svg)
 
-Items are rejected unless the cited source is indexed and the quote is found in it. Claude Code sessions or
-`skill/compile.sh` (see `skill/SKILL.md`) propose items; they stay `proposed` until accepted in the app.
-
-When a Claude Code session ends, a SessionEnd hook indexes the new text and embeds it:
+- Claude Code keeps one folder per project in `~/.claude/projects`. Each folder becomes a thread.
+- Sessions and notes are read, never changed.
+- Decisions, steps and questions are proposed from sessions and stay proposed until accepted in the app. A proposal is
+  rejected if its quote is not found in the cited source.
+- When a session ends, a hook indexes its new text.
 
 ![Session end](docs/architecture-session-end.svg)
 
-Modules, data model and processes: `docs/architecture.md`.
+More detail: `docs/architecture.md`.
 
-## What it reads and sends
+What it reads and sends:
 
-- Reads: Claude Code sessions (`~/.claude/projects/*/*.jsonl`), Markdown notes (folders in the configuration and the
-  Claude Code memory folders), artifact snapshots, and git history of repositories listed in the configuration.
-- Writes: `<data dir>/backtrail.db`, artifact snapshots, and daily backups in `<data dir>/backups`.
-- Network: passage and query text go to a local Ollama server (`embeddings.url` in `config.json`); `"embeddings": false`
-  turns this off. `compile.sh` runs the `claude` CLI, which sends session text to the model provider.
+- Reads: Claude Code sessions and memory notes, plus note folders and git repositories listed in `config.json`.
+- Writes: the data directory (database, backups, saved artifacts), and `~/.claude/settings.json` on `bt hooks install`.
+- Network: passage and query text go to the local Ollama server. The `claude` CLI scripts in `skill/` send session text
+  to Claude.
 
 ## Screenshots
-
-Taken from the demo store (`bt demo`), which holds invented content.
 
 | | |
 | --- | --- |
@@ -38,39 +36,47 @@ Taken from the demo store (`bt demo`), which holds invented content.
 ## Requirements
 
 - Rust 1.85 or later, and Node.js
-- Optional: Ollama with the `nomic-embed-text` model, for meaning-based search (setup: `docs/reference.md`)
-- Optional: the `claude` CLI, used only by `skill/compile.sh`
+- Ollama, for search by meaning. Other embedding servers (such as LM Studio) are not supported.
+- The `claude` CLI, for building the graph and proposing decisions and steps
 
 ## Install
 
 ```
+ollama pull embeddinggemma-2:270m
 ./install.sh
 bt serve
 ```
 
-- `install.sh` builds the app and the program and links it as `bt` in `~/.local/bin` (override with `BT_BIN_DIR`).
-- `bt serve` starts the app at `http://127.0.0.1:8799`.
-- After start, it reads the Claude Code sessions in `~/.claude/projects` and the memory notes next to them.
-- Each project folder becomes a thread. Thread rules and note folders can be added in an optional `config.json` (more
-  in `docs/reference.md`).
-- Data directory: `~/Library/Application Support/Backtrail` on macOS (override with `BACKTRAIL_HOME`).
+`install.sh` builds the app and links it as `bt`. `bt serve` starts the app at `http://127.0.0.1:8799` and indexes
+existing sessions on first start.
+
+Optional setup:
+
+- Custom threads, note folders and git repositories: `config.json` in the data directory (`docs/reference.md`).
+- Moving to another machine: copy the data directory before the first `bt serve`.
+
+Environment variables:
+
+| Variable | Default |
+| --- | --- |
+| `BACKTRAIL_HOME` | macOS: `~/Library/Application Support/Backtrail`. Linux: `$XDG_DATA_HOME/backtrail`, else `~/.local/share/backtrail` |
+| `BT_BIN_DIR` | `~/.local/bin` |
 
 ## Usage
 
 | Command | Purpose |
 | --- | --- |
-| `bt serve [--port N]` | Run the app; it also rescans every 5 minutes |
+| `bt serve [--port N]` | Run the app; it rescans every 5 minutes |
+| `bt hooks install` | Index each session when it ends and show a brief when one starts (`bt hooks remove` undoes it) |
 | `bt search <words>` | Search with cited sources |
-| `bt hooks install` | Add the SessionStart and SessionEnd hooks to `~/.claude/settings.json` (`remove` undoes it) |
-| `bt check` | Report lost quotes, orphan threads, stale work |
+| `bt check` | Report lost quotes, orphan threads and stale work |
 
-All other commands (`ingest`, `brief`, `add`, `import`, `done`, `backup`, `kg`) and the configuration keys are in
-`docs/reference.md`.
+Other commands: `docs/reference.md`.
 
 ## Limits
 
-- Vectors are compared by brute force in memory, which suits a few hundred thousand passages at most. Other parts that
-  do not scale unchanged are listed in `docs/reference.md`.
-- Ranking weights are set by hand and not tuned. `nomic-embed-text` is the only embedding model tried.
-- The quote rule proves a quote exists in the source, not that the title is a fair reading of it.
-- Claim extraction ran on a handful of sessions; its accuracy and the commit matcher have not been measured.
+- Search compares vectors in memory, which suits a few hundred thousand passages at most.
+- Search ranking is set by hand. Embedding models compared: `embeddinggemma-2:270m` and `nomic-embed-text`, on 519
+  queries from one store (`docs/reference.md`).
+- The quote check proves a quote exists in the source, not that the title is a fair reading of it.
+- Automatic extraction of decisions and the matching of steps to commits have not been measured for accuracy.
