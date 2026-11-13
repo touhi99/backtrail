@@ -6,6 +6,7 @@ import { useShell } from '@/components/Shell'
 import { STATE_HEX, STATE_NAME, dayCounts, nextStep, useDetails } from '@/lib/next'
 import { Ring, SegRing, Spark } from '@/components/Viz'
 import ItemActions, { Who } from '@/components/ItemActions'
+import Paged from '@/components/Paged'
 import { whoActor } from '@/lib/api'
 import '@/next.css'
 
@@ -45,7 +46,12 @@ export default function Today() {
   }, [details])
   const done = threads.reduce((a, t) => a + (t.done_s ?? 0), 0), open = threads.reduce((a, t) => a + (t.open_s ?? 0), 0)
 
-  const q = waiting[0]
+  const [later, setLater] = useState<number[]>(() => { try { return JSON.parse(localStorage.getItem('bt-later') ?? '[]') } catch { return [] } })
+  const [picked, setPicked] = useState<number | null>(null)
+  const saveLater = (v: number[]) => { setLater(v); try { localStorage.setItem('bt-later', JSON.stringify(v)) } catch {} }
+  const ordered = [...waiting.filter((x) => !later.includes(x.id)), ...later.map((id) => waiting.find((x) => x.id === id)).filter(Boolean)]
+  const q = ordered.find((x) => x.id === picked) ?? ordered[0]
+  const skip = () => { if (!q) return; setPicked(null); saveLater([...later.filter((id) => id !== q.id), q.id]) }
   const qThread = threads.find((t) => t.name === q?.thread)
   const glow = STATE_HEX[qThread?.state ?? 'moving']
 
@@ -58,17 +64,125 @@ export default function Today() {
 
   const when = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
 
+
+  const nLooks = (today?.looks ?? []).length, nSug = (today?.suggested ?? []).length
+  const nothing = waiting.length + nLooks + nSug === 0
+  const [shown, setShown] = useState<number[]>([])
+  const flip = (id: number) => setShown((v) => (v.includes(id) ? v.filter((x) => x !== id) : [...v, id]))
+  const parts = [waiting.length && `${waiting.length} ${waiting.length === 1 ? 'question' : 'questions'} to answer`, nLooks && `${nLooks} marked done by Claude`, nSug && `${nSug} suggestions`].filter(Boolean)
+
   return (
     <div className="nx-page">
-      <div className="nx-in mb-5 flex items-end justify-between">
-        <div><div className="text-[13px] text-mut">{when}</div><h2 className="text-[30px] font-semibold leading-tight tracking-tight">Today</h2></div>
+      <div className="nx-in mb-5">
+        <div className="text-[13px] text-mut">{when}</div>
+        <h2 className="text-[30px] font-semibold leading-tight tracking-tight">Today</h2>
+        <p className="mt-1 text-[14px] text-soft">{nothing ? 'Nothing is waiting on you.' : `Waiting on you: ${parts.join(' · ')}.`}</p>
       </div>
 
-      <div className="nx-in mb-4 grid grid-cols-2 gap-3 text-[12.5px] text-soft max-[900px]:grid-cols-1">
+      {q && (
+        <section className="nx-now nx-in mt-5" style={{ ['--g' as any]: glow + '38', ['--d' as any]: '240ms' }}>
+          <div className="relative flex items-start gap-4">
+            <span className="nx-glyph size-12" style={{ background: glow + '22', color: glow }}><MessageCircleQuestion size={22} /></span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 text-[13px] text-mut"><span className="nx-chip !h-[18px] !px-2 !text-[11px]" style={{ background: '#60a5fa1f', color: '#60a5fa' }}>Claude asks you</span><span className="size-2 rounded-full" style={{ background: glow }} />{q.thread}<span>·</span>{dayFmt(q.created)}</div>
+              <h3 className="mt-1 max-w-[30ch] text-[27px] font-semibold leading-[1.15] tracking-tight">{q.title}</h3>
+              {q.body && <p className="mt-2 line-clamp-2 max-w-[60ch] text-[14px] text-soft">{q.body}</p>}
+              <form onSubmit={submit} className="mt-5 flex max-w-[560px] gap-2.5">
+                <input className="nx-input" placeholder="Type your answer" value={ans} maxLength={320} onChange={(e) => setAns(e.target.value)} />
+                <button className="nx-btn" type="submit">Answer</button>
+                {ordered.length > 1 && <button className="btn" type="button" onClick={skip} title="Moves this question to the back of the list">Not now</button>}
+              </form>
+            </div>
+            <div className="hidden shrink-0 text-right text-[12.5px] text-mut lg:block">{waiting.length - 1} more waiting</div>
+          </div>
+          {ordered.length > 1 && (
+            <details className="relative mt-4 border-t border-line pt-3">
+              <summary className="cursor-pointer text-[12.5px] text-mut hover:text-ink">Other questions ({ordered.length - 1})</summary>
+              {ordered.filter((x) => x.id !== q.id).map((x) => (
+                <button key={x.id} type="button" onClick={() => setPicked(x.id)} className="row-hover flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-[13.5px]">
+                  <span className="min-w-0 flex-1 truncate">{x.title}</span>
+                  <span className="shrink-0 text-[12px] text-mut">{x.thread}{later.includes(x.id) ? ' · later' : ''}</span>
+                </button>
+              ))}
+            </details>
+          )}
+        </section>
+      )}
+      {!q && nothing && (
+        <section className="nx-panel nx-in grid place-items-center px-5 py-10 text-center">
+          <CheckCheck size={26} className="text-accent" />
+          <div className="mt-3 text-[16px] font-semibold">All clear</div>
+          <div className="mt-1 text-[13px] text-mut">Claude files new questions and suggestions after each session.</div>
+        </section>
+      )}
+        <div className="mt-5 grid grid-cols-2 items-start gap-4 max-[1100px]:grid-cols-1">
+        <section className="nx-panel nx-in" style={{ ['--d' as any]: '300ms' }}>
+          <div className="flex items-center justify-between px-5 pb-1 pt-4"><h3 className="text-[15px] font-semibold" title="Steps that Claude found built. Confirm closes a step; Not yet sends it back to to-do.">Claude says it's done</h3><span className="text-[12.5px] text-mut">{(today?.looks ?? []).length}</span></div>
+          <Paged items={today?.looks ?? []} size={5}>{(pageRows: any[]) => pageRows.map((l: any) => (
+            <div key={l.id} className="nx-row" style={{ gridTemplateColumns: '32px minmax(0,1fr) auto', cursor: 'default' }}>
+              <span className="nx-glyph size-8" style={{ background: '#34d3991f', color: '#34d399' }}><CheckCheck size={16} /></span>
+              <div className="min-w-0">
+                <Link to={`/thread/${encodeURIComponent(l.thread)}?item=${l.id}`} className="block truncate text-[13.5px] font-medium hover:underline">{l.title}</Link>
+                <div className="truncate text-[12px] text-mut">{l.thread}</div>{l.answer && (shown.includes(l.id) ? <div className="text-[12px]" style={{ color: '#34d399' }}>{l.answer}</div> : <button type="button" className="text-[12px] text-mut hover:text-ink" onClick={() => flip(l.id)}>Show evidence</button>)}
+              </div>
+              <div className="flex gap-2">
+                <button className="btn sm primary" type="button" onClick={async () => { const r = await post('/api/tick', { id: l.id }); if (r.ok) reload() }}>Confirm</button>
+                <button className="btn sm" type="button" onClick={async () => { const r = await post('/api/notyet', { id: l.id }); if (r.ok) reload() }}>Not yet</button>
+              </div>
+            </div>
+          ))}</Paged>
+        </section>
+        <section className="nx-panel nx-in" style={{ ['--d' as any]: '340ms' }}>
+          <div className="flex items-center justify-between px-5 pb-1 pt-4"><h3 className="text-[15px] font-semibold" title="Decisions, steps and questions Claude found in sessions. Accept keeps one, Not valid now parks it, Reject drops it.">Claude suggests</h3><Link to="/items?state=proposed" className="text-[12.5px] text-mut hover:text-ink">See all {today?.suggested?.length ?? 0}</Link></div>
+          {(today?.suggested ?? []).slice(0, 5).map((s: any) => (
+            <div key={s.id} className="nx-row" style={{ gridTemplateColumns: '32px minmax(0,1fr) auto', cursor: 'default' }}>
+              <span className="nx-glyph size-8" style={{ background: '#60a5fa1f', color: '#60a5fa' }}><Sparkles size={16} /></span>
+              <div className="min-w-0">
+                <Link to={`/thread/${encodeURIComponent(s.thread)}?item=${s.id}`} className="block truncate text-[13.5px] font-medium hover:underline">{s.title}</Link>
+                <div className="flex items-center gap-2 truncate text-[12px] text-mut"><Who i={s} />{s.type} · {s.thread}</div>{s.body && (shown.includes(s.id) ? <div className="text-[12px] text-soft">{s.body}</div> : <button type="button" className="text-[12px] text-mut hover:text-ink" onClick={() => flip(s.id)}>Show detail</button>)}
+              </div>
+              <ItemActions i={s} done={reload} />
+            </div>
+          ))}
+        </section>
+        </div>
+      {(today?.asks ?? []).length > 0 && (
+        <section className="nx-panel nx-in mt-5">
+          <div className="flex items-center justify-between px-5 pb-1 pt-4"><h3 className="text-[15px] font-semibold" title="You asked these. Claude answers in its next session and the answer appears on the project.">Your questions for Claude</h3><span className="text-[12.5px] text-mut">{today.asks.length}</span></div>
+          {today.asks.map((a: any) => (
+            <div key={a.id} className="nx-row" style={{ gridTemplateColumns: 'minmax(0,1fr) auto', cursor: 'default' }}>
+              <div className="min-w-0"><Link to={`/thread/${encodeURIComponent(a.thread)}?item=${a.id}`} className="block truncate text-[14px] font-medium hover:underline">{a.title}</Link><div className="truncate text-[12px] text-mut">{a.thread}{a.body ? ` · ${a.body}` : ''}</div></div>
+              <ItemActions i={{ ...a, state: 'open', type: 'question' }} done={reload} />
+            </div>
+          ))}
+        </section>
+      )}
+        <section className="nx-panel nx-in mt-5" style={{ ['--d' as any]: '300ms' }}>
+          <div className="flex items-center justify-between px-5 pb-1 pt-4"><h3 className="text-[15px] font-semibold">In development</h3><span className="text-[12.5px] text-mut">{moving.length} threads</span></div>
+          <div className="grid grid-cols-2 max-[1100px]:grid-cols-1">{moving.map((t) => {
+            const dd = details[t.name], act = dayCounts(dd, 14), mx = Math.max(1, ...act), c = STATE_HEX[t.state]
+            const tot = t.done_s + t.open_s, nx = nextStep(dd)
+            return (
+              <Link key={t.name} to={`/thread/${encodeURIComponent(t.name)}`} className="nx-row" style={{ gridTemplateColumns: '40px minmax(0,1fr) auto 46px' }}>
+                <span className="nx-glyph size-10 text-[15px] font-semibold" style={{ background: c + '1f', color: c }}>{t.name[0]}</span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-[14.5px] font-medium">{t.name}{t.open_q > 0 && <span className="nx-chip" style={{ background: '#fbbf2420', color: '#fbbf24' }}>{t.open_q} waiting</span>}</div>
+                  <div className="truncate text-[12.5px] text-mut">{nx ?? t.summary}</div>
+                </div>
+                <div className="flex items-end gap-[3px]" title="Sources in the last 14 days">
+                  {act.map((v, i) => <span key={i} className="nx-pill" style={{ height: 6 + (v / mx) * 16, background: v ? c : '#26262b', opacity: v ? 0.45 + 0.55 * (v / mx) : 1 }} />)}
+                </div>
+                <Ring value={tot ? t.done_s / tot : 0} color={c} size={42} stroke={4.5}><span className="text-[10.5px] font-semibold tabular-nums text-soft">{t.done_s}/{tot}</span></Ring>
+              </Link>
+            )
+          })}</div>
+        </section>
+      <details className="nx-in mt-6">
+        <summary className="cursor-pointer text-[13px] text-mut hover:text-ink">Overview</summary>
+      <div className="nx-in mb-4 mt-3 grid grid-cols-2 gap-3 text-[12.5px] text-soft max-[900px]:grid-cols-1">
         <div className="rounded-xl border border-line px-4 py-2.5"><span className="nx-chip mr-2" style={{ background: '#f4f4f51a', color: '#f4f4f5' }}>You</span>type todos, bugs and questions · answer Claude's questions · confirm built steps · accept or reject suggestions</div>
         <div className="rounded-xl border border-line px-4 py-2.5"><span className="nx-chip mr-2" style={{ background: '#60a5fa1f', color: '#60a5fa' }}>Claude</span>files suggestions from sessions · marks steps built with evidence · answers your questions · asks you when blocked</div>
       </div>
-
       <div className="grid grid-cols-4 gap-4 max-[1100px]:grid-cols-2">
         <Tile label="Waiting on you" icon={MessageCircleQuestion} d={0}>
           <div className="mt-2 flex items-center justify-between"><span className="nx-big">{waiting.length}</span>{byProject[0] && <span className="nx-delta">{byProject[0][0]} {byProject[0][1]}</span>}</div>
@@ -100,91 +214,8 @@ export default function Today() {
           <div className="mt-2.5 text-[12px] text-mut">{open} still open</div>
         </Tile>
       </div>
+      </details>
 
-      {q && (
-        <section className="nx-now nx-in mt-5" style={{ ['--g' as any]: glow + '38', ['--d' as any]: '240ms' }}>
-          <div className="relative flex items-start gap-4">
-            <span className="nx-glyph size-12" style={{ background: glow + '22', color: glow }}><MessageCircleQuestion size={22} /></span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 text-[13px] text-mut"><span className="nx-chip !h-[18px] !px-2 !text-[11px]" style={{ background: '#60a5fa1f', color: '#60a5fa' }}>Claude asks you</span><span className="size-2 rounded-full" style={{ background: glow }} />{q.thread}<span>·</span>{dayFmt(q.created)}</div>
-              <h3 className="mt-1 max-w-[30ch] text-[27px] font-semibold leading-[1.15] tracking-tight">{q.title}</h3>
-              {q.body && <p className="mt-2 max-w-[60ch] text-[14px] text-soft">{q.body}</p>}
-              <form onSubmit={submit} className="mt-5 flex max-w-[560px] gap-2.5">
-                <input className="nx-input" placeholder="Type your answer" value={ans} maxLength={320} onChange={(e) => setAns(e.target.value)} />
-                <button className="nx-btn" type="submit">Answer</button>
-              </form>
-            </div>
-            <div className="hidden shrink-0 text-right text-[12.5px] text-mut lg:block">{waiting.length - 1} more waiting</div>
-          </div>
-        </section>
-      )}
-
-      {(today?.asks ?? []).length > 0 && (
-        <section className="nx-panel nx-in mt-5">
-          <div className="flex items-center justify-between px-5 pb-1 pt-4"><h3 className="text-[15px] font-semibold">Your questions for Claude</h3><span className="text-[12.5px] text-mut">{today.asks.length}</span></div>
-          <p className="px-5 pb-2 text-[12.5px] text-mut">You asked these. Nothing to type here: Claude answers in its next session, and the answer appears on the project. Filed under the wrong project? Move it.</p>
-          {today.asks.map((a: any) => (
-            <div key={a.id} className="nx-row" style={{ gridTemplateColumns: 'minmax(0,1fr) auto', cursor: 'default' }}>
-              <div className="min-w-0"><Link to={`/thread/${encodeURIComponent(a.thread)}?item=${a.id}`} className="block truncate text-[14px] font-medium hover:underline">{a.title}</Link><div className="truncate text-[12px] text-mut">{a.thread}{a.body ? ` · ${a.body}` : ''}</div></div>
-              <ItemActions i={{ ...a, state: 'open', type: 'question' }} done={reload} />
-            </div>
-          ))}
-        </section>
-      )}
-
-      <div className="mt-5 grid grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] gap-4 max-[1100px]:grid-cols-1">
-        <section className="nx-panel nx-in" style={{ ['--d' as any]: '300ms' }}>
-          <div className="flex items-center justify-between px-5 pb-1 pt-4"><h3 className="text-[15px] font-semibold">Moving</h3><span className="text-[12.5px] text-mut">{moving.length} threads</span></div>
-          {moving.map((t) => {
-            const dd = details[t.name], act = dayCounts(dd, 14), mx = Math.max(1, ...act), c = STATE_HEX[t.state]
-            const tot = t.done_s + t.open_s, nx = nextStep(dd)
-            return (
-              <Link key={t.name} to={`/thread/${encodeURIComponent(t.name)}`} className="nx-row" style={{ gridTemplateColumns: '40px minmax(0,1fr) auto 46px' }}>
-                <span className="nx-glyph size-10 text-[15px] font-semibold" style={{ background: c + '1f', color: c }}>{t.name[0]}</span>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 text-[14.5px] font-medium">{t.name}{t.open_q > 0 && <span className="nx-chip" style={{ background: '#fbbf2420', color: '#fbbf24' }}>{t.open_q} waiting</span>}</div>
-                  <div className="truncate text-[12.5px] text-mut">{nx ?? t.summary}</div>
-                </div>
-                <div className="flex items-end gap-[3px]" title="Sources in the last 14 days">
-                  {act.map((v, i) => <span key={i} className="nx-pill" style={{ height: 6 + (v / mx) * 16, background: v ? c : '#26262b', opacity: v ? 0.45 + 0.55 * (v / mx) : 1 }} />)}
-                </div>
-                <Ring value={tot ? t.done_s / tot : 0} color={c} size={42} stroke={4.5}><span className="text-[10.5px] font-semibold tabular-nums text-soft">{t.done_s}/{tot}</span></Ring>
-              </Link>
-            )
-          })}
-        </section>
-
-        <section className="nx-panel nx-in" style={{ ['--d' as any]: '360ms' }}>
-          <div className="flex items-center justify-between px-5 pb-1 pt-4"><h3 className="text-[15px] font-semibold">Looks done</h3><span className="text-[12.5px] text-mut">{(today?.looks ?? []).length}</span></div>
-          <p className="px-5 pb-2 text-[12.5px] text-mut">Steps that look built. Open a title to see it in its project; Confirm closes it, Not yet sends it back to to-do.</p>
-          {(today?.looks ?? []).length === 0 && <div className="px-5 pb-4 text-[13px] text-mut">Nothing to confirm.</div>}
-          {(today?.looks ?? []).map((l: any) => (
-            <div key={l.id} className="nx-row" style={{ gridTemplateColumns: '32px minmax(0,1fr) auto', cursor: 'default' }}>
-              <span className="nx-glyph size-8" style={{ background: '#34d3991f', color: '#34d399' }}><CheckCheck size={16} /></span>
-              <div className="min-w-0">
-                <Link to={`/thread/${encodeURIComponent(l.thread)}?item=${l.id}`} className="block truncate text-[13.5px] font-medium hover:underline">{l.title}</Link>
-                <div className="truncate text-[12px] text-mut">{l.thread} · marked built by {whoActor(l)}</div>{l.answer && <div className="line-clamp-2 text-[12px]" style={{ color: '#34d399' }}>Evidence: {l.answer}</div>}
-              </div>
-              <div className="flex gap-2">
-                <button className="btn sm primary" type="button" onClick={async () => { const r = await post('/api/tick', { id: l.id }); if (r.ok) reload() }}>Confirm</button>
-                <button className="btn sm" type="button" onClick={async () => { const r = await post('/api/notyet', { id: l.id }); if (r.ok) reload() }}>Not yet</button>
-              </div>
-            </div>
-          ))}
-          <div className="flex items-center justify-between px-5 pb-1 pt-4"><h3 className="text-[15px] font-semibold">Suggested</h3><Link to="/items?state=proposed" className="text-[12.5px] text-mut hover:text-ink">See all {today?.suggested?.length ?? 0}</Link></div>
-          <p className="px-5 pb-2 text-[12.5px] text-mut">Filed by Claude from sessions. Open a title to see it in its project. Accept keeps it, Not valid now parks it, Reject drops it.</p>
-          {(today?.suggested ?? []).slice(0, 4).map((s: any) => (
-            <div key={s.id} className="nx-row" style={{ gridTemplateColumns: '32px minmax(0,1fr) auto', cursor: 'default' }}>
-              <span className="nx-glyph size-8" style={{ background: '#60a5fa1f', color: '#60a5fa' }}><Sparkles size={16} /></span>
-              <div className="min-w-0">
-                <Link to={`/thread/${encodeURIComponent(s.thread)}?item=${s.id}`} className="block truncate text-[13.5px] font-medium hover:underline">{s.title}</Link>
-                <div className="flex items-center gap-2 truncate text-[12px] text-mut"><Who i={s} />{s.type} · {s.thread}</div>{s.body && <div className="line-clamp-2 text-[12px] text-soft">{s.body}</div>}
-              </div>
-              <ItemActions i={s} done={reload} />
-            </div>
-          ))}
-        </section>
-      </div>
     </div>
   )
 }

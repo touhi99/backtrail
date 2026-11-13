@@ -2,80 +2,75 @@
 
 Local index and web app that organise work done with Claude Code into threads. Session logs, Markdown notes and
 artifact snapshots are read, never modified, and indexed into one SQLite file. Decisions, steps and questions are
-filed against threads, and each must cite an indexed source with a verbatim quote.
+filed against threads (one thread per project or topic), and each must cite an indexed source with a verbatim quote.
 
 Status: prototype. Tested on macOS only.
 
 ## How it works
 
-- `backtrail ingest` indexes Claude Code sessions (`~/.claude/projects/*/*.jsonl`), Markdown notes (folders in the
-  configuration and the Claude memory folder) and artifact snapshots, using SQLite FTS5.
-- Sources are assigned to threads by regular-expression rules in `config.json`. Unmatched sources stay in `Unsorted`.
-- Items (decision, step, question, turn) are filed with `add` or `import`. An item is rejected if its source is not
-  indexed, its quote is not found in that source, or its title (110 characters) or body (320) is too long.
-- Search is keyword ranking (BM25), merged with vector similarity when embeddings are configured.
-- A graph of entities and claims is built from filed decisions and thread relations (`kg import`, `kg migrate`). A claim
-  carries its quote, speaker and date; `kg find "<question>"` answers history questions from claims, then passages.
-- `backtrail serve` runs the app at `http://127.0.0.1:8799` (loopback only) and rescans every 5 minutes.
-- The binary never calls a model. Compiling sessions into proposed items is done by a Claude Code session following
-  `skill/SKILL.md`, or by `skill/compile.sh`. Suggested items stay `proposed` until accepted in the app.
+![Overview](docs/architecture-overview.svg)
+
+Items are rejected unless the cited source is indexed and the quote is found in it. Claude Code sessions or
+`skill/compile.sh` (see `skill/SKILL.md`) propose items; they stay `proposed` until accepted in the app.
+
+When a Claude Code session ends, a SessionEnd hook indexes the new text and embeds it:
+
+![Session end](docs/architecture-session-end.svg)
+
+Modules, data model and processes: `docs/architecture.md`.
 
 ## What it reads and sends
 
-- Reads: the session, note and memory paths above, and git history of repositories listed in the configuration.
-- Writes: `<data dir>/backtrail.db`, artifact snapshots, and daily backups in `BacktrailBackups`.
-- Network: none from the binary unless `embeddings` is configured, which sends passage and query text to the
-  configured URL. `compile.sh` runs the `claude` CLI, which sends session text to the model provider.
+- Reads: Claude Code sessions (`~/.claude/projects/*/*.jsonl`), Markdown notes (folders in the configuration and the
+  Claude Code memory folders), artifact snapshots, and git history of repositories listed in the configuration.
+- Writes: `<data dir>/backtrail.db`, artifact snapshots, and daily backups in `<data dir>/backups`.
+- Network: passage and query text go to a local Ollama server (`embeddings.url` in `config.json`); `"embeddings": false`
+  turns this off. `compile.sh` runs the `claude` CLI, which sends session text to the model provider.
 
 ## Screenshots
 
-Taken from the demo store (`backtrail demo`), which holds invented content.
+Taken from the demo store (`bt demo`), which holds invented content.
 
 | | |
 | --- | --- |
 | ![Today](docs/demo/today.png) | ![Graph](docs/demo/graph.png) |
-| ![Project](docs/demo/thread.png) | ![Graph with an entity selected](docs/demo/graph-selected.png) |
 
 ## Requirements
 
-- Rust toolchain (edition 2024) and Node.js
-- Optional: Ollama with an embedding model (for example `nomic-embed-text`) for meaning-based search
-- Optional: the `claude` CLI, for compiling sessions
+- Rust 1.85 or later, and Node.js
+- Optional: Ollama with the `nomic-embed-text` model, for meaning-based search (setup: `docs/reference.md`)
+- Optional: the `claude` CLI, used only by `skill/compile.sh`
 
 ## Install
 
 ```
-(cd app && npm install && npm run build)   # the build output is embedded into the binary
-cargo build --release
-./target/release/backtrail ingest
-./target/release/backtrail serve
+./install.sh
+bt serve
 ```
 
-Data directory: `~/Library/Application Support/Backtrail` (override with `BACKTRAIL_HOME`). On a new machine, create
-`<data dir>/config.json` with `workspace` and `note_dirs` first; without it every source lands in `Unsorted`.
-Not yet run on a second machine. Hooks and embeddings setup: `docs/reference.md`.
+- `install.sh` builds the app and the program and links it as `bt` in `~/.local/bin` (override with `BT_BIN_DIR`).
+- `bt serve` starts the app at `http://127.0.0.1:8799`.
+- After start, it reads the Claude Code sessions in `~/.claude/projects` and the memory notes next to them.
+- Each project folder becomes a thread. Thread rules and note folders can be added in an optional `config.json` (more
+  in `docs/reference.md`).
+- Data directory: `~/Library/Application Support/Backtrail` on macOS (override with `BACKTRAIL_HOME`).
 
 ## Usage
 
 | Command | Purpose |
 | --- | --- |
-| `ingest` | Read new or changed sources |
-| `serve [--port N]` | Run the app |
-| `brief [--thread T]` | Print open questions, threads in motion and stale items |
-| `search <words>` | Search with cited sources |
-| `add <type> --thread --title --source --quote` | File one item |
-| `import <items.json>` | File many items through the same rule |
-| `done <step id> --by owner\|claude\|evidence --proof "..."` | Close a step |
-| `check` | Report lost quotes, orphan threads, stale work |
-| `backup` | Copy the store to `BacktrailBackups` |
+| `bt serve [--port N]` | Run the app; it also rescans every 5 minutes |
+| `bt search <words>` | Search with cited sources |
+| `bt hooks install` | Add the SessionStart and SessionEnd hooks to `~/.claude/settings.json` (`remove` undoes it) |
+| `bt check` | Report lost quotes, orphan threads, stale work |
 
-All commands and the configuration keys are in `docs/reference.md`.
+All other commands (`ingest`, `brief`, `add`, `import`, `done`, `backup`, `kg`) and the configuration keys are in
+`docs/reference.md`.
 
 ## Limits
 
 - Vectors are compared by brute force in memory, which suits a few hundred thousand passages at most. Other parts that
-  do not scale unchanged are listed in `docs/reference.md`. Nothing has been measured beyond the present store.
+  do not scale unchanged are listed in `docs/reference.md`.
 - Ranking weights are set by hand and not tuned. `nomic-embed-text` is the only embedding model tried.
 - The quote rule proves a quote exists in the source, not that the title is a fair reading of it.
 - Claim extraction ran on a handful of sessions; its accuracy and the commit matcher have not been measured.
-- macOS paths are assumed.

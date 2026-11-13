@@ -118,7 +118,7 @@ pub fn coverage(c: &Connection) -> (i64, i64) {
 pub fn run(c: &Connection, limit: usize) -> Result<(usize, i64), String> {
     if !enabled() {
         return Err(
-            "embeddings are not configured (config.json: embeddings.url and embeddings.model)"
+            "embeddings are turned off in config.json (\"embeddings\": false)"
                 .into(),
         );
     }
