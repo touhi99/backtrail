@@ -10,9 +10,9 @@ export const useShell = () => useContext(ShellCtx)
 
 const NAV = [
   { to: '/', label: 'Today', icon: CalendarCheck, end: true },
+  { to: '/graph', label: 'Graph', icon: Share2, end: false },
 ]
 const MORE = [
-  { to: '/graph', label: 'Graph', icon: Share2 },
   { to: '/items', label: 'Items', icon: ListChecks },
   { to: '/log', label: 'Log', icon: ScrollText },
 ]
@@ -26,11 +26,9 @@ export default function Shell({ children }: { children: ReactNode }) {
   const title = ({ map: 'Map', graph: 'Graph', thread: 'Project', source: 'Source', search: 'Search', items: 'Items', log: 'Log' } as any)[loc.pathname.split('/')[1]] ?? 'Today'
   const live = (today?.threads ?? []).filter((t: any) => t.state === 'moving')
   const others = (today?.threads ?? []).filter((t: any) => t.state !== 'moving' && t.name !== 'Unsorted')
-  const [showOthers, setShowOthers] = useState(() => { try { return localStorage.getItem('bt-others2') === '1' } catch { return false } })
-  const toggleOthers = () => setShowOthers((v) => { try { localStorage.setItem('bt-others2', v ? '0' : '1') } catch {} return !v })
+  const [showOthers, setShowOthers] = useState(false)
+  const toggleOthers = () => setShowOthers((v) => !v)
   const waiting = today?.waiting?.length ?? 0
-  const onExplore = MORE.some((m) => loc.pathname.startsWith(m.to)) || loc.pathname.startsWith('/search')
-  const [showExplore, setShowExplore] = useState(false)
 
   return (
     <ShellCtx.Provider value={{ today, reload, capture: (thread) => setCap({ open: true, thread }) }}>
@@ -45,12 +43,6 @@ export default function Shell({ children }: { children: ReactNode }) {
               <Icon size={16} />{label}
               {to === '/' && waiting > 0 && <span className="ml-auto rounded-full bg-[#fbbf24]/15 px-2 text-[11.5px] font-semibold tabular-nums text-open">{waiting}</span>}
             </NavLink>
-          ))}
-          <button type="button" onClick={() => setShowExplore((v) => !v)} className="mt-1 flex items-center gap-1.5 px-2.5 py-1.5 text-left text-[12px] text-mut hover:text-ink" title="Graph, Items and Log are for looking things up; Search is in the top bar">
-            <ChevronRight size={12} className={`transition ${showExplore || onExplore ? 'rotate-90' : ''}`} />Explore
-          </button>
-          {(showExplore || onExplore) && MORE.map(({ to, label, icon: Icon }) => (
-            <NavLink key={to} to={to} className={({ isActive }) => `row-hover flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] ${isActive ? 'bg-[#1a1a1e] font-medium text-ink' : 'text-soft'}`}><Icon size={16} />{label}</NavLink>
           ))}
           <div className="mt-5 px-2.5 pb-1 text-[12px] text-mut" title="Projects whose state is In development. The yellow number is how many questions in it wait for your answer.">Projects</div>
           {live.map((t: any) => (
@@ -81,7 +73,12 @@ export default function Shell({ children }: { children: ReactNode }) {
               })}</div>}
             </>
           )}
-          <div className="mt-auto px-2.5 pt-4 text-[11.5px] text-mut">
+          <div className="mt-auto pt-4">
+            {MORE.map(({ to, label, icon: Icon }) => (
+              <NavLink key={to} to={to} className={({ isActive }) => `row-hover flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] ${isActive ? 'bg-white/[.07] font-medium text-ink' : 'text-soft'}`}><Icon size={15} />{label}</NavLink>
+            ))}
+          </div>
+          <div className="px-2.5 pt-3 text-[11.5px] text-mut">
             {today ? `${today.totals.sessions} sessions, ${today.totals.notes} notes, ${today.totals.artifacts} artifacts` : ''}
           </div>
         </aside>

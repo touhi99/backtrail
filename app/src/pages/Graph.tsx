@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Minus, Plus, Search as SearchIcon, X, Maximize2 } from 'lucide-react'
 import { dayFmt, post, useApi } from '@/lib/api'
-import Growth from '@/pages/Growth'
+import Trail from '@/pages/Trail'
 import More from '@/components/More'
 import Paged from '@/components/Paged'
 import '@/next.css'
@@ -222,14 +222,13 @@ function Network({ tabs }: { tabs: React.ReactNode }) {
 
 export default function Graph() {
   const [sp, setSp] = useSearchParams()
-  const { data: g } = useApi('/api/kg/graph') as { data: any }
-  const growth = sp.get('view') === 'growth'
+  const growth = sp.get('view') === 'trail'
   const tabs = (
     <div className="flex gap-1.5">
-      {([['', 'Network'], ['growth', 'Over time']] as const).map(([k, l]) => (
+      {([['', 'Network'], ['trail', 'Trail']] as const).map(([k, l]) => (
         <button key={k} type="button" onClick={() => { const n = new URLSearchParams(sp); k ? n.set('view', k) : n.delete('view'); setSp(n) }} className="rounded-full px-3 text-[12.5px] font-medium" style={{ height: 28, border: '1px solid var(--color-line2)', background: growth === !!k ? '#34d39926' : 'rgba(255,255,255,.04)', color: growth === !!k ? '#34d399' : 'var(--color-soft)' }}>{l}</button>
       ))}
     </div>
   )
-  return growth ? <Growth nodes={g?.nodes ?? []} tabs={tabs} /> : <Network tabs={tabs} />
+  return growth ? <Trail tabs={tabs} /> : <Network tabs={tabs} />
 }

@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { Bug, CheckCheck, CircleHelp, Copy, FileText, Layers, MessageCircleQuestion, Network, Plus, Scale, ScrollText, Sparkles } from 'lucide-react'
-import { agoFmt, dayFmt, post, STALE_LABEL, staleOf, useApi, whoActor } from '@/lib/api'
+import { Bug, CheckCheck, CircleHelp, Copy, FileText, MessageCircleQuestion, Network, Plus, Sparkles } from 'lucide-react'
+import { dayFmt, post, STALE_LABEL, staleOf, useApi } from '@/lib/api'
 import { useShell } from '@/components/Shell'
-import { Ring, Spark } from '@/components/Viz'
+import { buildStory, JourneyRail, Made, Milestones, Settled, StoryHero } from '@/components/Story'
 import ItemActions, { Who } from '@/components/ItemActions'
 import More from '@/components/More'
 import Paged from '@/components/Paged'
 import Fold from '@/components/Fold'
-import { dayCounts, STATE_HEX, STATE_NAME, STEP_STATUS } from '@/lib/next'
+import { STATE_HEX, STATE_NAME, STEP_STATUS } from '@/lib/next'
 import '@/next.css'
 
 const SRC_COLOR: Record<string, string> = { session: '#60a5fa', note: '#8b8b95', artifact: '#c084fc', commit: '#34d399', owner: '#f4f4f5' }
-const SRC_NAME: Record<string, string> = { session: 'Sessions', note: 'Notes', artifact: 'Artifacts', commit: 'Commits', owner: 'Typed here' }
 
 function Panel({ title, count, children, d = 0, className = '', id, hint }: { hint?: string; title: string; count?: number | string; children: React.ReactNode; d?: number; className?: string; id?: string }) {
   return (
@@ -25,40 +24,6 @@ function Panel({ title, count, children, d = 0, className = '', id, hint }: { hi
 const Empty = ({ children }: { children: React.ReactNode }) => <div className="px-5 pb-5 text-[13px] text-mut">{children}</div>
 const Src = ({ i }: { i: any }) => i.source_id ? <Link to={`/source/${i.source_id}${i.chunk_id ? `?c=${i.chunk_id}` : ''}`} className="mt-1 inline-flex items-center gap-1.5 text-[12px] text-mut hover:text-ink"><FileText size={12} />{i.source_title}</Link> : null
 
-/** Sources per day over the thread's life, stacked by kind. */
-function Journey({ d }: { d: any }) {
-  const { days, max } = useMemo(() => {
-    const m: Record<string, Record<string, number>> = {}
-    d.sources.forEach((x: any) => { const k = (x.first_ts || x.last_ts || '').slice(0, 10); if (k > '2000') { m[k] ||= {}; m[k][x.kind] = (m[k][x.kind] ?? 0) + 1 } })
-    const ks = Object.keys(m).sort()
-    if (!ks.length) return { days: [], max: 1 }
-    const out: { k: string; c: Record<string, number> }[] = []
-    for (let t = new Date(ks[0] + 'T12:00:00'); t <= new Date(ks[ks.length - 1] + 'T12:00:00'); t.setDate(t.getDate() + 1)) { const k = t.toISOString().slice(0, 10); out.push({ k, c: m[k] ?? {} }) }
-    return { days: out, max: Math.max(1, ...out.map((x) => Object.values(x.c).reduce((a, b) => a + b, 0))) }
-  }, [d])
-  if (!days.length) return <Empty>No sources yet.</Empty>
-  const kinds = Object.keys(SRC_COLOR).filter((k) => d.sources.some((x: any) => x.kind === k))
-  return (
-    <div className="px-5 pb-4">
-      <div className="flex h-[104px] items-end gap-[4px] pt-5">
-        {days.map((x) => {
-          const tot = Object.values(x.c).reduce((a, b) => a + b, 0)
-          return (
-            <div key={x.k} title={`${dayFmt(x.k)}: ${Object.entries(x.c).map(([k, v]) => `${v} ${SRC_NAME[k] ?? k}`).join(', ') || 'nothing'}`} className="relative flex min-w-[6px] max-w-[44px] flex-1 flex-col-reverse gap-px" style={{ height: `${Math.max(4, (tot / max) * 100)}%`, opacity: tot ? 1 : 0.35 }}>
-              {tot > 0 && <span className="absolute -top-4 left-0 right-0 text-center text-[11px] tabular-nums text-soft">{tot}</span>}{tot === 0 ? <span className="h-full rounded-[3px] bg-[#26262b]" /> : Object.entries(x.c).map(([k, v]) => <span key={k} className="rounded-[3px]" style={{ flex: v, background: SRC_COLOR[k] ?? '#8b8b95' }} />)}
-            </div>
-          )
-        })}
-      </div>
-      <div className="mt-2 flex items-center justify-between text-[12px] text-mut">
-        <span>{dayFmt(days[0].k)}</span>
-        <div className="flex gap-4">{kinds.map((k) => <span key={k} className="flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: SRC_COLOR[k] }} />{SRC_NAME[k]}</span>)}</div>
-        <span>{dayFmt(days[days.length - 1].k)}</span>
-      </div>
-    </div>
-  )
-}
-
 export default function Thread() {
   const { name = '' } = useParams()
   const { data: d, reload } = useApi(`/api/thread?name=${encodeURIComponent(name)}`)
@@ -69,23 +34,20 @@ export default function Thread() {
   useEffect(() => { if (focus && d?.items) setTimeout(() => document.getElementById(`item-${focus}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 150) }, [focus, d])
   const hl = (id: string) => (id === focus ? { boxShadow: 'inset 0 0 0 1.5px #34d399', background: 'rgba(52,211,153,.07)' } : {})
   useEffect(() => { const h = () => reload(); window.addEventListener('tm:changed', h); return () => window.removeEventListener('tm:changed', h) }, [reload])
-  if (!d?.thread) return <div className="p-8 text-mut">Loading</div>
+  const story = useMemo(() => (d?.thread ? buildStory(d) : null), [d])
+  if (!d?.thread || !story) return <div className="p-8 text-mut">Loading</div>
   const th = d.thread
   const c = STATE_HEX[th.state] ?? '#8b8b95'
   const live = d.items.filter((i: any) => !['proposed', 'rejected', 'parked'].includes(i.state))
   const by = (t: string) => live.filter((i: any) => i.type === t)
   const open = by('question').filter((i: any) => i.state === 'open' && i.origin !== 'owner')
   const asks = by('question').filter((i: any) => i.state === 'open' && i.origin === 'owner')
-  const answered = by('question').filter((i: any) => i.state !== 'open')
   const steps = by('step')
   const stepsDone = steps.filter((s: any) => s.state === 'done').length
   const prop = d.items.filter((i: any) => i.state === 'proposed')
   const rej = d.items.filter((i: any) => i.state === 'rejected' || i.state === 'parked')
   const act = async (url: string, body: any) => { await post(url, body); reload(); reloadShell() }
   const copy = (t: string) => navigator.clipboard?.writeText(t)
-  const spark = dayCounts(d, 30)
-  const last = d.sources.map((s: any) => s.last_ts).filter(Boolean).sort().pop()
-  const decisions = by('decision').filter((i: any) => !(i.stale ?? '').startsWith('superseded'))
 
   const openSteps = steps.filter((x: any) => x.state !== 'done'), doneSteps = steps.filter((x: any) => x.state === 'done')
   const stepRow = (s: any) => (
@@ -125,31 +87,9 @@ export default function Thread() {
         ))}
       </div>
 
-      <div className="mt-5 grid grid-cols-4 gap-4 max-[1100px]:grid-cols-2">
-        <div className="nx-tile nx-in" style={{ ['--d' as any]: '60ms' }}>
-          <div className="nx-label"><CheckCheck size={15} />Steps</div>
-          <div className="mt-2 flex items-center justify-between"><span className="nx-big">{stepsDone}<span className="text-[18px] font-medium text-mut"> / {steps.length}</span></span>
-            <Ring value={steps.length ? stepsDone / steps.length : 0} color={c} size={48} stroke={5} /></div>
-          <div className="mt-2 text-[12px] text-mut">{steps.length - stepsDone} still open</div>
-        </div>
-        <div className="nx-tile nx-in" style={{ ['--d' as any]: '120ms' }}>
-          <div className="nx-label"><MessageCircleQuestion size={15} />Claude asks you</div>
-          <div className="mt-2 flex items-center justify-between"><span className="nx-big" style={{ color: open.length ? '#fbbf24' : undefined }}>{open.length}</span></div>
-          <div className="mt-2 text-[12px] text-mut">{open.length ? 'Answer below' : 'Nothing is blocked'}</div>
-        </div>
-        <div className="nx-tile nx-in" style={{ ['--d' as any]: '180ms' }}>
-          <div className="nx-label"><ScrollText size={15} />Sources</div>
-          <div className="mt-2 flex items-center justify-between"><span className="nx-big">{d.sources.length}</span></div>
-          <div className="mt-1"><Spark data={spark} color={c} h={34} /></div>
-        </div>
-        <div className="nx-tile nx-in" style={{ ['--d' as any]: '240ms' }}>
-          <div className="nx-label"><Layers size={15} />Last activity</div>
-          <div className="mt-2"><span className="nx-big text-[26px]">{last ? agoFmt(last) : 'none'}</span></div>
-          <div className="mt-3 text-[12px] text-mut">{last ? dayFmt(last) : ''}</div>
-        </div>
-      </div>
-
-      <Panel title="Journey" d={280} className="mt-5" hint="One bar per day: how many sources (sessions, notes, artifacts, things typed here) touched this project that day."><Journey d={d} /></Panel>
+      <StoryHero s={story} state={th.state} color={c} />
+      <JourneyRail s={story} color={c} />
+      <Milestones s={story} color={c} />
 
       {asks.map((i: any) => (
         <section key={i.id} id={`item-${i.id}`} className="nx-panel nx-in mt-5 px-5 py-4" style={hl(i.id)}>
@@ -181,23 +121,19 @@ export default function Thread() {
       ))}
 
       <div className="mt-5 grid grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] gap-4 max-[1100px]:grid-cols-1">
-        <Panel title="Steps" count={`${openSteps.length} open`} d={360} id="steps">
+        <Panel title="Still open" count={`${openSteps.length} steps`} d={360} id="steps">
           {openSteps.length === 0 && <Empty>{steps.length ? 'All steps are done.' : 'No steps.'}</Empty>}
           <Paged resetKey={name} items={openSteps} size={8}>{(pageRows: any[]) => pageRows.map(stepRow)}</Paged>
           <Fold label="Done" count={doneSteps.length}><Paged resetKey={name} items={doneSteps} size={8}>{(pageRows: any[]) => pageRows.map(stepRow)}</Paged></Fold>
         </Panel>
 
-        <div className="flex min-w-0 flex-col gap-4">
-          <Panel title="Decisions" count={decisions.length + answered.length} d={400}>
-            {decisions.length + answered.length === 0 && <Empty>None kept.</Empty>}
-            <Paged resetKey={name} items={decisions} size={5}>{(pageRows: any[]) => pageRows.map((i: any) => <div key={i.id} id={`item-${i.id}`} className="nx-row" style={{ gridTemplateColumns: '32px minmax(0,1fr) auto', cursor: 'default', ...hl(i.id) }}><span className="nx-glyph size-8" style={{ background: '#c084fc1f', color: '#c084fc' }}><Scale size={15} /></span><div className="min-w-0"><div className="text-[14px] font-medium">{i.title}</div>{i.body && <More label="Detail" className="text-[12.5px] text-mut">{i.body}</More>}</div><ItemActions i={i} done={() => { reload(); reloadShell() }} /></div>)}</Paged>
-            {answered.map((i: any) => <div key={i.id} className="nx-row" style={{ gridTemplateColumns: '32px minmax(0,1fr)', cursor: 'default' }}><span className="nx-glyph size-8" style={{ background: '#34d3991f', color: '#34d399' }}><CircleHelp size={15} /></span><div className="min-w-0"><div className="text-[14px] font-medium">{i.title}</div><More label={i.origin === 'owner' ? "Claude's answer" : 'Your answer'} className="text-[12.5px]"><span style={{ color: '#34d399' }}>{i.answer}</span></More></div></div>)}
-          </Panel>
-          <Panel title="Sources" count={d.sources.length} d={440}>
-            <div><Paged resetKey={name} items={d.sources} size={8}>{(pageRows: any[]) => pageRows.map((s: any) => <Link key={s.id} to={`/source/${s.id}`} className="nx-row" style={{ gridTemplateColumns: '10px minmax(0,1fr) auto', padding: '10px 18px' }}><span className="size-2 rounded-full" style={{ background: SRC_COLOR[s.kind] }} /><span className="truncate text-[13.5px]">{s.title}</span><span className="text-[12px] text-mut">{dayFmt(s.last_ts)}</span></Link>)}</Paged></div>
-          </Panel>
-        </div>
+        <Panel title="Sources" count={d.sources.length} d={400}>
+          <div><Paged resetKey={name} items={d.sources} size={8}>{(pageRows: any[]) => pageRows.map((s: any) => <Link key={s.id} to={`/source/${s.id}`} className="nx-row" style={{ gridTemplateColumns: '10px minmax(0,1fr) auto', padding: '10px 18px' }}><span className="size-2 rounded-full" style={{ background: SRC_COLOR[s.kind] }} /><span className="truncate text-[13.5px]">{s.title}</span><span className="text-[12px] text-mut">{dayFmt(s.last_ts)}</span></Link>)}</Paged></div>
+        </Panel>
       </div>
+
+      <Settled s={story} done={() => { reload(); reloadShell() }} />
+      <Made s={story} />
 
       {prop.length > 0 && (
         <Panel title="Suggested by Claude" count={prop.length} d={480} className="mt-4" id="suggested" hint="Accept keeps it. Not valid now parks something that was true once. Reject drops it.">
