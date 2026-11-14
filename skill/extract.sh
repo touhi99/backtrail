@@ -48,7 +48,7 @@ out = []
 for i in items:
     if not isinstance(i, dict): continue
     out.append({"type": i.get("type"), "title": i.get("title") or i.get("text", ""), "body": i.get("body", ""), "source": ref,
-                "quote": i.get("quote", ""), "entities": i.get("entities", []), "kind": i.get("kind", "related to"),
+                "quote": i.get("quote", ""), "entities": i.get("entities", []), "kind": i.get("kind", ""),
                 "stated": i.get("stated", "inferred"), "state": "proposed", "origin": "suggested"})
 r = subprocess.run([tm, "import", "-"], input=json.dumps(out), capture_output=True, text=True)
 log(True, f"{cost} items={len(out)} {r.stdout.strip()}")

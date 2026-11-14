@@ -130,9 +130,9 @@ been measured beyond that size.
 
 ## Source layout
 
-Rust code is formatted with `cargo fmt`. Longer SQL statements are in `src/sql/*.sql` and loaded with `include_str!`; the
-first line of each file names the function that uses it. A few use `{where}`, `{limit}`, `{exclude}` or `{ids}` markers
-that the caller replaces. Short statements stay inline.
+Rust code is formatted with `cargo fmt`. Tables are defined in `src/sql/schema.sql` and read through the views in
+`src/sql/views.sql`; a page or command filters a view instead of repeating its joins. Statements stay inline next to
+the code that runs them. A change to existing tables is a migration in `src/migrate.rs`.
 
 ## Other limits
 

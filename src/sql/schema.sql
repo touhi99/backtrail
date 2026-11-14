@@ -1,4 +1,4 @@
--- db.rs: open
+-- Tables and indexes. Created on open when missing; changes to existing stores are migrations in db.rs.
 PRAGMA busy_timeout=8000;
 
 PRAGMA journal_mode=WAL;
@@ -16,7 +16,11 @@ CREATE TABLE IF NOT EXISTS sources(
   last_ts TEXT,
   mtime INTEGER,
   path TEXT,
-  nchunks INTEGER DEFAULT 0
+  nchunks INTEGER DEFAULT 0,
+  -- sessions only: how far the file has been read, a hash of the 256 bytes before that point, turns stored
+  bytes INTEGER NOT NULL DEFAULT 0,
+  tail TEXT,
+  nturns INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS chunks(
@@ -26,10 +30,19 @@ CREATE TABLE IF NOT EXISTS chunks(
   locator TEXT,
   role TEXT,
   ts TEXT,
-  text TEXT NOT NULL
+  text TEXT NOT NULL,
+  -- hash of the text; the key of its embedding in `vec`
+  hash TEXT
 );
 
 CREATE INDEX IF NOT EXISTS chunks_src ON chunks(source_id, seq);
+
+-- One embedding per distinct passage text.
+CREATE TABLE IF NOT EXISTS vec(
+  hash TEXT PRIMARY KEY,
+  model TEXT NOT NULL,
+  v BLOB NOT NULL
+);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(text, tokenize='porter unicode61');
 
@@ -59,6 +72,8 @@ CREATE TABLE IF NOT EXISTS claims(
   chunk_id INTEGER,
   quote TEXT,
   stated TEXT NOT NULL DEFAULT 'stated',
+  -- 'auto' when the keep rule kept the fact, 'held|<reason>' when it left it for review
+  review TEXT,
   created TEXT,
   updated TEXT,
   text TEXT GENERATED ALWAYS AS (title) VIRTUAL,
@@ -113,4 +128,39 @@ CREATE TABLE IF NOT EXISTS log(
   action TEXT,
   target TEXT,
   detail TEXT
+);
+
+CREATE INDEX IF NOT EXISTS log_target ON log(target);
+
+-- What a claim is about. Entities have aliases; a relation has a subject and an object.
+CREATE TABLE IF NOT EXISTS entities(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  kind TEXT,
+  created TEXT
+);
+
+CREATE TABLE IF NOT EXISTS entity_aliases(
+  alias TEXT PRIMARY KEY,
+  entity_id TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS entity_aliases_e ON entity_aliases(entity_id);
+
+CREATE TABLE IF NOT EXISTS claim_about(
+  claim_id TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'subject',
+  PRIMARY KEY(claim_id, entity_id, role)
+);
+
+CREATE INDEX IF NOT EXISTS claim_about_e ON claim_about(entity_id, claim_id);
+
+CREATE TABLE IF NOT EXISTS kg_overrides(
+  target TEXT NOT NULL,
+  field TEXT NOT NULL,
+  value TEXT,
+  by TEXT,
+  ts TEXT,
+  PRIMARY KEY(target, field)
 );

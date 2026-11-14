@@ -9,7 +9,7 @@ Types:
 - question: something only the user can decide that the session does not answer.
 - state: a fact about how something is or was at that time.
 - rationale: the reason the user gave for a choice.
-- relation: one project came from, was built on, replaced or was split from another. kind is one of "related to", "built on", "spun out of", "forked from", "replaced by". Read it as "first entity <kind> second entity".
+- relation: one project came from, was built on, replaced or was split from another. kind is one of "built on", "spun out of", "forked from", "replaced by". Read it as "first entity <kind> second entity".
 
 Rules:
 - entities are names from the ENTITIES list, spelled exactly as listed. state, rationale and relation need at least one; a relation needs exactly two. For decision, step and question, entities are optional.
