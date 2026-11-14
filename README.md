@@ -17,7 +17,8 @@ Status: prototype. Tested on macOS only.
 - A proposed decision, rationale or state claim is kept without review when its quote is a turn the owner typed and
   says it directly, unless an earlier fact of the same type on the same thread shares three or more content words with
   it. Everything else (steps, questions, relations, the assistant's words, possible repeats) waits for review in the app.
-  A fact kept this way can still be rejected there.
+  A decision kept this way can still be rejected on the Items and project pages; kept rationale and state claims have
+  no reject control in the app yet.
 - When a session ends, a hook indexes its new text. Session files are read from where the last read stopped, so stored
   passages keep their ids.
 
