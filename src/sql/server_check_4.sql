@@ -3,7 +3,7 @@ SELECT
   id,
   thread,
   title
-FROM nodes
-WHERE type!='thread'
+FROM claims
+WHERE type IN ('decision','step','question','turn')
   AND source_id IS NOT NULL
   AND chunk_id IS NULL

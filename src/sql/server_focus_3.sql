@@ -5,7 +5,7 @@ SELECT
   s.title,
   s.last_ts,
   s.nchunks,
-  (SELECT COUNT(*) FROM nodes n WHERE n.source_id=s.id) AS cited
+  (SELECT COUNT(*) FROM claims n WHERE n.source_id=s.id AND n.type IN ('decision','step','question','turn')) AS cited
 FROM sources s
 WHERE s.thread=?1
   AND s.kind IN ('note','artifact')

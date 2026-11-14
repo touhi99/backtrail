@@ -188,20 +188,13 @@ pub fn seed_threads(c: &Connection) {
     for (area, name, state, summary, _) in all.iter().chain(std::iter::once(&unsorted)) {
         c.execute(
             include_str!("sql/ingest_seed_threads.sql"),
-            params![
-                format!("t-{:x}", fxhash(name)),
-                name,
-                summary,
-                state,
-                area,
-                now
-            ],
+            params![name, summary, state, area, now],
         )
         .unwrap();
     }
     for t in &cfg().threads {
         if !t.5.is_empty() {
-            c.execute("UPDATE nodes SET kind=?2 WHERE type='thread' AND thread=?1 AND (kind IS NULL OR kind='')", params![t.1, t.5]).ok();
+            c.execute("UPDATE threads SET kind=?2 WHERE name=?1 AND (kind IS NULL OR kind='')", params![t.1, t.5]).ok();
         }
     }
 }
@@ -254,7 +247,28 @@ fn upsert_source(
     Some(c.last_insert_rowid())
 }
 
+/// Replace access tokens and private keys with a marker before text is stored. Pattern-based: it covers the common
+/// token formats below and misses secrets that have no fixed shape (passwords, custom tokens).
+fn redact(text: &str) -> std::borrow::Cow<'_, str> {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(concat!(
+            r"\bsk-[A-Za-z0-9_-]{20,}",
+            r"|\bgh[pousr]_[A-Za-z0-9]{36,}",
+            r"|\bgithub_pat_[A-Za-z0-9_]{22,}",
+            r"|\bAKIA[0-9A-Z]{16}\b",
+            r"|\bxox[abprs]-[A-Za-z0-9-]{10,}",
+            r"|\bAIza[0-9A-Za-z_-]{35}",
+            r"|\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
+            r"|-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+        ))
+        .unwrap()
+    })
+    .replace_all(text, "[redacted secret]")
+}
+
 fn add_chunk(c: &Connection, sid: i64, seq: i64, loc: &str, role: &str, ts: &str, text: &str) {
+    let text = &*redact(text);
     c.execute(
         "INSERT INTO chunks(source_id,seq,locator,role,ts,text) VALUES(?1,?2,?3,?4,?5,?6)",
         params![sid, seq, loc, role, ts, text],
@@ -276,9 +290,33 @@ fn finish(c: &Connection, sid: i64, first: &str, last: &str) {
     .unwrap();
 }
 
-fn cap(s: &str, n: usize) -> String {
-    s.chars().take(n).collect()
+/// Split one turn into chunks of at most `n` characters. The first chunk is exactly the first `n` characters, so
+/// quotes filed when turns were cut at `n` still match it; later cuts prefer a line break or a space.
+fn split_turn(s: &str, n: usize) -> Vec<String> {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= n {
+        return vec![s.to_string()];
+    }
+    let mut out = vec![chars[..n].iter().collect::<String>()];
+    let mut i = n;
+    while i < chars.len() {
+        let end = (i + n).min(chars.len());
+        let mut cut = end;
+        if end < chars.len() {
+            let lo = end.saturating_sub(300).max(i + 1);
+            cut = (lo..end)
+                .rev()
+                .find(|&k| chars[k] == '\n')
+                .or_else(|| (lo..end).rev().find(|&k| chars[k] == ' '))
+                .map_or(end, |k| k + 1);
+        }
+        out.push(chars[i..cut].iter().collect());
+        i = cut;
+    }
+    out
 }
+
+const TURN_CHUNK: usize = 2400;
 
 /// Claude Code names a project folder after its path with every non-alphanumeric character turned into "-".
 fn slug(p: &Path) -> String {
@@ -290,6 +328,108 @@ fn slug(p: &Path) -> String {
 
 fn home_dir() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_default())
+}
+
+/// The text of one session file from byte `from` to the end of its last complete line, and the byte offset after it.
+/// A last line without a newline counts only when it is valid JSON, so a line still being written is read next time.
+fn read_lines(p: &Path, from: u64) -> Option<(String, u64)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = fs::File::open(p).ok()?;
+    f.seek(SeekFrom::Start(from)).ok()?;
+    let mut buf = vec![];
+    f.read_to_end(&mut buf).ok()?;
+    let mut cut = buf.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    if cut < buf.len() && serde_json::from_slice::<Value>(&buf[cut..]).is_ok() {
+        cut = buf.len();
+    }
+    buf.truncate(cut);
+    Some((String::from_utf8_lossy(&buf).into_owned(), from + cut as u64))
+}
+
+/// A check of the 256 bytes before `at`: if they differ next time, the file was rewritten, not appended to.
+fn tail_of(p: &Path, at: u64) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    if at == 0 {
+        return None;
+    }
+    let start = at.saturating_sub(256);
+    let mut f = fs::File::open(p).ok()?;
+    f.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = vec![0; (at - start) as usize];
+    f.read_exact(&mut buf).ok()?;
+    Some(id64(&String::from_utf8_lossy(&buf)))
+}
+
+/// The AI title (empty when none) and the kept turns (role, timestamp, text) of session lines.
+fn parse_session(raw: &str) -> (String, Vec<(String, String, String)>) {
+    let mut title = String::new();
+    let mut turns = vec![];
+    for l in raw.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(l) else {
+            continue;
+        };
+        let t = v["type"].as_str().unwrap_or("");
+        let ts = v["timestamp"].as_str().unwrap_or("").to_string();
+        if t == "ai-title" {
+            title = v["aiTitle"].as_str().unwrap_or("").to_string();
+        } else if t == "user" || t == "assistant" {
+            if v["isMeta"].as_bool() == Some(true) {
+                continue;
+            }
+            let mut text = String::new();
+            match &v["message"]["content"] {
+                Value::String(s) => text = s.clone(),
+                Value::Array(a) => {
+                    for b in a {
+                        if b["type"] == "text" {
+                            text.push_str(b["text"].as_str().unwrap_or(""));
+                            text.push('\n');
+                        }
+                    }
+                }
+                _ => {}
+            }
+            let tt = text.trim();
+            if tt.len() < 15
+                || tt.starts_with("<local-command")
+                || tt.starts_with("<command-")
+                || tt.starts_with("<system-reminder")
+                || tt.starts_with("[SYSTEM")
+                || tt.starts_with("Caveat:")
+            {
+                continue;
+            }
+            // redacted here as well as in add_chunk, so a token cannot survive by straddling a chunk cut
+            turns.push((t.to_string(), ts, redact(tt).into_owned()));
+        }
+    }
+    (title, turns)
+}
+
+/// Store turns as passages, numbering passages from `seq0` and turns from `turn0`.
+fn add_turns(c: &Connection, sid: i64, seq0: i64, turn0: i64, turns: &[(String, String, String)]) {
+    let mut seq = seq0;
+    for (i, (role, ts, text)) in turns.iter().enumerate() {
+        for (k, part) in split_turn(text, TURN_CHUNK).iter().enumerate() {
+            let mut loc = format!("turn {} · {}", turn0 + i as i64 + 1, &ts.get(..16).unwrap_or(""));
+            if k > 0 {
+                loc.push_str(&format!(" · part {}", k + 1));
+            }
+            add_chunk(c, sid, seq, &loc, role, ts, part);
+            seq += 1;
+        }
+    }
+}
+
+/// Keep the turn count in an untitled session's display title current after new turns were added.
+fn untitled_count(c: &Connection, sid: i64, proj: &str) {
+    c.execute(
+        "UPDATE sources SET title='Untitled session ('||?2||' · '||(SELECT COUNT(*) FROM chunks
+           WHERE source_id=?1 AND role='user' AND locator NOT LIKE '% · part %')||' turns)'
+         WHERE id=?1 AND title LIKE 'Untitled session (%'",
+        params![sid, proj],
+    )
+    .ok();
 }
 
 pub fn ingest_sessions(c: &Connection) -> (usize, usize) {
@@ -313,15 +453,9 @@ pub fn ingest_sessions(c: &Connection) -> (usize, usize) {
             if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
                 continue;
             }
-            let id8: String = p
-                .file_stem()
-                .unwrap()
-                .to_string_lossy()
-                .chars()
-                .take(8)
-                .collect();
+            let stem = p.file_stem().unwrap().to_string_lossy().to_string();
             let size = f.metadata().map(|m| m.len()).unwrap_or(0);
-            let e = largest.entry(id8).or_insert((size, p.clone()));
+            let e = largest.entry(stem).or_insert((size, p.clone()));
             if size > e.0 {
                 *e = (size, p.clone());
             }
@@ -352,82 +486,89 @@ pub fn ingest_sessions(c: &Connection) -> (usize, usize) {
             if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
                 continue;
             }
-            let id8: String = p
-                .file_stem()
-                .unwrap()
-                .to_string_lossy()
-                .chars()
-                .take(8)
-                .collect();
-            if largest.get(&id8).is_some_and(|(_, best)| *best != p) {
+            let stem = p.file_stem().unwrap().to_string_lossy().to_string();
+            if largest.get(&stem).is_some_and(|(_, best)| *best != p) {
                 continue;
             }
-            let r = format!("session:{}", id8);
+            let r = format!("session:{stem}");
+            let path_s = p.to_string_lossy().to_string();
             let mt = mtime(&p);
-            let known: Option<i64> = c
-                .query_row("SELECT mtime FROM sources WHERE ref=?1", params![r], |x| {
-                    x.get(0)
-                })
+            // (id, mtime, bytes read, check of the bytes before that point, path, turns stored)
+            let prev: Option<(i64, i64, i64, Option<String>, String, i64)> = c
+                .query_row(
+                    "SELECT id, mtime, bytes, tail, ifnull(path,''), nturns FROM sources WHERE ref=?1",
+                    params![r],
+                    |x| Ok((x.get(0)?, x.get(1)?, x.get(2)?, x.get(3)?, x.get(4)?, x.get(5)?)),
+                )
+                .ok();
+            let known: Option<i64> = prev.as_ref().map(|x| x.1).or_else(|| {
+                c.query_row(
+                    "SELECT mtime FROM scanned WHERE path=?1",
+                    params![path_s],
+                    |x| x.get(0),
+                )
                 .ok()
-                .or_else(|| {
-                    c.query_row(
-                        "SELECT mtime FROM scanned WHERE path=?1",
-                        params![p.to_string_lossy()],
-                        |x| x.get(0),
-                    )
-                    .ok()
-                });
-            if known == Some(mt) {
+            });
+            // mtime has whole-second resolution, so a line written in the same second as the last scan leaves it
+            // unchanged; a file longer than the bytes read so far is read again from there.
+            let size = f.metadata().map(|m| m.len() as i64).unwrap_or(0);
+            let grown = prev.as_ref().is_some_and(|x| x.2 > 0 && size > x.2);
+            if known == Some(mt) && !grown {
                 skipped += 1;
                 continue;
             }
-            let Ok(raw) = fs::read_to_string(&p) else {
+            // Claude Code appends to a session file. When the bytes read last time are unchanged, only the new lines
+            // are read and their passages added, so stored passages keep their ids. A file that shrank, moved or
+            // changed before that point is read again in full.
+            let append = prev.as_ref().filter(|x| {
+                x.2 > 0 && x.4 == path_s && x.3.is_some() && tail_of(&p, x.2 as u64) == x.3
+            });
+            let from = append.map_or(0, |x| x.2 as u64);
+            let Some((raw, upto)) = read_lines(&p, from) else {
                 continue;
             };
-            let mut title = String::new();
-            let mut turns: Vec<(String, String, String)> = vec![];
-            for l in raw.lines() {
-                let Ok(v) = serde_json::from_str::<Value>(l) else {
-                    continue;
-                };
-                let t = v["type"].as_str().unwrap_or("");
-                let ts = v["timestamp"].as_str().unwrap_or("").to_string();
-                if t == "ai-title" {
-                    title = v["aiTitle"].as_str().unwrap_or("").to_string();
-                } else if t == "user" || t == "assistant" {
-                    if v["isMeta"].as_bool() == Some(true) {
-                        continue;
-                    }
-                    let mut text = String::new();
-                    match &v["message"]["content"] {
-                        Value::String(s) => text = s.clone(),
-                        Value::Array(a) => {
-                            for b in a {
-                                if b["type"] == "text" {
-                                    text.push_str(b["text"].as_str().unwrap_or(""));
-                                    text.push('\n');
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                    let tt = text.trim();
-                    if tt.len() < 15
-                        || tt.starts_with("<local-command")
-                        || tt.starts_with("<command-")
-                        || tt.starts_with("<system-reminder")
-                        || tt.starts_with("[SYSTEM")
-                        || tt.starts_with("Caveat:")
-                    {
-                        continue;
-                    }
-                    turns.push((t.to_string(), ts, cap(tt, 2400)));
+            let (title, turns) = parse_session(&raw);
+            let tail = tail_of(&p, upto);
+            if let Some(&(sid, _, _, _, _, nturns)) = append {
+                if !title.is_empty() {
+                    c.execute("UPDATE sources SET title=?2 WHERE id=?1", params![sid, title])
+                        .unwrap();
                 }
+                if !turns.is_empty() {
+                    let seq0: i64 = c
+                        .query_row(
+                            "SELECT ifnull(max(seq)+1,0) FROM chunks WHERE source_id=?1",
+                            params![sid],
+                            |x| x.get(0),
+                        )
+                        .unwrap_or(0);
+                    add_turns(c, sid, seq0, nturns, &turns);
+                    let first: String = c
+                        .query_row(
+                            "SELECT ifnull(first_ts,'') FROM sources WHERE id=?1",
+                            params![sid],
+                            |x| x.get(0),
+                        )
+                        .unwrap_or_default();
+                    finish(c, sid, &first, &turns.last().unwrap().1);
+                    if title.is_empty() {
+                        untitled_count(c, sid, &proj);
+                    }
+                    n += 1;
+                } else {
+                    skipped += 1;
+                }
+                c.execute(
+                    "UPDATE sources SET mtime=?2, bytes=?3, tail=?4, nturns=nturns+?5 WHERE id=?1",
+                    params![sid, mt, upto as i64, tail, turns.len() as i64],
+                )
+                .unwrap();
+                continue;
             }
             if turns.is_empty() {
                 c.execute(
                     "INSERT OR REPLACE INTO scanned(path,mtime) VALUES(?1,?2)",
-                    params![p.to_string_lossy(), mt],
+                    params![path_s, mt],
                 )
                 .unwrap();
                 continue;
@@ -440,26 +581,18 @@ pub fn ingest_sessions(c: &Connection) -> (usize, usize) {
             } else {
                 title.clone()
             };
-            let Some(sid) = upsert_source(
-                c,
-                &r,
-                "session",
-                &disp,
-                &proj,
-                thread,
-                &p.to_string_lossy(),
-                mt,
-            ) else {
+            let Some(sid) = upsert_source(c, &r, "session", &disp, &proj, thread, &path_s, mt)
+            else {
                 skipped += 1;
                 continue;
             };
-            let first = turns[0].1.clone();
-            let last = turns.last().unwrap().1.clone();
-            for (i, (role, ts, text)) in turns.iter().enumerate() {
-                let loc = format!("turn {} · {}", i + 1, &ts.get(..16).unwrap_or(""));
-                add_chunk(c, sid, i as i64, &loc, role, ts, text);
-            }
-            finish(c, sid, &first, &last);
+            add_turns(c, sid, 0, 0, &turns);
+            finish(c, sid, &turns[0].1, &turns.last().unwrap().1);
+            c.execute(
+                "UPDATE sources SET bytes=?2, tail=?3, nturns=?4 WHERE id=?1",
+                params![sid, upto as i64, tail, turns.len() as i64],
+            )
+            .unwrap();
             n += 1;
         }
     }
@@ -744,89 +877,89 @@ pub fn ingest_artifacts(c: &Connection) -> (usize, usize) {
     (n, skipped)
 }
 
-/// After a source is re-read its chunk ids change; point each item back at the chunk that still holds its quote.
+/// Session files on disk that the store has never indexed, with the age of each file in days. Claude Code removes old
+/// transcripts (30 days by default), so a session that stays unindexed that long is lost.
+pub fn unindexed_sessions(c: &Connection) -> Vec<(String, u64)> {
+    let root = home_dir().join(".claude/projects");
+    let mut out = vec![];
+    for d in fs::read_dir(&root).into_iter().flatten().flatten() {
+        let dn = d.file_name().to_string_lossy().to_string();
+        if dn.contains("private-tmp") || dn.contains("private-var") {
+            continue;
+        }
+        for f in fs::read_dir(d.path()).into_iter().flatten().flatten() {
+            let p = f.path();
+            if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let id: String = p.file_stem().unwrap().to_string_lossy().to_string();
+            let known: i64 = c
+                .query_row(
+                    "SELECT (SELECT COUNT(*) FROM sources WHERE ref=?1) + (SELECT COUNT(*) FROM scanned WHERE path=?2)",
+                    params![format!("session:{id}"), p.to_string_lossy()],
+                    |r| r.get(0),
+                )
+                .unwrap_or(1);
+            if known == 0 {
+                let age = f
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .map_or(0, |e| e.as_secs() / 86400);
+                out.push((format!("session:{id}"), age));
+            }
+        }
+    }
+    out.sort_by(|a, b| b.1.cmp(&a.1));
+    out
+}
+
+/// A note, artifact or session read again in full gets new passage ids. Point each fact whose passage no longer holds
+/// its quote back at the passage that does; facts whose passage still holds the quote are left alone. Returns (facts
+/// traced to their quote, facts whose quote is no longer in the source).
 pub fn relink(c: &Connection) -> (usize, usize) {
-    let items: Vec<(String, i64, String)> = {
-        let mut st = c.prepare("SELECT id, source_id, quote FROM nodes WHERE source_id IS NOT NULL AND quote IS NOT NULL").unwrap();
-        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+    let items: Vec<(String, i64, String, Option<i64>, Option<String>)> = {
+        let mut st = c
+            .prepare(
+                "SELECT cl.id, cl.source_id, cl.quote, cl.chunk_id, k.text FROM claims cl
+                 LEFT JOIN chunks k ON k.id=cl.chunk_id AND k.source_id=cl.source_id
+                 WHERE cl.source_id IS NOT NULL AND cl.quote IS NOT NULL",
+            )
+            .unwrap();
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
             .unwrap()
             .flatten()
             .collect()
     };
     let (mut ok, mut lost) = (0, 0);
-    for (id, sid, quote) in items {
+    for (id, sid, quote, chunk, text) in items {
         let q = norm(&quote);
-        let mut st = c
+        if text.is_some_and(|t| norm(&t).contains(&q)) {
+            ok += 1;
+            continue;
+        }
+        let found = c
             .prepare("SELECT id, text FROM chunks WHERE source_id=?1 ORDER BY seq")
-            .unwrap();
-        let found = st
+            .unwrap()
             .query_map(params![sid], |r| {
                 Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
             })
             .unwrap()
             .flatten()
-            .find(|(_, t)| norm(t).contains(&q));
-        match found {
-            Some((cid, _)) => {
-                c.execute("UPDATE nodes SET chunk_id=?2 WHERE id=?1", params![id, cid])
-                    .unwrap();
-                ok += 1;
-            }
-            None => {
-                c.execute("UPDATE nodes SET chunk_id=NULL WHERE id=?1", params![id])
-                    .unwrap();
-                lost += 1;
-            }
+            .find(|(_, t)| norm(t).contains(&q))
+            .map(|x| x.0);
+        if found.is_some() {
+            ok += 1;
+        } else {
+            lost += 1;
         }
-    }
-    relink_claims(c);
-    (ok, lost)
-}
-
-/// Claim evidence is located by source and quote, so it follows a re-read source the same way items do.
-fn relink_claims(c: &Connection) {
-    let rows: Vec<(String, i64, i64, String)> = {
-        let mut st = c
-            .prepare(
-                "SELECT v.claim_id, v.source_id, v.chunk_id, v.quote FROM claim_evidence v
-                 LEFT JOIN chunks k ON k.id=v.chunk_id WHERE k.id IS NULL",
-            )
-            .unwrap();
-        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
-            .unwrap()
-            .flatten()
-            .collect()
-    };
-    let mut by_source: std::collections::HashMap<i64, Vec<(i64, String)>> = Default::default();
-    for (claim, sid, old, quote) in rows {
-        let chunks = by_source.entry(sid).or_insert_with(|| {
-            let mut st = c
-                .prepare("SELECT id, text FROM chunks WHERE source_id=?1 ORDER BY seq")
+        if found != chunk {
+            c.execute("UPDATE claims SET chunk_id=?2 WHERE id=?1", params![id, found])
                 .unwrap();
-            st.query_map(params![sid], |r| {
-                Ok((r.get::<_, i64>(0)?, norm(&r.get::<_, String>(1)?)))
-            })
-            .unwrap()
-            .flatten()
-            .collect()
-        });
-        let q = norm(&quote);
-        if let Some((cid, _)) = chunks.iter().find(|(_, t)| t.contains(&q)) {
-            c.execute(
-                "UPDATE OR IGNORE claim_evidence SET chunk_id=?3 WHERE claim_id=?1 AND chunk_id=?2 AND quote=?4",
-                params![claim, old, cid, quote],
-            )
-            .unwrap();
         }
     }
-    // A stale row is dropped when the same quote already has a row on a chunk that exists.
-    c.execute(
-        "DELETE FROM claim_evidence WHERE chunk_id NOT IN (SELECT id FROM chunks) AND EXISTS (
-           SELECT 1 FROM claim_evidence o WHERE o.claim_id=claim_evidence.claim_id AND o.quote=claim_evidence.quote
-             AND o.chunk_id IN (SELECT id FROM chunks))",
-        [],
-    )
-    .unwrap();
+    (ok, lost)
 }
 
 /// Thread for a session: the title decides first; the project folder is the fallback.
@@ -900,7 +1033,6 @@ pub fn rethread(c: &Connection) {
             c.execute(
                 include_str!("sql/ingest_seed_threads.sql"),
                 params![
-                    format!("t-{:x}", fxhash(&t)),
                     t,
                     "Sessions from this project folder.",
                     "open",

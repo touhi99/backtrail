@@ -18,13 +18,12 @@ SELECT
       ORDER BY x.role='object'
     )
   ) AS path,
-  v.quote,
-  v.stated,
-  v.source_id,
+  c.quote,
+  c.stated,
+  c.source_id,
   s.title AS source_title
 FROM claims c
-JOIN claim_evidence v ON v.claim_id=c.id AND v.rowid=(SELECT MIN(rowid) FROM claim_evidence WHERE claim_id=c.id)
-LEFT JOIN sources s ON s.id=v.source_id
+LEFT JOIN sources s ON s.id=c.source_id
 WHERE c.type LIKE 'relation:%'
   AND c.status!='retracted'
 ORDER BY c.asserted_at ASC

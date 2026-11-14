@@ -5,6 +5,6 @@ SELECT
   type,
   title,
   state
-FROM nodes
-WHERE type!='thread'
+FROM claims
+WHERE type IN ('decision','step','question','turn')
   AND state NOT IN ('rejected','proposed')

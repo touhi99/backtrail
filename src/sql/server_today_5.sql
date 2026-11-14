@@ -1,6 +1,6 @@
 -- server.rs: today
 SELECT
-  t.thread AS name,
+  t.name AS name,
   t.area,
   t.state,
   t.kind,
@@ -9,15 +9,15 @@ SELECT
     SELECT
       MIN(first_ts)
     FROM sources s
-    WHERE s.thread=t.thread
+    WHERE s.thread=t.name
       AND s.first_ts>'2000'
   ) AS first,
-  (SELECT COUNT(*) FROM sources s WHERE s.thread=t.thread) AS sources,
+  (SELECT COUNT(*) FROM sources s WHERE s.thread=t.name) AS sources,
   (
     SELECT
       COUNT(*)
-    FROM nodes q
-    WHERE q.thread=t.thread
+    FROM claims q
+    WHERE q.thread=t.name
       AND q.type='question'
       AND q.state='open'
       AND q.origin!='owner'
@@ -25,20 +25,19 @@ SELECT
   (
     SELECT
       COUNT(*)
-    FROM nodes q
-    WHERE q.thread=t.thread
+    FROM claims q
+    WHERE q.thread=t.name
       AND q.type='step'
       AND q.state IN ('open','doing')
   ) AS open_s,
   (
     SELECT
       COUNT(*)
-    FROM nodes q
-    WHERE q.thread=t.thread
+    FROM claims q
+    WHERE q.thread=t.name
       AND q.type='step'
       AND q.state='done'
   ) AS done_s,
-  (SELECT MAX(last_ts) FROM sources s WHERE s.thread=t.thread) AS last
-FROM nodes t
-WHERE t.type='thread'
+  (SELECT MAX(last_ts) FROM sources s WHERE s.thread=t.name) AS last
+FROM threads t
 ORDER BY last DESC

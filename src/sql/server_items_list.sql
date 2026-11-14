@@ -10,6 +10,7 @@ SELECT
   n.answer,
   n.origin,
   n.stale,
+  n.review,
   (
     SELECT
       l.actor
@@ -22,10 +23,10 @@ SELECT
   s.title AS source_title,
   s.id AS source_id,
   n.chunk_id
-FROM nodes n
+FROM claims n
 LEFT JOIN sources s ON s.id=n.source_id
-JOIN nodes t ON t.type='thread' AND t.thread=n.thread
-WHERE n.type!='thread'
+JOIN threads t ON t.name=n.thread
+WHERE n.type IN ('decision','step','question','turn')
   AND n.type LIKE ?1
   AND n.state LIKE ?2
   AND n.thread LIKE ?3

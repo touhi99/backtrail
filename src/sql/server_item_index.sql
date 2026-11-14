@@ -6,5 +6,5 @@ FROM temp.nfts;
 
 INSERT INTO temp.nfts(rowid, title, body) SELECT
   rowid, title, IFNULL(body,'')
-FROM nodes
-WHERE type!='thread';
+FROM claims
+WHERE type IN ('decision','step','question','turn');

@@ -14,5 +14,6 @@ SELECT
     ORDER BY l.id DESC
     LIMIT 1
   ) AS by_actor
-FROM nodes n
+FROM claims n
 WHERE n.state='looks_done'
+  AND n.type='step'

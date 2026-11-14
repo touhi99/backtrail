@@ -285,7 +285,7 @@ fn source(c: &Connection, id: i64) -> Value {
     );
     let items = rows(
         c,
-        "SELECT id, type, title, thread, chunk_id FROM nodes WHERE source_id=?1",
+        "SELECT id, type, title, thread, chunk_id FROM claims WHERE source_id=?1 AND type IN ('decision','step','question','turn')",
         &[&id],
     );
     json!({"source": s.get(0), "chunks": ch, "items": items})
@@ -342,10 +342,10 @@ fn dead(state: &str, stale: &str) -> bool {
     state == "rejected" || stale.starts_with("superseded")
 }
 
-/// Item index over title and body, rebuilt in a per-connection temp table when the nodes change.
+/// Item index over title and body, rebuilt in a per-connection temp table when the claims change.
 fn item_index(c: &Connection) {
     static SIG: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
-    let sig: String = c.query_row("SELECT COUNT(*)||'-'||IFNULL(MAX(updated),'')||'-'||IFNULL(MAX(created),'') FROM nodes", [], |r| r.get(0)).unwrap_or_default();
+    let sig: String = c.query_row("SELECT COUNT(*)||'-'||IFNULL(MAX(updated),'')||'-'||IFNULL(MAX(created),'') FROM claims", [], |r| r.get(0)).unwrap_or_default();
     let have = c
         .query_row(
             "SELECT COUNT(*) FROM sqlite_temp_master WHERE name='nfts'",
@@ -365,9 +365,9 @@ fn item_index(c: &Connection) {
 
 const PASSAGE_SELECT: &str = include_str!("sql/server_item_index_2.sql");
 const PASSAGE_FILTER: &str = "(?2='' OR s.thread=?2) AND (?3='' OR s.kind=?3) AND (?4='' OR substr(s.last_ts,1,10)>=?4) AND (?5='' OR substr(s.last_ts,1,10)<=?5)
-    AND (?6='' OR EXISTS(SELECT 1 FROM nodes n WHERE n.source_id=s.id AND n.type!='thread' AND n.state=?6))";
+    AND (?6='' OR EXISTS(SELECT 1 FROM claims n WHERE n.source_id=s.id AND n.type IN ('decision','step','question','turn') AND n.state=?6))";
 
-fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
+pub fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
     let fq = fts_query(q);
     let (cov_have, cov_all) = crate::embed::coverage(c);
     let mut res = json!({"results": [], "items": [], "mode": "text", "note": "", "embedded": cov_have, "passages": cov_all});
@@ -449,7 +449,7 @@ fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
     // 2. graph context: thread state and the filed items that cite each passage or its source
     let tstate: std::collections::HashMap<String, String> = rows(
         c,
-        "SELECT thread, state FROM nodes WHERE type='thread'",
+        "SELECT name AS thread, state FROM threads",
         &[],
     )
     .into_iter()
@@ -474,7 +474,7 @@ fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
         rows(
             c,
             &format!(
-                "SELECT id, type, title, state, IFNULL(stale,'') AS stale, source_id, chunk_id FROM nodes WHERE type!='thread' AND source_id IN ({sids})"
+                "SELECT id, type, title, state, IFNULL(stale,'') AS stale, source_id, chunk_id FROM claims WHERE type IN ('decision','step','question','turn') AND source_id IN ({sids})"
             ),
             &[],
         )
@@ -558,7 +558,7 @@ fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
     res
 }
 
-/// Daily copy of the store (answers, ticks and accepts exist nowhere else). Keeps 14, in `<data dir>/backups`.
+/// Daily copy of the store (answers, ticks and accepts exist nowhere else). Keeps the newest 3, in `<data dir>/backups`.
 pub fn backup(c: &Connection) -> Option<String> {
     let dir = home().join("backups");
     // Older versions wrote to a `BacktrailBackups` folder next to the data folder; move it once.
@@ -575,6 +575,7 @@ pub fn backup(c: &Connection) -> Option<String> {
     }
     c.execute("VACUUM INTO ?1", params![path.to_string_lossy()])
         .ok()?;
+    private(&path, 0o600);
     let mut all: Vec<_> = std::fs::read_dir(&dir)
         .ok()?
         .flatten()
@@ -582,7 +583,7 @@ pub fn backup(c: &Connection) -> Option<String> {
         .filter(|p| p.extension().map_or(false, |x| x == "db"))
         .collect();
     all.sort();
-    while all.len() > 14 {
+    while all.len() > 3 {
         std::fs::remove_file(all.remove(0)).ok();
     }
     logw(c, "backup", "backup", &name, "");
@@ -599,8 +600,6 @@ pub fn rescan(c: &Connection) {
     crate::ingest::rethread(c);
     crate::ingest::relink(c);
     match_inner(c, false);
-    crate::kg::import_decisions(c);
-    crate::kg::migrate_links(c);
     if !home().join(".demo").exists() {
         backup(c);
     }
@@ -651,7 +650,15 @@ pub fn pairs(c: &Connection) {
 /// Health report: items whose quote left their source, and open work that has gone quiet.
 pub fn check(c: &Connection) {
     let (ok, lost) = crate::ingest::relink(c);
-    println!("items traced to their quote: {ok}; quote no longer in source: {lost}");
+    println!("claims traced to their quote: {ok}; quote no longer in source: {lost}");
+    let pending = crate::ingest::unindexed_sessions(c);
+    if !pending.is_empty() {
+        println!(
+            "session files not indexed yet: {} (oldest {} days; Claude Code removes transcripts after 30 days by default). Run `bt ingest`.",
+            pending.len(),
+            pending[0].1
+        );
+    }
     for r in rows(c, include_str!("sql/server_check_4.sql"), &[]) {
         println!(
             "  lost: [{}] {} ({})",
@@ -701,7 +708,7 @@ pub fn check(c: &Connection) {
     }
     let ld = rows(
         c,
-        "SELECT COUNT(*) AS n FROM nodes WHERE state='looks_done'",
+        "SELECT COUNT(*) AS n FROM claims WHERE state='looks_done'",
         &[],
     );
     println!(
@@ -735,6 +742,7 @@ pub fn pending(c: &Connection, days: i64) {
 }
 
 pub fn show(c: &Connection, r: &str) {
+    let r = resolve_ref(c, r);
     for ch in rows(c, include_str!("sql/server_show.sql"), &[&r]) {
         println!(
             "[{} · {}] {}\n",
@@ -1060,8 +1068,6 @@ pub fn demo(c: &Connection) {
             eprintln!("demo relation rejected: {e}");
         }
     }
-    crate::kg::import_decisions(c);
-    crate::kg::migrate_links(c);
     println!(
         "demo store written to {}; run BACKTRAIL_HOME={} backtrail serve --port 8800",
         h.display(),
@@ -1069,7 +1075,7 @@ pub fn demo(c: &Connection) {
     );
 }
 
-const STOP: &[&str] = &[
+pub const STOP: &[&str] = &[
     "about", "after", "before", "their", "there", "which", "would", "first", "later", "again",
     "build", "built", "write", "files", "check", "start",
 ];
@@ -1082,7 +1088,7 @@ pub fn match_evidence(c: &Connection) {
 fn match_inner(c: &Connection, say: bool) {
     let steps = rows(
         c,
-        "SELECT n.id, n.title, n.thread, n.created FROM nodes n WHERE n.type='step' AND n.state='open'",
+        "SELECT n.id, n.title, n.thread, n.created FROM claims n WHERE n.type='step' AND n.state='open'",
         &[],
     );
     let (mut hit, mut seen) = (0, 0);
@@ -1134,7 +1140,7 @@ fn match_inner(c: &Connection, say: bool) {
             }
             let t = cm["text"].as_str().unwrap_or("").to_lowercase();
             if phrases.iter().any(|p| t.contains(p.as_str())) {
-                c.execute("UPDATE nodes SET state='looks_done', done_by='evidence?', answer=?2, updated=?3 WHERE id=?1", params![id, cm["text"].as_str().unwrap_or(""), chrono_now()]).unwrap();
+                c.execute("UPDATE claims SET state='looks_done', done_by='evidence?', answer=?2, updated=?3 WHERE id=?1", params![id, cm["text"].as_str().unwrap_or(""), chrono_now()]).unwrap();
                 logw(
                     c,
                     "check",
@@ -1402,12 +1408,12 @@ fn graph(c: &Connection) -> Value {
             );
         }
     }
-    // thread lineage is drawn from relation claims; links that carry no evidence, and item links, are read from `links`
+    // thread lineage is drawn from relation claims; a replaced item points at the item that replaced it
     for l in rows(c, include_str!("sql/server_graph_3.sql"), &[]) {
         edges.push(json!({"a": l["a"], "b": l["b"], "kind": l["kind"], "w": 1, "quote": l["quote"], "ts": l["ts"], "state": l["state"], "chunk_id": l["chunk_id"], "source": l["source"], "source_title": l["source_title"], "source_id": l["source_id"]}));
     }
     for l in rows(c, include_str!("sql/server_graph_4.sql"), &[]) {
-        edges.push(json!({"a": l["a"], "b": l["b"], "kind": l["kind"], "w": 1, "quote": l["quote"], "ts": l["ts"], "state": l["state"], "chunk_id": l["chunk_id"], "source": l["source"], "source_title": l["source_title"], "source_id": l["source_id"]}));
+        edges.push(json!({"a": l["a"], "b": l["b"], "kind": "replaced by", "w": 1, "quote": null, "ts": null, "state": null, "chunk_id": null, "source": null, "source_title": null, "source_id": null}));
     }
     // items and the sources they come from
     let mut cited = std::collections::HashSet::new();
@@ -1502,7 +1508,7 @@ pub fn brief(c: &Connection, only: Option<String>) {
                 th["last"].as_str().unwrap_or("?").get(..10).unwrap_or("?")
             );
             let nm = th["name"].as_str().unwrap().to_string();
-            if let Some(ns) = rows(c, "SELECT title FROM nodes WHERE type='step' AND state='open' AND thread=?1 ORDER BY created LIMIT 1", &[&nm]).first() { println!("      next: {}", ns["title"].as_str().unwrap_or("")); }
+            if let Some(ns) = rows(c, "SELECT title FROM claims WHERE type='step' AND state='open' AND thread=?1 ORDER BY created LIMIT 1", &[&nm]).first() { println!("      next: {}", ns["title"].as_str().unwrap_or("")); }
             for a in rows(c, include_str!("sql/server_brief.sql"), &[&nm]) {
                 println!(
                     "      owner answered \"{}\": {}",
@@ -1568,6 +1574,16 @@ fn urldecode(s: &str) -> String {
     String::from_utf8_lossy(&out).to_string()
 }
 
+/// True when a Host or Origin header value names this machine (`127.0.0.1`, `localhost` or `[::1]`, any port).
+fn loopback(v: &str) -> bool {
+    let h = v.strip_prefix("http://").unwrap_or(v);
+    let host = match h.strip_prefix('[') {
+        Some(r) => r.split(']').next(),
+        None => h.split(':').next(),
+    };
+    matches!(host, Some("127.0.0.1" | "localhost" | "::1"))
+}
+
 pub fn serve(c: Connection, port: u16) {
     let srv = Server::http(format!("127.0.0.1:{}", port)).expect("bind");
     println!("backtrail on http://127.0.0.1:{}", port);
@@ -1592,6 +1608,19 @@ pub fn serve(c: Connection, port: u16) {
         });
     }
     for mut rq in srv.incoming_requests() {
+        // Only this machine's browser may talk to the store. A page on another site reaches a loopback server
+        // through DNS rebinding (its own name in Host) or a cross-site POST (its own Origin); both are refused.
+        let hdr = |n: &'static str| {
+            rq.headers()
+                .iter()
+                .find(|h| h.field.equiv(n))
+                .map(|h| h.value.as_str().to_string())
+        };
+        if !hdr("Host").is_some_and(|h| loopback(&h)) || hdr("Origin").is_some_and(|o| !loopback(&o)) {
+            rq.respond(Response::from_string("{\"error\":\"forbidden\"}").with_status_code(403))
+                .ok();
+            continue;
+        }
         let url = rq.url().to_string();
         let path = url.split('?').next().unwrap_or("/").to_string();
         let mut body = String::new();
@@ -1674,9 +1703,6 @@ pub fn serve(c: Connection, port: u16) {
                     } else {
                         crate::kg::alias_add(&c, &alias_of, &name)
                     };
-                    if ok {
-                        crate::kg::import_decisions(&c);
-                    }
                     json_resp(json!({"ok": ok}))
                 }
             }
@@ -1760,7 +1786,7 @@ pub fn serve(c: Connection, port: u16) {
                 let id: i64 = c
                     .query_row(
                         "SELECT id FROM sources WHERE ref=?1",
-                        params![qparam(&url, "ref")],
+                        params![resolve_ref(&c, &qparam(&url, "ref"))],
                         |x| x.get(0),
                     )
                     .unwrap_or(0);
@@ -1793,7 +1819,7 @@ pub fn serve(c: Connection, port: u16) {
                 if a.is_empty() || a.chars().count() > MAX_BODY {
                     json_resp(json!({"ok": false, "error": "answer must be 1..320 chars"}))
                 } else {
-                    let n = c.execute("UPDATE nodes SET state='answered', answer=?2, updated=?3 WHERE id=?1 AND type='question'", params![b["id"].as_str().unwrap_or(""), a, now]).unwrap_or(0);
+                    let n = c.execute("UPDATE claims SET state='answered', answer=?2, updated=?3 WHERE id=?1 AND type='question'", params![b["id"].as_str().unwrap_or(""), a, now]).unwrap_or(0);
                     logw(&c, "owner", "answer", b["id"].as_str().unwrap_or(""), &a);
                     json_resp(json!({"ok": n == 1}))
                 }
@@ -1807,7 +1833,7 @@ pub fn serve(c: Connection, port: u16) {
                 let body = b["body"].as_str().unwrap_or("").trim().to_string();
                 let known: i64 = c
                     .query_row(
-                        "SELECT COUNT(*) FROM nodes WHERE type='thread' AND thread=?1",
+                        "SELECT COUNT(*) FROM threads WHERE name=?1",
                         params![th],
                         |x| x.get(0),
                     )
@@ -1845,7 +1871,7 @@ pub fn serve(c: Connection, port: u16) {
                         params![cid, full],
                     )
                     .unwrap();
-                    let id = format!("{}-{:x}", &ty[..1], fxhash(&format!("{}{}{}", th, t, now)));
+                    let id = format!("{}-{}", &ty[..1], id64(&format!("{}{}{}", th, t, now)));
                     let st = if ty == "step" || ty == "question" {
                         "open"
                     } else {
@@ -1870,7 +1896,7 @@ pub fn serve(c: Connection, port: u16) {
                 } else {
                     let exists: i64 = c
                         .query_row(
-                            "SELECT COUNT(*) FROM nodes WHERE type='thread' AND thread=?1",
+                            "SELECT COUNT(*) FROM threads WHERE name=?1",
                             params![t],
                             |x| x.get(0),
                         )
@@ -1897,7 +1923,7 @@ pub fn serve(c: Connection, port: u16) {
                         .unwrap();
                     c.execute(
                         include_str!("sql/server_api_idea.sql"),
-                        params![format!("t-{:x}", fxhash(&name)), name, now],
+                        params![name, now],
                     )
                     .unwrap();
                     logw(&c, "owner", "idea", &name, "");
@@ -1952,10 +1978,15 @@ pub fn serve(c: Connection, port: u16) {
                 } else {
                     "rejected"
                 };
-                let n = c.execute("UPDATE links SET state=?4 WHERE a=?1 AND b=?2 AND kind=?3 AND state='proposed'", params![a, bb, k, st]).unwrap_or(0);
-                if n > 0 {
-                    crate::kg::migrate_links(&c);
-                }
+                let n = c.execute(
+                    "UPDATE claims SET state=?4, updated=?5 WHERE type=?3 AND state='proposed' AND id IN (
+                       SELECT s.claim_id FROM claim_about s
+                       JOIN entities es ON es.id=s.entity_id
+                       JOIN claim_about o ON o.claim_id=s.claim_id AND o.role='object'
+                       JOIN entities eo ON eo.id=o.entity_id
+                       WHERE s.role='subject' AND es.name=?1 AND eo.name=?2)",
+                    params![a.trim_start_matches("T:"), bb.trim_start_matches("T:"), format!("relation:{k}"), if st == "accepted" { "settled" } else { "rejected" }, now],
+                ).unwrap_or(0);
                 if n == 1 {
                     logw(
                         &c,
@@ -1972,7 +2003,7 @@ pub fn serve(c: Connection, port: u16) {
                 let th = b["thread"].as_str().unwrap_or("");
                 let known: i64 = c
                     .query_row(
-                        "SELECT COUNT(*) FROM nodes WHERE type='thread' AND thread=?1",
+                        "SELECT COUNT(*) FROM threads WHERE name=?1",
                         params![th],
                         |x| x.get(0),
                     )
@@ -1982,13 +2013,13 @@ pub fn serve(c: Connection, port: u16) {
                     0
                 } else {
                     c.execute(
-                        "UPDATE nodes SET thread=?2, updated=?3 WHERE id=?1 AND type!='thread'",
+                        "UPDATE claims SET thread=?2, updated=?3 WHERE id=?1 AND type IN ('decision','step','question','turn')",
                         params![id, th, now],
                     )
                     .unwrap_or(0)
                 };
                 if n == 1 {
-                    c.execute("UPDATE sources SET thread=?2 WHERE kind='owner' AND id=(SELECT source_id FROM nodes WHERE id=?1)", params![id, th]).ok();
+                    c.execute("UPDATE sources SET thread=?2 WHERE kind='owner' AND id=(SELECT source_id FROM claims WHERE id=?1)", params![id, th]).ok();
                     logw(&c, "owner", "move", id, th);
                 }
                 json_resp(json!({"ok": n == 1}))
@@ -2001,7 +2032,7 @@ pub fn serve(c: Connection, port: u16) {
                     .chars()
                     .take(200)
                     .collect::<String>();
-                let n = c.execute("UPDATE nodes SET stale=?2, updated=?3 WHERE id=?1 AND type='decision' AND state='settled'", params![b["id"].as_str().unwrap_or(""), format!("superseded|{}", if reason.trim().is_empty() { "marked replaced in the app" } else { reason.trim() }), now]).unwrap_or(0);
+                let n = c.execute("UPDATE claims SET stale=?2, updated=?3 WHERE id=?1 AND type='decision' AND state='settled'", params![b["id"].as_str().unwrap_or(""), format!("superseded|{}", if reason.trim().is_empty() { "marked replaced in the app" } else { reason.trim() }), now]).unwrap_or(0);
                 if n == 1 {
                     logw(
                         &c,

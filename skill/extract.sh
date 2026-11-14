@@ -1,13 +1,13 @@
 #!/bin/bash
-# Extract claims from sessions with a small model, one single-shot call per session (tier 1; with --entity, tier 2).
-# Usage: kg-extract.sh [--entity NAME] [--limit N] [--session ID] | kg-extract.sh <session ref>...
-# The backtrail binary never calls a model: `kg extract-input` is piped to a headless model and the answer goes
-# back through `kg claims`, so the verbatim-quote, known-entity and speaker rules gate every claim.
+# Extract decisions, steps, questions and claims from sessions with a small model, one single-shot call per session.
+# Usage: extract.sh [--entity NAME] [--limit N] [--session ID] | extract.sh <session ref>...
+# The backtrail binary never calls a model: `extract-input` is piped to a headless model and the answer goes back
+# through `import -`, so the verbatim-quote, known-entity, known-thread and length rules gate every fact.
 set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 TM="$DIR/../target/release/backtrail"
 MODEL="${BACKTRAIL_COMPILE_MODEL:-haiku}"
-export BACKTRAIL_COMPILE=1
+export BACKTRAIL_COMPILE=1   # the SessionStart and SessionEnd hooks exit at once while this is set
 ENTITY=""; LIMIT=3; SESSION=""; REFS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -18,22 +18,22 @@ while [ $# -gt 0 ]; do
   esac
 done
 if [ ${#REFS[@]} -eq 0 ]; then
-  args=(kg extract-queue --limit "$LIMIT")
+  args=(extract-queue --limit "$LIMIT")
   [ -n "$ENTITY" ] && args+=(--entity "$ENTITY")
   [ -n "$SESSION" ] && args+=(--session "$SESSION")
   while IFS= read -r r; do [ -n "$r" ] && REFS+=("$r"); done < <("$TM" "${args[@]}")
 fi
-cd "$(mktemp -d)" || exit 1
-for ref in "${REFS[@]}"; do
-  packet="$("$TM" kg extract-input "$ref")" || { echo "$ref: no packet"; continue; }
+cd "$(mktemp -d)" || exit 1  # no project CLAUDE.md or session history is loaded here
+for ref in "${REFS[@]+"${REFS[@]}"}"; do
+  packet="$("$TM" extract-input "$ref")" || { echo "$ref: no packet"; continue; }
   raw="$(printf '%s' "$packet" | claude -p --model "$MODEL" --tools "" --no-session-persistence --output-format json \
         --setting-sources project --disable-slash-commands --strict-mcp-config --max-budget-usd 0.25 \
-        --system-prompt "$(cat "$DIR/kg-extract-prompt.md")" 2>/dev/null)"
+        --system-prompt "$(cat "$DIR/extract-prompt.md")" 2>/dev/null)"
   REF="$ref" TM="$TM" RAW="$raw" python3 - <<'PY'
 import json, os, re, subprocess, sys
 ref, tm, raw = os.environ["REF"], os.environ["TM"], os.environ["RAW"]
 def log(ok, detail):
-    subprocess.run([tm, "kg", "log", ref, "--detail", detail] + ([] if ok else ["--failed", "1"]), capture_output=True)
+    subprocess.run([tm, "extract-log", ref, "--detail", detail] + ([] if ok else ["--failed", "1"]), capture_output=True)
 try:
     d = json.loads(raw)
     u = d.get("usage", {})
@@ -47,11 +47,12 @@ except Exception as e:
 out = []
 for i in items:
     if not isinstance(i, dict): continue
-    t = i.get("type", "state")
-    out.append({"type": "relation:" + "related to" if t == "relation" else t, "text": i.get("text", ""), "body": i.get("body", ""), "source": ref,
-                "quote": i.get("quote", ""), "entities": i.get("entities", []), "stated": i.get("stated", "inferred")})
-r = subprocess.run([tm, "kg", "claims"], input=json.dumps(out), capture_output=True, text=True)
-log(True, f"{cost} claims={len(out)} {r.stdout.strip()}")
-print(f"{ref}: {cost} · {r.stdout.strip()}"); sys.stderr.write(r.stderr)
+    out.append({"type": i.get("type"), "title": i.get("title") or i.get("text", ""), "body": i.get("body", ""), "source": ref,
+                "quote": i.get("quote", ""), "entities": i.get("entities", []), "kind": i.get("kind", "related to"),
+                "stated": i.get("stated", "inferred"), "state": "proposed", "origin": "suggested"})
+r = subprocess.run([tm, "import", "-"], input=json.dumps(out), capture_output=True, text=True)
+log(True, f"{cost} items={len(out)} {r.stdout.strip()}")
+print(f"{ref}: {cost} · {r.stdout.strip()}")
+sys.stderr.write(r.stderr)
 PY
 done

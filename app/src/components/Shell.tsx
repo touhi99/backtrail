@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { CalendarCheck, ChevronRight, ListChecks, Network, Plus, ScrollText, Search, Share2, Waypoints } from 'lucide-react'
+import { House, ChevronRight, ListChecks, Network, Plus, ScrollText, Search, Share2, Waypoints } from 'lucide-react'
 import { STATE, useApi } from '@/lib/api'
 import Capture from '@/components/Capture'
 
@@ -9,7 +9,7 @@ const ShellCtx = createContext<Ctx>({ today: null, reload: () => {}, capture: ()
 export const useShell = () => useContext(ShellCtx)
 
 const NAV = [
-  { to: '/', label: 'Today', icon: CalendarCheck, end: true },
+  { to: '/', label: 'Home', icon: House, end: true },
   { to: '/graph', label: 'Graph', icon: Share2, end: false },
 ]
 const MORE = [
@@ -23,12 +23,13 @@ export default function Shell({ children }: { children: ReactNode }) {
   const nav = useNavigate()
   const loc = useLocation()
   useEffect(() => { if (new URLSearchParams(loc.search).get('add')) setCap({ open: true, thread: new URLSearchParams(loc.search).get('thread') ?? undefined }) }, [loc.search])
-  const title = ({ map: 'Map', graph: 'Graph', thread: 'Project', source: 'Source', search: 'Search', items: 'Items', log: 'Log' } as any)[loc.pathname.split('/')[1]] ?? 'Today'
+  const title = ({ map: 'Map', graph: 'Graph', thread: 'Project', source: 'Source', search: 'Search', items: 'Items', log: 'Log' } as any)[loc.pathname.split('/')[1]] ?? 'Home'
   const live = (today?.threads ?? []).filter((t: any) => t.state === 'moving')
   const others = (today?.threads ?? []).filter((t: any) => t.state !== 'moving' && t.name !== 'Unsorted')
   const [showOthers, setShowOthers] = useState(false)
   const toggleOthers = () => setShowOthers((v) => !v)
-  const waiting = today?.waiting?.length ?? 0
+  // a quiet dot, not a count: something fresh (under a week old) is waiting in the Home focus card
+  const fresh = (today?.looks?.length ?? 0) + (today?.waiting ?? []).filter((q: any) => Date.now() - (Date.parse(q.created ?? '') || 0) < 7 * 864e5).length
 
   return (
     <ShellCtx.Provider value={{ today, reload, capture: (thread) => setCap({ open: true, thread }) }}>
@@ -41,7 +42,7 @@ export default function Shell({ children }: { children: ReactNode }) {
           {NAV.map(({ to, label, icon: Icon, end }) => (
             <NavLink key={to} to={to} end={end} className={({ isActive }) => `row-hover flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] ${isActive ? 'bg-white/[.07] font-medium text-ink shadow-[inset_0_1px_0_rgba(255,255,255,.05)]' : 'text-soft'}`}>
               <Icon size={16} />{label}
-              {to === '/' && waiting > 0 && <span className="ml-auto rounded-full bg-[#fbbf24]/15 px-2 text-[11.5px] font-semibold tabular-nums text-open">{waiting}</span>}
+              {to === '/' && fresh > 0 && <span className="ml-auto size-2 rounded-full bg-accent" title="Something is waiting in the focus card" />}
             </NavLink>
           ))}
           <div className="mt-5 px-2.5 pb-1 text-[12px] text-mut" title="Projects whose state is In development. The yellow number is how many questions in it wait for your answer.">Projects</div>

@@ -19,6 +19,6 @@ FROM sources s
 WHERE s.kind='session'
   AND s.thread!='Unsorted'
   AND s.nchunks>=6
-  AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.source_id=s.id)
+  AND NOT EXISTS (SELECT 1 FROM claims n WHERE n.source_id=s.id AND n.type IN ('decision','step','question','turn'))
 ORDER BY s.last_ts DESC
 LIMIT 200

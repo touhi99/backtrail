@@ -20,12 +20,23 @@ function Move({ i, done }: { i: any; done: () => void }) {
 export default function ItemActions({ i, done }: { i: any; done: () => void }) {
   const mv = <Move i={i} done={done} />
   const run = async (url: string, body: any) => { await post(url, body); done() }
+  const held = (i.review ?? '').startsWith('held|') ? i.review.slice(5) : ''
+  const reject = <button className="btn sm" title="Wrong or not wanted." onClick={() => { const reason = prompt('Why reject? (kept with the item)'); if (reason !== null) run('/api/review', { id: i.id, accept: false, reason }) }}>Reject</button>
+  if (i.review === 'auto' && i.state === 'settled')
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-[12px] text-mut" title="You said this in a session in so many words, so it was kept without review.">Kept automatically</span>
+        {reject}
+        {i.type === 'decision' && !(i.stale ?? '').startsWith('superseded') && <button className="btn sm" onClick={() => { const reason = prompt('What replaced it?'); if (reason !== null) run('/api/supersede', { id: i.id, reason }) }}>Mark replaced</button>}
+      </div>
+    )
   if (i.state === 'proposed')
     return (
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2">
+        {held && <span className="nx-chip whitespace-nowrap" style={{ background: '#fbbf2418', color: '#fbbf24' }} title={`Not kept automatically: it ${held}`}>May repeat</span>}
         <button className="btn sm primary" onClick={() => run('/api/review', { id: i.id, accept: true })}>Accept</button>
         <button className="btn sm" title="Was true once, no longer applies. Kept on file, out of the way." onClick={() => { const reason = prompt('Why is it not valid now?'); if (reason !== null) run('/api/review', { id: i.id, accept: false, park: true, reason }) }}>Not valid now</button>
-        <button className="btn sm" title="Wrong or not wanted." onClick={() => { const reason = prompt('Why reject? (kept with the item)'); if (reason !== null) run('/api/review', { id: i.id, accept: false, reason }) }}>Reject</button>
+        {reject}
         {mv}
       </div>
     )

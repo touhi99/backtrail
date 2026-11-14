@@ -12,9 +12,10 @@ SELECT
   n.source_id,
   n.chunk_id,
   n.stale,
+  n.review,
   (SELECT last_ts FROM sources WHERE id=n.source_id) AS source_ts
-FROM nodes n
+FROM claims n
 WHERE n.thread=?1
-  AND n.type!='thread'
+  AND n.type IN ('decision','step','question','turn')
   AND n.state!='rejected'
 ORDER BY n.created DESC

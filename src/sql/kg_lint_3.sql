@@ -2,4 +2,6 @@
 SELECT
   COUNT(*)
 FROM claims c
-WHERE NOT EXISTS (SELECT 1 FROM claim_evidence v WHERE v.claim_id=c.id)
+WHERE c.quote IS NULL
+  AND c.origin!='owner'
+  AND (c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%')

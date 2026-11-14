@@ -51,15 +51,18 @@ fn main() {
     }
     let c = open();
     match cmd {
-        "ingest" => do_ingest(&c),
+        "ingest" => {
+            if args.iter().any(|a| a == "--force") {
+                // read every session again, for example after the chunking rule changed; sources whose file is gone are kept
+                c.execute("UPDATE sources SET mtime=0, bytes=0 WHERE kind='session'", []).unwrap();
+                c.execute("DELETE FROM scanned WHERE path LIKE '%.jsonl'", []).unwrap();
+            }
+            do_ingest(&c)
+        }
         "build" => {
-            // a fresh machine: index every source, then build the graph from them
+            // a fresh machine: index every source, create the configured entities, then embed
             do_ingest(&c);
-            let (n, l, b) = kg::import_decisions(&c);
-            println!(
-                "graph: {n} claims from decisions ({l} linked to entities, {b} about no entity)"
-            );
-            kg::migrate_links(&c);
+            println!("entities: {}", kg::sync_entities(&c));
             match embed::run(&c, usize::MAX) {
                 Ok((n, left)) => println!("embedded {n} passages, {left} pending"),
                 Err(e) => eprintln!(
@@ -101,22 +104,64 @@ fn main() {
             let (mut ok, mut bad) = (0, 0);
             for x in v.as_array().expect("array") {
                 let g = |k: &str| x[k].as_str().unwrap_or("").to_string();
-                let it = Item {
-                    typ: g("type"),
-                    thread: g("thread"),
-                    title: g("title"),
-                    body: g("body"),
-                    source: g("source"),
-                    quote: g("quote"),
-                    state: x["state"].as_str().map(|s| s.to_string()),
-                    origin: x["origin"].as_str().unwrap_or("compiled").into(),
-                    date: x["date"].as_str().map(|s| s.to_string()),
+                let typ = g("type");
+                let title = if g("title").is_empty() { g("text") } else { g("title") };
+                let res = if db::TYPES.contains(&typ.as_str()) {
+                    // decision, step, question, turn: a work item or a decision on a thread
+                    let thread = if g("thread").is_empty() {
+                        c.query_row(
+                            "SELECT thread FROM sources WHERE ref=?1",
+                            rusqlite::params![resolve_ref(&c, &g("source"))],
+                            |r| r.get::<_, Option<String>>(0),
+                        )
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default()
+                    } else {
+                        g("thread")
+                    };
+                    add_item(
+                        &c,
+                        &Item {
+                            typ,
+                            thread,
+                            title: title.clone(),
+                            body: g("body"),
+                            source: g("source"),
+                            quote: g("quote"),
+                            state: x["state"].as_str().map(|s| s.to_string()),
+                            origin: x["origin"].as_str().unwrap_or("compiled").into(),
+                            date: x["date"].as_str().map(|s| s.to_string()),
+                        },
+                    )
+                } else {
+                    // state, rationale, relation: a claim about named entities
+                    let ents: Vec<String> = x["entities"]
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+                        .unwrap_or_default();
+                    let ctype = if typ == "relation" {
+                        format!("relation:{}", x["kind"].as_str().unwrap_or("related to"))
+                    } else {
+                        typ
+                    };
+                    kg::add_claim(
+                        &c,
+                        &ctype,
+                        &title,
+                        &g("body"),
+                        &g("source"),
+                        &g("quote"),
+                        &ents,
+                        if g("stated") == "inferred" { "inferred" } else { "stated" },
+                        "extracted",
+                    )
                 };
-                match add_item(&c, &it) {
+                match res {
                     Ok(_) => ok += 1,
                     Err(e) => {
                         bad += 1;
-                        eprintln!("rejected [{}]: {e}", it.title);
+                        eprintln!("rejected [{}]: {e}", title);
                     }
                 }
             }
@@ -127,14 +172,14 @@ fn main() {
             let name = args.get(1).expect("name");
             if let Some(s) = arg(&args, "--state") {
                 c.execute(
-                    "UPDATE nodes SET state=?2 WHERE type='thread' AND thread=?1",
+                    "UPDATE threads SET state=?2 WHERE name=?1",
                     rusqlite::params![name, s],
                 )
                 .unwrap();
             }
             if let Some(s) = arg(&args, "--summary") {
                 c.execute(
-                    "UPDATE nodes SET body=?2 WHERE type='thread' AND thread=?1",
+                    "UPDATE threads SET body=?2 WHERE name=?1",
                     rusqlite::params![name, s],
                 )
                 .unwrap();
@@ -150,19 +195,24 @@ fn main() {
                 eprintln!("rejected: a step closed by Claude or evidence needs --proof");
                 std::process::exit(1);
             }
-            let n = c.execute("UPDATE nodes SET state='done', done_by=?2, answer=?3, updated=?4 WHERE id=?1 AND type='step'", rusqlite::params![id, by, proof, chrono_now()]).unwrap();
+            let n = c.execute("UPDATE claims SET state='done', done_by=?2, answer=?3, updated=?4 WHERE id=?1 AND type='step'", rusqlite::params![id, by, proof, chrono_now()]).unwrap();
             logw(&c, &by, "done", id, &proof);
             println!("{}", if n == 1 { "ok" } else { "no such step" });
         }
-        "compile-input" => compile::input(&c, args.get(1).expect("session ref")),
-        "compile-queue" => compile::queue(
-            &c,
-            arg(&args, "--session"),
-            arg(&args, "--limit")
-                .and_then(|d| d.parse().ok())
-                .unwrap_or(5),
-        ),
-        "compile-log" => compile::record(
+        "extract-input" => kg::extract_input(&c, args.get(1).expect("session ref")),
+        "extract-queue" => {
+            for r in kg::extract_queue(
+                &c,
+                arg(&args, "--limit")
+                    .and_then(|d| d.parse().ok())
+                    .unwrap_or(3),
+                arg(&args, "--entity").as_deref(),
+                arg(&args, "--session").as_deref(),
+            ) {
+                println!("{r}")
+            }
+        }
+        "extract-log" => compile::record(
             &c,
             args.get(1).expect("session ref"),
             arg(&args, "--failed").is_none(),
@@ -198,7 +248,7 @@ fn main() {
             }
             let n = c
                 .execute(
-                    "UPDATE nodes SET stale=?2 WHERE id=?1 AND state='proposed'",
+                    "UPDATE claims SET stale=?2 WHERE id=?1 AND state='proposed'",
                     rusqlite::params![id, format!("{kind}|{reason}")],
                 )
                 .unwrap();
@@ -329,7 +379,6 @@ fn main() {
             &c,
             arg(&args, "--n").and_then(|d| d.parse().ok()).unwrap_or(25),
         ),
-        "relate-input" => compile::relate_input(&c, args.get(1).expect("session ref")),
         "relate" => {
             // backtrail relate "A" "B" "spun out of" --source session:xxxxxxxx --quote "..." [--state proposed]
             let (a, b, k) = (
@@ -360,11 +409,7 @@ fn main() {
                 args.get(2).expect("to thread"),
                 args.get(3).cloned().unwrap_or("built on".into()),
             );
-            c.execute(
-                "INSERT OR IGNORE INTO links(a,b,kind) VALUES(?1,?2,?3)",
-                rusqlite::params![format!("T:{a}"), format!("T:{b}"), k],
-            )
-            .unwrap();
+            kg::owner_relation(&c, a, b, &k, &chrono_now());
             logw(&c, "claude", "link", &format!("{a} -> {b}"), &k);
             println!("ok");
         }
@@ -376,38 +421,7 @@ fn main() {
         ),
         "show" => server::show(&c, args.get(1).expect("source ref")),
         "kg" => match args.get(1).map(|s| s.as_str()) {
-            Some("migrate") => {
-                let (d, s) = kg::migrate_links(&c);
-                logw(
-                    &c,
-                    "claude",
-                    "kg-migrate",
-                    "links",
-                    &format!("{d} copied, {s} left out"),
-                );
-                println!("claims from links: {d} copied, {s} left out (item links or no quote)");
-                kg::stats(&c)
-            }
             Some("state") => kg::state(&c),
-            Some("claims") => {
-                let mut raw = String::new();
-                std::io::Read::read_to_string(&mut std::io::stdin(), &mut raw).ok();
-                let (ok, bad) = kg::import_claims(&c, &raw);
-                println!("claims added {ok}, rejected {bad}")
-            }
-            Some("extract-queue") => {
-                for r in kg::extract_queue(
-                    &c,
-                    arg(&args, "--limit")
-                        .and_then(|d| d.parse().ok())
-                        .unwrap_or(3),
-                    arg(&args, "--entity").as_deref(),
-                    arg(&args, "--session").as_deref(),
-                ) {
-                    println!("{r}")
-                }
-            }
-            Some("extract-input") => kg::extract_input(&c, args.get(2).expect("session ref")),
             Some("export") => {
                 kg::export(&c, args.get(2).expect("file")).expect("write");
                 println!("ok")
@@ -415,25 +429,10 @@ fn main() {
             Some("restore") => {
                 let (n, o) = kg::restore(&c, args.get(2).expect("file"));
                 println!(
-                    "restored {n} rows, {o} evidence rows left out (source or quote not found)"
+                    "restored {n} rows, {o} claims kept without a quote (source or quote not found)"
                 )
             }
             Some("lint") => kg::lint(&c),
-            Some("log") => {
-                let ok = arg(&args, "--failed").is_none();
-                logw(
-                    &c,
-                    "compile",
-                    if ok {
-                        "kg-extract"
-                    } else {
-                        "kg-extract-failed"
-                    },
-                    args.get(2).expect("session ref"),
-                    &arg(&args, "--detail").unwrap_or_default(),
-                );
-                println!("ok")
-            }
             Some("suggest") => kg::suggest(&c),
             Some("merge") => {
                 match kg::merge(
@@ -479,25 +478,10 @@ fn main() {
                 kg::why(&c, &args[2..].join(" "));
             }
             Some("neighbors") => kg::neighbors(&c, args.get(2).expect("entity")),
-            Some("passage") => kg::passage(
-                &c,
-                args.get(2).expect("query"),
-                arg(&args, "--entity").as_deref(),
-                arg(&args, "--from").as_deref(),
-            ),
-            Some("find") => kg::find(&c, &args[2..].join(" ")),
-            Some("import") => {
-                let (n, l, b) = kg::import_decisions(&c);
-                logw(
-                    &c,
-                    "claude",
-                    "kg-import",
-                    "decisions",
-                    &format!("{n} claims, {l} linked to entities, {b} without"),
-                );
-                println!("decisions to claims: {n} ({l} linked to entities, {b} about no entity)");
-                kg::stats(&c)
+            Some("passage") => {
+                kg::ask(&c, &args[2..].join(" "));
             }
+            Some("find") => kg::find(&c, &args[2..].join(" ")),
             _ => kg::stats(&c),
         },
         "demo" => server::demo(&c),
@@ -508,7 +492,7 @@ fn main() {
                 .unwrap_or(ingest::cfg().port),
         ),
         _ => println!(
-            "backtrail ingest | check | match | artifacts | search <q> [--thread --kind --state --from --to --text] | embed [--limit N] | log | link A B kind | pending [--days N] | show <ref> | demo (needs BACKTRAIL_HOME) | add <type> --thread --title --source --quote | import <items.json> | set-thread | compile-input <ref> | compile-queue [--session ID] | compile-log <ref> | retire <id> --by <id> --reason | assign <ref> <thread> | reply <q> --text TEXT | built <step> --evidence TEXT | flag <id> --as live|in_effect|superseded|done --reason | brief [--thread T] | serve [--port N]"
+            "backtrail ingest [--force] | check | match | artifacts | search <q> [--thread --kind --state --from --to --text] | embed [--limit N] | log | link A B kind | pending [--days N] | show <ref> | demo (needs BACKTRAIL_HOME) | add <type> --thread --title --source --quote | import <facts.json> | set-thread | extract-input <ref> | extract-queue [--session ID] [--entity NAME] | extract-log <ref> | retire <id> --by <id> --reason | assign <ref> <thread> | reply <q> --text TEXT | built <step> --evidence TEXT | flag <id> --as live|in_effect|superseded|done --reason | brief [--thread T] | serve [--port N]"
         ),
     }
 }
