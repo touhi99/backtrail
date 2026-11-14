@@ -12,9 +12,14 @@ Status: prototype. Tested on macOS only.
 
 - Claude Code keeps one folder per project in `~/.claude/projects`. Each folder becomes a thread.
 - Sessions and notes are read, never changed.
-- Decisions, steps and questions are proposed from sessions and stay proposed until accepted in the app. A proposal is
-  rejected if its quote is not found in the cited source.
-- When a session ends, a hook indexes its new text.
+- Decisions, steps and questions are proposed from sessions. A proposal is rejected if its quote is not found in the
+  cited source.
+- A proposed decision, rationale or state claim is kept without review when its quote is a turn the owner typed and
+  says it directly, unless an earlier fact of the same type on the same thread shares three or more content words with
+  it. Everything else (steps, questions, relations, the assistant's words, possible repeats) waits for review in the app.
+  A fact kept this way can still be rejected there.
+- When a session ends, a hook indexes its new text. Session files are read from where the last read stopped, so stored
+  passages keep their ids.
 
 ![Session end](docs/architecture-session-end.svg)
 
@@ -26,6 +31,9 @@ What it reads and sends:
 - Writes: the data directory (database, backups, saved artifacts), and `~/.claude/settings.json` on `bt hooks install`.
 - Network: passage and query text go to the local Ollama server. The `claude` CLI scripts in `skill/` send session text
   to Claude.
+- Stored text: the database is not encrypted and is readable by its owner only. Access tokens and private keys in
+  common formats are replaced with `[redacted secret]` when text is indexed; secrets without a fixed format are stored
+  as written.
 
 ## Screenshots
 
@@ -59,7 +67,7 @@ Environment variables:
 
 | Variable | Default |
 | --- | --- |
-| `BACKTRAIL_HOME` | macOS: `~/Library/Application Support/Backtrail`. Linux: `$XDG_DATA_HOME/backtrail`, else `~/.local/share/backtrail` |
+| `BACKTRAIL_HOME` | `~/Library/Application Support/Backtrail` |
 | `BT_BIN_DIR` | `~/.local/bin` |
 
 ## Usage
@@ -79,4 +87,5 @@ Other commands: `docs/reference.md`.
 - Search ranking is set by hand. Embedding models compared: `embeddinggemma-2:270m` and `nomic-embed-text`, on 519
   queries from one store (`docs/reference.md`).
 - The quote check proves a quote exists in the source, not that the title is a fair reading of it.
-- Automatic extraction of decisions and the matching of steps to commits have not been measured for accuracy.
+- Automatic extraction of decisions, the keep rule and the matching of steps to commits have not been measured for
+  accuracy. On one store the keep rule kept 477 of 805 proposed facts and held 42 as possible repeats.

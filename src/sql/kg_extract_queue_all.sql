@@ -10,4 +10,4 @@ SELECT
   )
 FROM sources s
 WHERE s.kind='session'
-  AND NOT EXISTS (SELECT 1 FROM log l WHERE l.target=s.ref AND l.action='kg-extract')
+  AND NOT EXISTS (SELECT 1 FROM log l WHERE l.target=s.ref AND l.action IN ('extract','kg-extract'))

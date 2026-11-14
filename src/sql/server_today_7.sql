@@ -6,8 +6,8 @@ SELECT
   n.thread,
   n.updated AS since,
   'doing' AS why
-FROM nodes n
-JOIN nodes t ON t.type='thread' AND t.thread=n.thread
+FROM claims n
+JOIN threads t ON t.name=n.thread
 WHERE n.type='step'
   AND n.state='doing'
   AND (

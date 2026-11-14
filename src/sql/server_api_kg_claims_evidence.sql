@@ -1,12 +1,13 @@
 -- server.rs: evidence for the listed claims (a quoted id list is filled in by the caller)
 SELECT
-  v.claim_id,
-  v.quote,
-  v.stated,
-  v.ts,
-  v.source_id,
+  c.id AS claim_id,
+  c.quote,
+  c.stated,
+  c.asserted_at AS ts,
+  c.source_id,
   s.ref AS source,
   s.title AS source_title
-FROM claim_evidence v
-LEFT JOIN sources s ON s.id=v.source_id
-WHERE v.claim_id IN ({ids})
+FROM claims c
+LEFT JOIN sources s ON s.id=c.source_id
+WHERE c.id IN ({ids})
+  AND c.quote IS NOT NULL

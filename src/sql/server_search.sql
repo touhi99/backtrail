@@ -5,9 +5,10 @@ SELECT
   n.title,
   n.thread,
   n.state,
-  IFNULL(n.stale,'') AS stale
+  IFNULL(n.stale,'') AS stale,
+  n.review
 FROM temp.nfts f
-JOIN nodes n ON n.rowid=f.rowid
+JOIN claims n ON n.rowid=f.rowid
 LEFT JOIN sources s ON s.id=n.source_id
 WHERE nfts MATCH ?1
   AND (?2='' OR n.thread=?2)

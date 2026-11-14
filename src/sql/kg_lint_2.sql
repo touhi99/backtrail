@@ -1,7 +1,7 @@
 -- kg.rs: lint
 SELECT
   c.id,
-  c.text,
+  c.title,
   (
     SELECT
       group_concat(entity_id)
@@ -14,4 +14,5 @@ SELECT
     )
   )
 FROM claims c
-WHERE c.status NOT IN ('retracted','superseded')
+WHERE c.state NOT IN ('rejected','superseded')
+  AND (c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%')

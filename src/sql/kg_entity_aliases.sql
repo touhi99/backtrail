@@ -1,4 +1,4 @@
--- kg.rs: import_decisions
+-- kg.rs: link_entities
 SELECT
   e.id,
   e.name,

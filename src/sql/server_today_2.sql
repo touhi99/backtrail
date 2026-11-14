@@ -6,7 +6,7 @@ SELECT
   n.thread,
   n.created,
   n.origin
-FROM nodes n
+FROM claims n
 WHERE n.type='question'
   AND n.state='open'
   AND n.origin='owner'

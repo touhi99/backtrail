@@ -6,7 +6,7 @@ SELECT
   state,
   thread,
   source_id
-FROM nodes
-WHERE type!='thread'
+FROM claims
+WHERE type IN ('decision','step','question','turn')
   AND state!='rejected'
   AND thread!='Unsorted'

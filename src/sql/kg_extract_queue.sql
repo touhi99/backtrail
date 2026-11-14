@@ -5,13 +5,14 @@ SELECT
 FROM sources s
 WHERE s.kind='session'
   AND (SELECT COUNT(*) FROM chunks WHERE source_id=s.id AND role='user')>=4
-  AND NOT EXISTS (SELECT 1 FROM log l WHERE l.target=s.ref AND l.action='kg-extract')
+  AND ifnull(s.thread,'Unsorted')!='Unsorted'
+  AND NOT EXISTS (SELECT 1 FROM log l WHERE l.target=s.ref AND l.action IN ('extract','kg-extract'))
   AND (
     SELECT
       COUNT(*)
     FROM log l
     WHERE l.target=s.ref
-      AND l.action='kg-extract-failed'
+      AND l.action IN ('extract-failed','kg-extract-failed','compile-failed')
   )<2
   AND NOT EXISTS (
     SELECT

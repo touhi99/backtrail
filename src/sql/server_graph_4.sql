@@ -1,16 +1,7 @@
--- server.rs: graph
+-- server.rs: graph (an item replaced by another)
 SELECT
-  l.a,
-  l.b,
-  l.kind,
-  l.quote,
-  l.ts,
-  l.state,
-  l.chunk_id,
-  s.ref AS source,
-  s.title AS source_title,
-  s.id AS source_id
-FROM links l
-LEFT JOIN sources s ON s.id=l.source_id
-WHERE ifnull(l.state,'') != 'rejected'
-  AND NOT (l.a LIKE 'T:%' AND l.b LIKE 'T:%' AND l.chunk_id IS NOT NULL AND l.quote IS NOT NULL)
+  id AS a,
+  superseded_by AS b
+FROM claims
+WHERE type IN ('decision','step','question','turn')
+  AND superseded_by IS NOT NULL

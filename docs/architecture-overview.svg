@@ -54,7 +54,7 @@
 <text class="t" x="606" y="90" text-anchor="middle">Timer thread</text><text class="s" x="606" y="108" text-anchor="middle">every 5 minutes:</text><text class="s" x="606" y="122" text-anchor="middle">rescan, backup, embed</text>
 <rect class="sys" x="235" y="172" width="436" height="86" rx="10"/>
 <text class="t" x="453" y="196" text-anchor="middle">Store functions</text>
-<text class="s" x="453" y="216" text-anchor="middle">write rule for items, knowledge graph, search ranking,</text>
+<text class="s" x="453" y="216" text-anchor="middle">write rule for facts, knowledge graph, search ranking,</text>
 <text class="s" x="453" y="232" text-anchor="middle">source readers, embedding client</text>
 <path class="ln" d="M305,148 L305,172"/><path class="ln" d="M458,148 L458,172"/><path class="ln" d="M606,148 L606,172"/>
 
@@ -65,8 +65,8 @@
 <!-- store -->
 <rect class="dat" x="285" y="330" width="336" height="76" rx="10"/>
 <text class="t" x="453" y="356" text-anchor="middle">backtrail.db (SQLite)</text>
-<text class="s" x="453" y="376" text-anchor="middle">sources, chunks, fts, vec, nodes, links, log, overrides,</text>
-<text class="s" x="453" y="392" text-anchor="middle">entities, claims and their link tables</text>
+<text class="s" x="453" y="376" text-anchor="middle">sources, chunks, fts, vec, claims, threads, log, overrides,</text>
+<text class="s" x="453" y="392" text-anchor="middle">entities and their link tables</text>
 <path class="ln" d="M453,282 L453,330"/><text class="r" x="463" y="312">only writer</text>
 <rect class="dat" x="285" y="426" width="160" height="32" rx="8"/><text class="s" x="365" y="446" text-anchor="middle">config.json, per machine</text>
 <rect class="dat" x="461" y="426" width="160" height="32" rx="8"/><text class="s" x="541" y="446" text-anchor="middle">daily backups</text>
@@ -83,7 +83,7 @@
 
 <!-- scripts and model -->
 <rect class="ext" x="720" y="330" width="150" height="56" rx="10"/>
-<text class="t" x="795" y="356" text-anchor="middle">skill/*.sh</text><text class="s" x="795" y="373" text-anchor="middle">compile, extract, hooks</text>
+<text class="t" x="795" y="356" text-anchor="middle">skill/*.sh</text><text class="s" x="795" y="373" text-anchor="middle">extract, hooks</text>
 <rect class="opt" x="720" y="410" width="150" height="48" rx="10"/>
 <text class="t" x="795" y="432" text-anchor="middle">Model provider</text><text class="s" x="795" y="447" text-anchor="middle">through the claude CLI</text>
 <path class="lno" d="M795,386 L795,410"/>

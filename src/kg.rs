@@ -1,5 +1,5 @@
-//! Knowledge-graph tables (plan: notes/backtrail/knowledge-graph-plan.md). Entities with aliases, claims, and
-//! one-to-many evidence. `links` stays in place; `migrate_links` copies its evidenced thread relations as claims.
+//! Knowledge-graph code (plan: notes/backtrail/knowledge-graph-plan.md). Entities with aliases, and the queries
+//! over `claims`, which also holds the work items (see schema.sql). One quote from one source supports each claim.
 use crate::db::{fxhash, logw, norm};
 use rusqlite::{Connection, params};
 
@@ -8,7 +8,7 @@ pub fn ensure(c: &Connection) {
         .expect("kg schema");
 }
 
-fn entity_for(c: &Connection, name: &str, kind: &str, now: &str) -> String {
+pub fn entity_for(c: &Connection, name: &str, kind: &str, now: &str) -> String {
     let id = format!("e-{:x}", fxhash(&norm(name)));
     c.execute(
         "INSERT OR IGNORE INTO entities(id,name,kind,created) VALUES(?1,?2,?3,?4)",
@@ -23,106 +23,38 @@ fn entity_for(c: &Connection, name: &str, kind: &str, now: &str) -> String {
     id
 }
 
-/// Copy thread-to-thread links that carry a source and quote into claims with evidence. Idempotent; `links` is not changed.
-/// Item-to-item links and links without a quote are counted and left out.
-pub fn migrate_links(c: &Connection) -> (usize, usize) {
-    let now = crate::db::chrono_now();
-    let rows: Vec<(
-        String,
-        String,
-        String,
-        Option<i64>,
-        Option<i64>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    )> = {
-        let mut st = c
-            .prepare("SELECT a,b,kind,source_id,chunk_id,quote,ts,state FROM links")
-            .unwrap();
-        st.query_map([], |r| {
-            Ok((
-                r.get(0)?,
-                r.get(1)?,
-                r.get(2)?,
-                r.get(3)?,
-                r.get(4)?,
-                r.get(5)?,
-                r.get(6)?,
-                r.get(7)?,
-            ))
-        })
-        .unwrap()
-        .flatten()
-        .collect()
-    };
-    let (mut done, mut skipped) = (0, 0);
-    for (a, b, kind, sid, cid, quote, ts, state) in rows {
-        let (Some(an), Some(bn)) = (a.strip_prefix("T:"), b.strip_prefix("T:")) else {
-            skipped += 1;
-            continue;
-        };
-        let (Some(sid), Some(cid), Some(q)) = (sid, cid, quote) else {
-            skipped += 1;
-            continue;
-        };
-        let (ea, eb) = (
-            entity_for(c, an, "project", &now),
-            entity_for(c, bn, "project", &now),
-        );
-        let id = format!("c-{:x}", fxhash(&format!("{ea}{kind}{eb}")));
-        let role: Option<String> = c
-            .query_row("SELECT role FROM chunks WHERE id=?1", params![cid], |r| {
-                r.get(0)
-            })
-            .ok();
-        let speaker = match role.as_deref() {
-            Some("user") => "owner",
-            Some("assistant") => "assistant",
-            _ => "unknown",
-        };
-        let status = match state.as_deref() {
-            Some("proposed") | None => "proposed",
-            Some("rejected") => "retracted",
-            _ => "active",
-        };
+/// A relation between two projects that the owner asserted without a quote (`bt link`). Such claims have origin
+/// `owner` and are the only claims allowed to lack evidence. Returns the claim id.
+pub fn owner_relation(c: &Connection, a: &str, b: &str, kind: &str, now: &str) -> String {
+    let (ea, eb) = (
+        entity_for(c, a, "project", now),
+        entity_for(c, b, "project", now),
+    );
+    let id = format!("c-{:x}", fxhash(&format!("{ea}{kind}{eb}")));
+    c.execute(
+        "INSERT OR IGNORE INTO claims(id,type,title,state,origin,speaker,asserted_at,created,updated)
+         VALUES(?1,?2,?3,'settled','owner','owner',?4,?4,?4)",
+        params![id, format!("relation:{kind}"), format!("{a} {kind} {b}"), now],
+    )
+    .unwrap();
+    for (e, role) in [(&ea, "subject"), (&eb, "object")] {
         c.execute(
-            include_str!("sql/kg_migrate_links.sql"),
-            params![
-                id,
-                format!("relation:{kind}"),
-                format!("{an} {kind} {bn}"),
-                speaker,
-                ts,
-                status,
-                now
-            ],
+            "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role) VALUES(?1,?2,?3)",
+            params![id, e, role],
         )
         .unwrap();
-        c.execute(
-            "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role) VALUES(?1,?2,'subject')",
-            params![id, ea],
-        )
-        .unwrap();
-        c.execute(
-            "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role) VALUES(?1,?2,'object')",
-            params![id, eb],
-        )
-        .unwrap();
-        c.execute("INSERT OR IGNORE INTO claim_evidence(claim_id,source_id,chunk_id,quote,ts) VALUES(?1,?2,?3,?4,?5)", params![id, sid, cid, q, ts]).unwrap();
-        done += 1;
     }
-    (done, skipped)
+    id
 }
 
 pub fn stats(c: &Connection) {
     let n = |sql: &str| -> i64 { c.query_row(sql, [], |r| r.get(0)).unwrap_or(0) };
     println!(
-        "entities {} (aliases {}), claims {} (evidence rows {}), overrides {}",
+        "entities {} (aliases {}), claims {} (with a quote {}), overrides {}",
         n("SELECT COUNT(*) FROM entities"),
         n("SELECT COUNT(*) FROM entity_aliases"),
         n("SELECT COUNT(*) FROM claims"),
-        n("SELECT COUNT(*) FROM claim_evidence"),
+        n("SELECT COUNT(*) FROM claims WHERE quote IS NOT NULL"),
         n("SELECT COUNT(*) FROM kg_overrides")
     );
     println!(
@@ -309,15 +241,12 @@ pub fn sync_entities(c: &Connection) -> usize {
     list.len()
 }
 
-/// Copy decisions (with a source and quote) into claims. The entities a claim is about are those whose name or alias
-/// appears as a whole word in its title, body or quote, plus the entity named like the decision's thread.
-/// Idempotent; `nodes` is not changed. Returns (claims, linked to an entity, without an entity).
-pub fn import_decisions(c: &Connection) -> (usize, usize, usize) {
-    sync_entities(c);
-    let now = crate::db::chrono_now();
+/// Link a decision to the entities it is about: those whose name or alias appears as a whole word in `hay`
+/// (its title, body and quote), and the entity named like its thread. Returns how many were linked.
+pub fn link_entities(c: &Connection, id: &str, thread: &str, hay: &str) -> usize {
     let ents: Vec<(String, String, Vec<String>)> = {
         let mut st = c
-            .prepare(include_str!("sql/kg_import_decisions_3.sql"))
+            .prepare(include_str!("sql/kg_entity_aliases.sql"))
             .unwrap();
         st.query_map([], |r| {
             Ok((
@@ -331,78 +260,35 @@ pub fn import_decisions(c: &Connection) -> (usize, usize, usize) {
         .map(|(i, n, a)| (i, n, a.split('\u{1f}').map(String::from).collect()))
         .collect()
     };
-    let rows: Vec<(
-        String,
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        i64,
-        i64,
-        String,
-        Option<String>,
-        Option<String>,
-    )> = {
-        let mut st = c
-            .prepare(include_str!("sql/kg_import_decisions.sql"))
+    let hay = norm(hay);
+    let mut n = 0;
+    for (eid, name, aliases) in &ents {
+        if norm(name) == norm(thread)
+            || aliases.iter().any(|a| !a.is_empty() && has_word(&hay, a))
+        {
+            c.execute(
+                "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role) VALUES(?1,?2,'subject')",
+                params![id, eid],
+            )
             .unwrap();
-        st.query_map([], |r| {
-            Ok((
-                r.get(0)?,
-                r.get(1)?,
-                r.get(2)?,
-                r.get(3)?,
-                r.get(4)?,
-                r.get(5)?,
-                r.get(6)?,
-                r.get(7)?,
-                r.get(8)?,
-                r.get(9)?,
-                r.get(10)?,
-            ))
-        })
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Link every decision to the entities its text names. Run after an entity or an alias is added.
+pub fn relink_all(c: &Connection) -> usize {
+    let rows: Vec<(String, String, String)> = c
+        .prepare("SELECT id, ifnull(thread,''), title||' '||ifnull(body,'')||' '||ifnull(quote,'') FROM claims WHERE type='decision'")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
         .unwrap()
         .flatten()
-        .collect()
-    };
-    let (mut n, mut linked, mut bare) = (0, 0, 0);
-    for (nid, title, body, thread, state, stale, sid, cid, quote, role, ts) in rows {
-        let id = format!("c-{nid}");
-        let speaker = match role.as_deref() {
-            Some("user") => "owner",
-            Some("assistant") => "assistant",
-            _ => "unknown",
-        };
-        let superseded = stale
-            .as_deref()
-            .map_or(false, |s| s.starts_with("superseded"));
-        let status = match state.as_str() {
-            "rejected" => "retracted",
-            _ if superseded => "superseded",
-            "proposed" => "proposed",
-            _ => "active",
-        };
-        c.execute(
-            include_str!("sql/kg_import_decisions_2.sql"),
-            params![id, title, body, speaker, ts, status, now],
-        )
-        .unwrap();
-        c.execute("INSERT OR IGNORE INTO claim_evidence(claim_id,source_id,chunk_id,quote,ts) VALUES(?1,?2,?3,?4,?5)", params![id, sid, cid, quote, ts]).unwrap();
-        let hay = norm(&format!("{title} {body} {quote}"));
-        let mut any = false;
-        for (eid, name, aliases) in &ents {
-            if norm(name) == norm(&thread)
-                || aliases.iter().any(|a| !a.is_empty() && has_word(&hay, a))
-            {
-                c.execute("INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role) VALUES(?1,?2,'subject')", params![id, eid]).unwrap();
-                any = true;
-            }
-        }
-        n += 1;
-        if any { linked += 1 } else { bare += 1 }
-    }
-    (n, linked, bare)
+        .collect();
+    rows.iter()
+        .map(|(id, th, hay)| link_entities(c, id, th, hay))
+        .sum()
 }
 
 // ---------------------------------------------------------------- helpers
@@ -522,6 +408,10 @@ pub fn add_claim(
     stated: &str,
     origin: &str,
 ) -> Result<String, String> {
+    let rel = ctype.starts_with("relation:");
+    if !(rel || ["state", "rationale"].contains(&ctype)) {
+        return Err(format!("type must be state, rationale or relation:<kind> (got {ctype})"));
+    }
     if text.trim().is_empty() || text.chars().count() > 160 {
         return Err("text must be 1..160 chars".into());
     }
@@ -531,14 +421,18 @@ pub fn add_claim(
     if quote.trim().chars().count() < 8 {
         return Err("quote of at least 8 chars is required".into());
     }
-    if ents.is_empty() {
-        return Err("at least one entity is required".into());
+    if ents.is_empty() || (rel && ents.len() != 2) {
+        return Err(if rel {
+            "a relation needs two entities".into()
+        } else {
+            "at least one entity is required".into()
+        });
     }
-    let sid: i64 = c
+    let (sid, thread): (i64, Option<String>) = c
         .query_row(
-            "SELECT id FROM sources WHERE ref=?1",
-            params![source],
-            |r| r.get(0),
+            "SELECT id, thread FROM sources WHERE ref=?1",
+            params![crate::db::resolve_ref(c, source)],
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .map_err(|_| format!("source '{source}' not found"))?;
     let q = norm(quote);
@@ -566,12 +460,35 @@ pub fn add_claim(
                 .0,
         );
     }
-    ids.sort();
-    ids.dedup();
-    let id = format!(
-        "c-{:x}",
-        fxhash(&format!("{}{}{}", ids.join(","), ctype, norm(text)))
-    );
+    if rel && ids[0] == ids[1] {
+        return Err("a relation needs two different entities".into());
+    }
+    let mut key = ids.clone();
+    if !rel {
+        key.sort();
+        key.dedup();
+    }
+    // The same entities, type and text are the same claim, whether it was filed under the older 32-bit id or the
+    // 64-bit one; filing it again changes nothing. A new claim whose id is taken by different content is refused.
+    let natural = format!("{}{}{}", key.join(","), ctype, norm(text));
+    let same = |id: &str| -> Option<bool> {
+        c.query_row(
+            "SELECT type=?2 AND lower(title)=lower(?3) FROM claims WHERE id=?1",
+            params![id, ctype, text],
+            |r| r.get::<_, bool>(0),
+        )
+        .ok()
+    };
+    let old_id = format!("c-{:x}", fxhash(&natural));
+    if same(&old_id) == Some(true) {
+        return Ok(old_id);
+    }
+    let id = format!("c-{}", crate::db::id64(&natural));
+    match same(&id) {
+        Some(true) => return Ok(id),
+        Some(false) => return Err(format!("id {id} is already used by another claim")),
+        None => {}
+    }
     let speaker = match hit.1.as_deref() {
         Some("user") => "owner",
         Some("assistant") => "assistant",
@@ -580,62 +497,21 @@ pub fn add_claim(
     let now = crate::db::chrono_now();
     c.execute(
         include_str!("sql/kg_add_claim.sql"),
-        params![id, ctype, text, body, speaker, hit.2, origin, now],
+        params![
+            id, ctype, thread, text, body, speaker, hit.2, origin, sid, hit.0, quote, stated, now
+        ],
     )
     .map_err(|e| e.to_string())?;
-    for e in &ids {
+    for (i, e) in key.iter().enumerate() {
+        let role = if rel && i == 1 { "object" } else { "subject" };
         c.execute(
-            "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role) VALUES(?1,?2,'subject')",
-            params![id, e],
+            "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role) VALUES(?1,?2,?3)",
+            params![id, e, role],
         )
         .unwrap();
     }
-    c.execute(
-        include_str!("sql/kg_add_claim_2.sql"),
-        params![id, sid, hit.0, quote, stated, hit.2],
-    )
-    .unwrap();
+    crate::db::keep(c, &id);
     Ok(id)
-}
-
-/// `kg claims -` : a JSON array of {type,text,body,source,quote,entities:[..],stated} through the write rule.
-pub fn import_claims(c: &Connection, raw: &str) -> (usize, usize) {
-    let v: serde_json::Value = serde_json::from_str(raw).unwrap_or_default();
-    let (mut ok, mut bad) = (0, 0);
-    for x in v.as_array().cloned().unwrap_or_default() {
-        let g = |k: &str| x[k].as_str().unwrap_or("").to_string();
-        let ents: Vec<String> = x["entities"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|s| s.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let stated = if g("stated") == "inferred" {
-            "inferred"
-        } else {
-            "stated"
-        };
-        match add_claim(
-            c,
-            &g("type"),
-            &g("text"),
-            &g("body"),
-            &g("source"),
-            &g("quote"),
-            &ents,
-            stated,
-            "extracted",
-        ) {
-            Ok(_) => ok += 1,
-            Err(e) => {
-                bad += 1;
-                eprintln!("rejected [{}]: {e}", clip(&g("text"), 50));
-            }
-        }
-    }
-    (ok, bad)
 }
 
 /// Sessions to extract claims from: enough owner turns, not automated probes, not yet extracted, newest first,
@@ -647,13 +523,11 @@ pub fn extract_queue(
     session_id: Option<&str>,
 ) -> Vec<String> {
     let today = crate::db::chrono_now()[..10].to_string();
-    let used: i64 = c.query_row("SELECT COUNT(*) FROM log WHERE action IN ('kg-extract','kg-extract-failed') AND ts LIKE ?1", params![format!("{today}%")], |x| x.get(0)).unwrap_or(0);
-    let cap: i64 = std::env::var("BACKTRAIL_KG_CAP")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(8);
+    let used: i64 = c.query_row("SELECT COUNT(*) FROM log WHERE action IN ('extract','extract-failed') AND ts LIKE ?1", params![format!("{today}%")], |x| x.get(0)).unwrap_or(0);
+    let cap: i64 = crate::compile::num(&crate::compile::cfgv(), "daily_cap", 8);
     let room = (cap - used).max(0) as usize;
-    let only = session_id.map(|s| format!("session:{}", s.chars().take(8).collect::<String>()));
+    // a full session id or any unique prefix of it
+    let only = session_id.map(|s| crate::db::resolve_ref(c, &format!("session:{}", s.trim_start_matches("session:"))));
     let mut st = c.prepare(include_str!("sql/kg_extract_queue.sql")).unwrap();
     let want: Option<Vec<String>> = entity.and_then(|e| find_entity(c, e)).map(|(id, _)| {
         c.prepare("SELECT alias FROM entity_aliases WHERE entity_id=?1")
@@ -694,14 +568,28 @@ pub fn extract_queue(
     out
 }
 
-/// The text a small model reads: entity names, owner turns in full, assistant turns clipped.
+/// The text a small model reads for one session: the thread's existing items (to avoid repeats), entity names, owner
+/// turns in full, assistant turns clipped.
 pub fn extract_input(c: &Connection, r: &str) {
+    let r = &crate::db::resolve_ref(c, r);
     let Ok((sid, thread, ts)) = c.query_row("SELECT id, ifnull(thread,''), ifnull(last_ts,'') FROM sources WHERE ref=?1 AND kind='session'", params![r], |x| Ok((x.get::<_, i64>(0)?, x.get::<_, String>(1)?, x.get::<_, String>(2)?))) else { eprintln!("no such session"); std::process::exit(1) };
     println!(
-        "BACKTRAIL-KG\nSESSION {r}\nTHREAD {thread}\nDATE {}\n",
+        "BACKTRAIL-EXTRACT\nSESSION {r}\nTHREAD {thread}\nDATE {}\n",
         ts.get(..10).unwrap_or("")
     );
-    println!("ENTITIES (use these names exactly):");
+    println!("EXISTING ITEMS ON THIS THREAD (do not repeat these):");
+    for (t, title) in c
+        .prepare(include_str!("sql/kg_existing_items.sql"))
+        .unwrap()
+        .query_map(params![thread], |x| {
+            Ok((x.get::<_, String>(0)?, x.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .flatten()
+    {
+        println!("- {t}: {}", clip(&title, 110));
+    }
+    println!("\nENTITIES (use these names exactly):");
     for (n, k) in c
         .prepare("SELECT name, ifnull(kind,'') FROM entities ORDER BY name")
         .unwrap()
@@ -908,6 +796,7 @@ pub fn entity_add(c: &Connection, name: &str, kind: &str, aliases: &[String]) {
         )
         .unwrap();
     }
+    relink_all(c);
     logw(c, "owner", "kg-entity", name, &aliases.join(", "));
     println!("ok {id}");
 }
@@ -929,9 +818,11 @@ struct Row {
 /// question as if it were put in a fresh session.
 fn excl() -> String {
     match std::env::var("BACKTRAIL_EXCLUDE_SESSION") {
-        Ok(r) if r.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == ':') && !r.is_empty() => {
+        Ok(r) if r.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == ':' || ch == '-') && !r.is_empty() => {
+            // a prefix is enough: `session:xxxxxxxx` matches the stored full id
             format!(
-                " AND NOT EXISTS (SELECT 1 FROM claim_evidence xv JOIN sources xs ON xs.id=xv.source_id WHERE xv.claim_id=c.id AND xs.ref='{r}')"
+                " AND NOT EXISTS (SELECT 1 FROM sources xs WHERE xs.id=c.source_id AND substr(xs.ref,1,{})='{r}')",
+                r.len()
             )
         }
         _ => String::new(),
@@ -975,8 +866,8 @@ fn who(s: &str) -> &str {
 }
 
 fn line(r: &Row, qlen: usize) -> String {
-    format!(
-        "{} {} [{}{}] {}\n    \"{}\"",
+    let head = format!(
+        "{} {} [{}{}] {}",
         day(&r.ts),
         who(&r.speaker),
         r.status,
@@ -985,9 +876,13 @@ fn line(r: &Row, qlen: usize) -> String {
         } else {
             ""
         },
-        r.text,
-        clip(&r.quote, qlen)
-    )
+        r.text
+    );
+    if r.quote.is_empty() {
+        head
+    } else {
+        format!("{head}\n    \"{}\"", clip(&r.quote, qlen))
+    }
 }
 
 /// Entity page: header, newest claims in full, older claims rolled up by month, within a token budget.
@@ -1102,7 +997,7 @@ pub fn why(c: &Connection, q: &str) -> bool {
     }
     let hit = |i: usize| {
         format!(
-            "(' '||lower(c.text||' '||ifnull(c.body,'')||' '||ifnull((SELECT group_concat(quote,' ') FROM claim_evidence v WHERE v.claim_id=c.id),'')) LIKE ?{})",
+            "(' '||lower(c.text||' '||ifnull(c.body,'')||' '||ifnull(c.quote,'')) LIKE ?{})",
             i + 1
         )
     };
@@ -1118,7 +1013,7 @@ pub fn why(c: &Connection, q: &str) -> bool {
     };
     let args: Vec<&dyn rusqlite::ToSql> = ws.iter().map(|w| w as &dyn rusqlite::ToSql).collect();
     let sql = format!(
-        "SELECT c.id FROM claims c WHERE c.status!='retracted'{} AND ({score})>={need} ORDER BY ({score}) DESC, c.asserted_at DESC LIMIT 5",
+        "SELECT c.id FROM claims c WHERE c.status!='retracted' AND (c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%'){} AND ({score})>={need} ORDER BY ({score}) DESC, c.asserted_at DESC LIMIT 5",
         excl()
     );
     let ids: Vec<String> = c
@@ -1132,12 +1027,51 @@ pub fn why(c: &Connection, q: &str) -> bool {
         println!("no record in claims");
         return false;
     }
-    for id in &ids {
-        for r in claim_rows(c, "c.id=?1", &[id], 1) {
-            println!("{}\n    about: {}", line(&r, 160), r.ents);
+    let rows: Vec<Row> = ids
+        .iter()
+        .flat_map(|id| claim_rows(c, "c.id=?1", &[id], 1))
+        .collect();
+    print_with_notes(c, &rows);
+    true
+}
+
+/// Print claims, then one line per entity they are about when newer claims about that entity exist than any shown.
+/// Wording alone cannot tell a changed mind from a restatement, so this only reports dates.
+fn print_with_notes(c: &Connection, rows: &[Row]) {
+    for r in rows {
+        println!("{}\n    about: {}", line(r, 160), r.ents);
+    }
+    let mut names: Vec<&str> = rows
+        .iter()
+        .flat_map(|r| r.ents.split(", "))
+        .filter(|e| !e.is_empty())
+        .collect();
+    names.sort();
+    names.dedup();
+    let mut said = 0;
+    for name in names {
+        let shown = rows
+            .iter()
+            .filter(|r| r.ents.split(", ").any(|e| e == name))
+            .filter_map(|r| r.ts.as_deref())
+            .max()
+            .unwrap_or("");
+        let latest: Option<String> = c
+            .query_row(
+                "SELECT MAX(c.asserted_at) FROM claims c JOIN claim_about a ON a.claim_id=c.id JOIN entities e ON e.id=a.entity_id
+                 WHERE e.name=?1 AND c.state!='rejected' AND (c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%')",
+                params![name],
+                |x| x.get(0),
+            )
+            .ok()
+            .flatten();
+        if let Some(l) = latest {
+            if said < 3 && l.get(..10) > shown.get(..10) {
+                println!("[newer claims about {name} exist, latest {}: `kg trace \"{name}\"`]", day(&Some(l)));
+                said += 1;
+            }
         }
     }
-    true
 }
 
 const STOP: &[&str] = &[
@@ -1183,66 +1117,82 @@ pub fn neighbors(c: &Connection, name: &str) {
 }
 
 /// Full-text passages, prefiltered to the entity's sessions or a time window when given.
-pub fn passage(c: &Connection, q: &str, entity: Option<&str>, from: Option<&str>) {
-    let ws: Vec<String> = q
-        .split(|ch: char| !ch.is_alphanumeric())
-        .filter(|w| w.chars().count() >= 3 && !STOP.contains(&w.to_lowercase().as_str()))
-        .map(|w| format!("\"{}\"", w.to_lowercase()))
+/// The last route of `find`: the same hybrid search that `/search` and `bt search` use (keyword and vectors,
+/// merged). Claims that cite the best passages are printed first, with date, speaker and quote. When no claim
+/// cites them, the passages themselves are printed. Returns false when nothing matched.
+pub fn ask(c: &Connection, q: &str) -> bool {
+    let r = crate::server::search(c, q, &crate::server::Filters::default(), true);
+    let skip = match std::env::var("BACKTRAIL_EXCLUDE_SESSION") {
+        Ok(r) if !r.is_empty() => r,
+        _ => String::new(),
+    };
+    let hits: Vec<(i64, String, String)> = r["results"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter(|x| skip.is_empty() || !x["ref"].as_str().unwrap_or("").starts_with(&skip))
+        .take(15)
+        .map(|x| {
+            (
+                x["chunk_id"].as_i64().unwrap_or(0),
+                x["ref"].as_str().unwrap_or("").to_string(),
+                x["snip"].as_str().unwrap_or("").to_string(),
+            )
+        })
         .collect();
-    if ws.is_empty() {
-        println!("no record: query has no content words");
-        return;
+    if hits.is_empty() {
+        println!("no record");
+        return false;
     }
-    let ent_filter = entity
-        .and_then(|e| find_entity(c, e))
-        .map(|(id, _)| id)
-        .unwrap_or_default();
-    let from = from.unwrap_or("").to_string();
-    for (label, m) in [
-        ("all words", ws.join(" AND ")),
-        ("any word", ws.join(" OR ")),
-    ] {
-        let exclude = match std::env::var("BACKTRAIL_EXCLUDE_SESSION") {
-            Ok(r)
-                if r.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == ':') && !r.is_empty() =>
-            {
-                format!(" AND s.ref!='{r}'")
+    let mode = r["mode"].as_str().unwrap_or("text");
+    let mut seen = std::collections::HashSet::new();
+    let mut found: Vec<Row> = vec![];
+    for (cid, _, _) in &hits {
+        for row in claim_rows(c, "c.chunk_id=?1 AND c.status!='retracted'", &[cid], 3) {
+            if found.len() < 5 && seen.insert(row.text.clone()) {
+                found.push(row);
             }
-            _ => String::new(),
-        };
-        let mut st = c
-            .prepare(&include_str!("sql/kg_passage.sql").replace("{exclude}", &exclude))
-            .unwrap();
-        let rs: Vec<(String, String, String, String)> = st
-            .query_map(params![m, ent_filter, from], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-            })
-            .unwrap()
-            .flatten()
-            .collect();
-        if !rs.is_empty() {
-            println!("passages ({label}):");
-            for (r, d, role, sn) in rs {
-                println!(
-                    "{d} {r} {} | {}",
-                    if role == "user" { "owner" } else { "assistant" },
-                    clip(&sn, 170)
-                );
-            }
-            return;
         }
     }
-    println!("no record in passages");
+    if !found.is_empty() {
+        println!("claims citing the best passages ({mode} search):");
+        print_with_notes(c, &found);
+        return true;
+    }
+    println!("no claim cites the best passages ({mode} search); passages:");
+    for (cid, rf, snip) in hits.iter().take(5) {
+        let (role, ts): (String, Option<String>) = c
+            .query_row("SELECT ifnull(role,''), ts FROM chunks WHERE id=?1", params![cid], |x| {
+                Ok((x.get(0)?, x.get(1)?))
+            })
+            .unwrap_or_default();
+        let snip = snip
+            .replace("<mark>", "[")
+            .replace("</mark>", "]")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">");
+        println!(
+            "{} {rf} {} | {}",
+            day(&ts),
+            if role == "user" { "owner" } else { "assistant" },
+            clip(&snip, 170)
+        );
+    }
+    true
 }
 
 /// Router for a history question: lineage questions trace the entity; questions about an entity's state or contents
-/// show its page; everything else looks up claims, then passages. A miss prints two short lines.
+/// show its page; everything else looks up claims by their own words, then searches passages by meaning and keyword.
 pub fn find(c: &Connection, q: &str) {
     let low = q.to_lowercase();
     let ents = mentions(c, q);
     let lineage = [
         "lineage",
         "came from",
+        "come from",
+        "where did",
         "built on",
         "spun out",
         "history of",
@@ -1302,13 +1252,13 @@ pub fn find(c: &Connection, q: &str) {
         }
     }
     if !why(c, q) {
-        passage(c, q, None, None);
+        ask(c, q);
     }
     if let Some((_, name)) = ents.first() {
         let n = backlog(c, name);
         if n > 0 {
             println!(
-                "[{n} sessions that mention {name} have no extracted claims yet: skill/kg-extract.sh --entity \"{name}\"]"
+                "[{n} sessions that mention {name} have no extracted claims yet: skill/extract.sh --entity \"{name}\"]"
             );
         }
     }
@@ -1341,11 +1291,11 @@ pub fn lint(c: &Connection) {
     println!(
         "claims about no entity: {}",
         n(
-            "SELECT COUNT(*) FROM claims c WHERE NOT EXISTS (SELECT 1 FROM claim_about a WHERE a.claim_id=c.id)"
+            "SELECT COUNT(*) FROM claims c WHERE (c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%') AND NOT EXISTS (SELECT 1 FROM claim_about a WHERE a.claim_id=c.id)"
         )
     );
     let mut lost = 0;
-    let mut st = c.prepare("SELECT v.claim_id, v.quote, k.text FROM claim_evidence v LEFT JOIN chunks k ON k.id=v.chunk_id").unwrap();
+    let mut st = c.prepare("SELECT c.id, c.quote, k.text FROM claims c LEFT JOIN chunks k ON k.id=c.chunk_id WHERE c.quote IS NOT NULL").unwrap();
     for (id, q, t) in st
         .query_map([], |r| {
             Ok((
@@ -1365,22 +1315,6 @@ pub fn lint(c: &Connection) {
         }
     }
     println!("claims whose quote is no longer in its passage: {lost}");
-    let mm: Vec<(String, String, String)> = c
-        .prepare(include_str!("sql/kg_lint.sql"))
-        .unwrap()
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-        .unwrap()
-        .flatten()
-        .collect();
-    println!(
-        "claims whose state differs from their source item: {}{}",
-        mm.len(),
-        if mm.is_empty() {
-            ""
-        } else {
-            " (run `kg import`)"
-        }
-    );
     let tok = |s: &str| -> std::collections::HashSet<String> {
         s.to_lowercase()
             .split(|ch: char| !ch.is_alphanumeric())
@@ -1428,7 +1362,7 @@ pub fn lint(c: &Connection) {
     for (id, t, _) in sample.iter().take(5) {
         let q: String = c
             .query_row(
-                "SELECT quote FROM claim_evidence WHERE claim_id=?1 LIMIT 1",
+                "SELECT ifnull(quote,'') FROM claims WHERE id=?1",
                 params![id],
                 |r| r.get(0),
             )
@@ -1439,7 +1373,7 @@ pub fn lint(c: &Connection) {
 
 // ---------------------------------------------------------------- KG-20 backup export and restore
 
-/// One JSON object per line. Evidence is stored by source ref and quote, not by row id, so another machine can re-locate it.
+/// One JSON object per line. A claim's evidence is stored by source ref and quote, not by row id, so another machine can re-locate it.
 pub fn export(c: &Connection, path: &str) -> std::io::Result<()> {
     use std::io::Write;
     let mut f = std::fs::File::create(path)?;
@@ -1461,7 +1395,7 @@ pub fn export(c: &Connection, path: &str) -> std::io::Result<()> {
         .flatten()
         .collect()
     };
-    let sets: [(&str, &str, &[&str]); 6] = [
+    let sets: [(&str, &str, &[&str]); 5] = [
         (
             "entity",
             "SELECT id,name,kind,created FROM entities",
@@ -1476,28 +1410,15 @@ pub fn export(c: &Connection, path: &str) -> std::io::Result<()> {
             "claim",
             include_str!("sql/kg_export.sql"),
             &[
-                "id",
-                "type",
-                "text",
-                "body",
-                "speaker",
-                "asserted_at",
-                "valid_to",
-                "status",
-                "superseded_by",
-                "origin",
-                "created",
+                "id", "type", "thread", "title", "body", "state", "origin", "speaker",
+                "asserted_at", "valid_to", "superseded_by", "done_by", "answer", "tag", "stale",
+                "source", "quote", "stated", "created", "updated",
             ],
         ),
         (
             "about",
             "SELECT claim_id,entity_id,role FROM claim_about",
             &["claim_id", "entity_id", "role"],
-        ),
-        (
-            "evidence",
-            include_str!("sql/kg_export_2.sql"),
-            &["claim_id", "source", "quote", "stated", "ts"],
         ),
         (
             "override",
@@ -1514,7 +1435,25 @@ pub fn export(c: &Connection, path: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Restore an export into this store. Evidence whose source or quote cannot be found here is counted and skipped.
+/// The source and chunk that hold `quote`, found by source ref.
+fn locate(c: &Connection, source: Option<String>, quote: &str) -> Option<(i64, i64)> {
+    let q = norm(quote);
+    let sid: i64 = c
+        .query_row("SELECT id FROM sources WHERE ref=?1", params![crate::db::resolve_ref(c, &source?)], |x| x.get(0))
+        .ok()?;
+    let mut st = c
+        .prepare("SELECT id, text FROM chunks WHERE source_id=?1 ORDER BY seq")
+        .unwrap();
+    let found = st
+        .query_map(params![sid], |x| Ok((x.get::<_, i64>(0)?, x.get::<_, String>(1)?)))
+        .unwrap()
+        .flatten()
+        .find(|x| norm(&x.1).contains(&q))
+        .map(|x| (sid, x.0));
+    found
+}
+
+/// Restore an export into this store. A claim whose source or quote cannot be found here is kept without a quote and counted.
 pub fn restore(c: &Connection, path: &str) -> (usize, usize) {
     let raw = std::fs::read_to_string(path).unwrap_or_default();
     let (mut n, mut orphan) = (0, 0);
@@ -1542,20 +1481,47 @@ pub fn restore(c: &Connection, path: &str) -> (usize, usize) {
                 n += 1
             }
             "claim" => {
+                let hit = locate(c, g("source"), &g("quote").unwrap_or_default());
+                // An export from before items and claims were merged names the fields text and status.
+                let (Some(title), state) = (
+                    g("title").or_else(|| g("text")),
+                    g("state").or_else(|| {
+                        g("status").map(|s| match s.as_str() {
+                            "active" => "settled".to_string(),
+                            "retracted" => "rejected".to_string(),
+                            _ => s,
+                        })
+                    }),
+                ) else {
+                    continue;
+                };
+                if hit.is_none() && g("quote").is_some() {
+                    orphan += 1;
+                }
                 c.execute(
                     include_str!("sql/kg_restore.sql"),
                     params![
                         g("id"),
                         g("type"),
-                        g("text"),
+                        g("thread"),
+                        title,
                         g("body"),
+                        state.unwrap_or("proposed".into()),
+                        g("origin"),
                         g("speaker"),
                         g("asserted_at"),
                         g("valid_to"),
-                        g("status"),
                         g("superseded_by"),
-                        g("origin"),
-                        g("created")
+                        g("done_by"),
+                        g("answer"),
+                        g("tag"),
+                        g("stale"),
+                        hit.map(|h| h.0),
+                        hit.map(|h| h.1),
+                        g("quote"),
+                        g("stated").unwrap_or("stated".into()),
+                        g("created"),
+                        g("updated")
                     ],
                 )
                 .unwrap();
@@ -1574,33 +1540,12 @@ pub fn restore(c: &Connection, path: &str) -> (usize, usize) {
                 n += 1
             }
             "evidence" => {
-                let q = norm(&g("quote").unwrap_or_default());
-                let sid: Option<i64> = c
-                    .query_row(
-                        "SELECT id FROM sources WHERE ref=?1",
-                        params![g("source")],
-                        |r| r.get(0),
-                    )
-                    .ok();
-                let hit: Option<(i64, i64)> = sid.and_then(|sid: i64| {
-                    let mut st = c
-                        .prepare("SELECT id, text FROM chunks WHERE source_id=?1 ORDER BY seq")
-                        .unwrap();
-                    let found = st
-                        .query_map(params![sid], |r| {
-                            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
-                        })
-                        .unwrap()
-                        .flatten()
-                        .find(|r| norm(&r.1).contains(&q))
-                        .map(|r| (sid, r.0));
-                    found
-                });
-                match hit {
-                    Some((s, ch)) => {
+                // Old exports kept evidence in its own rows; the claim now carries its quote.
+                match locate(c, g("source"), &g("quote").unwrap_or_default()) {
+                    Some((sid, cid)) => {
                         c.execute(
-                            include_str!("sql/kg_restore_2.sql"),
-                            params![g("claim_id"), s, ch, g("quote"), g("stated"), g("ts")],
+                            "UPDATE claims SET source_id=?2, chunk_id=?3, quote=?4, stated=?5 WHERE id=?1 AND quote IS NULL",
+                            params![g("claim_id"), sid, cid, g("quote"), g("stated").unwrap_or("stated".into())],
                         )
                         .unwrap();
                         n += 1
@@ -1615,7 +1560,7 @@ pub fn restore(c: &Connection, path: &str) -> (usize, usize) {
 }
 
 /// Add an alias to an existing entity (by name or alias), then relink claims. Returns false when the entity is unknown.
-/// Merge a duplicate claim into the one to keep: its evidence and entities move over, and it is closed as superseded.
+/// Merge a duplicate claim into the one to keep: its entities move over, and it is closed as superseded.
 pub fn merge(c: &Connection, keep: &str, drop: &str) -> Result<(), String> {
     let has = |id: &str| -> bool {
         c.query_row("SELECT 1 FROM claims WHERE id=?1", params![id], |_| Ok(()))
@@ -1625,19 +1570,13 @@ pub fn merge(c: &Connection, keep: &str, drop: &str) -> Result<(), String> {
         return Err("both ids must be existing, different claims".into());
     }
     c.execute(
-        "INSERT OR IGNORE INTO claim_evidence(claim_id,source_id,chunk_id,quote,stated,ts)
-         SELECT ?1,source_id,chunk_id,quote,stated,ts FROM claim_evidence WHERE claim_id=?2",
-        params![keep, drop],
-    )
-    .unwrap();
-    c.execute(
         "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role)
          SELECT ?1,entity_id,role FROM claim_about WHERE claim_id=?2",
         params![keep, drop],
     )
     .unwrap();
     c.execute(
-        "UPDATE claims SET status='superseded', superseded_by=?1, valid_to=?3 WHERE id=?2",
+        "UPDATE claims SET state='superseded', superseded_by=?1, valid_to=?3 WHERE id=?2",
         params![keep, drop, crate::db::chrono_now()],
     )
     .unwrap();
@@ -1663,6 +1602,7 @@ pub fn alias_add(c: &Connection, entity: &str, alias: &str) -> bool {
         params![norm(alias), id],
     )
     .unwrap();
+    relink_all(c);
     logw(c, "owner", "kg-alias", &name, alias);
     true
 }

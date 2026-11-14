@@ -9,55 +9,52 @@ Commands run as `bt <command>`.
 
 | Command | Purpose |
 | --- | --- |
-| `ingest` | Read new or changed sources and re-link items to their quotes |
+| `ingest [--force]` | Read new or changed sources (new lines only, for a session file that grew) and re-link facts whose passage changed. `--force` reads every session again in full (after a change to the chunking rule); sessions whose file is gone are kept |
 | `serve [--port N]` | Run the app |
 | `brief [--thread T]` | Rescan, then print open questions, threads in motion and stale items |
-| `add <type> --thread --title --source --quote [--body --state --origin]` | File one item |
-| `import <items.json>` or `import -` | File many items through the same rule |
+| `add <type> --thread --title --source --quote [--body --state --origin]` | File one decision, step, question or turn |
+| `import <facts.json>` or `import -` | File many facts through the same rule. Decisions, steps, questions and turns need a thread (taken from the source when missing); `state`, `rationale` and `relation` items name entities |
 | `done <step id> --by owner\|claude\|evidence --proof "..."` | Close a step; `claude` and `evidence` need proof |
 | `flag <id> --as live\|in_effect\|superseded\|done --reason "..."` | Label a proposed item |
-| `retire <id> [--by <id>] --reason "..."` | Retire an item, optionally linking its replacement |
+| `retire <id> [--by <id>] --reason "..."` | Retire an item; `--by` records the item that replaced it |
 | `set-thread <name> --state --summary` | Change a thread's state or summary |
-| `link <A> <B> <kind>` | Record a thread-to-thread relation |
+| `link <A> <B> <kind>` | Record a project-to-project relation by the owner, without a quote |
 | `assign <session ref> <thread>` | Pin a session to a thread |
 | `search <words> [--thread T] [--kind session\|note\|artifact\|commit] [--state S] [--from DATE] [--to DATE] [--text]` | Search with filters. `--state` keeps passages whose source has a filed item in that state. `--text` forces keyword-only |
 | `embed [--limit N]` | Embed passages that have no vector yet (needs the embedding server; see the `embeddings` key) |
 | `show <ref>` | Print a source's passages |
-| `check [--pairs]` | Report lost quotes, orphan threads, stale work; `--pairs` lists candidate contradictions |
+| `check [--pairs]` | Report lost quotes, session files that were never indexed, orphan threads, stale work; `--pairs` lists candidate contradictions |
 | `match` | Mark open steps that a later commit seems to complete as `looks done?` (word-overlap heuristic, unproven) |
 | `pending [--days N]` | List recent sessions that no item cites |
 | `artifacts [--manifest list.json]` | Record publish dates and report missing or stale snapshots |
-| `compile-input <ref>` | Print the trimmed text of one session for a model |
-| `compile-queue [--session ID] [--limit N]` | List sessions worth compiling |
-| `compile-log <ref> [--failed 1] --detail "..."` | Record one compile run and its cost |
+| `extract-input <ref>` | Print one session for a model: the thread's existing items, the entity names, and the turns |
+| `extract-queue [--session ID] [--limit N] [--entity E]` | List sessions worth extracting (at most `daily_cap` a day) |
+| `extract-log <ref> [--failed 1] --detail "..."` | Record one extraction run and its cost |
 | `log [--n N]` | Print the append-only change log |
-| `backup` | Copy the store to `<data dir>/backups` (also daily on rescan, 14 kept) |
-| `kg [migrate]` | Print graph table counts; `migrate` copies thread relations that have a quote from `links` into claims (idempotent, `links` unchanged) |
-| `kg import` | Seed the configured entities (`config.json` key `entities`) and copy decisions into claims with their quote; entities are matched by whole-word name or alias |
-| `kg find "<question>"` | Router for history questions: lineage trace, entity page, claim lookup, then passages. Prints "no record" on a miss |
+| `backup` | Copy the store to `<data dir>/backups` (also daily on rescan, newest 3 kept) |
+| `kg` | Print claim and entity counts |
+| `kg find "<question>"` | Router for history questions: lineage trace, entity page, claims matched by their own words, then the hybrid search (claims that cite the best passages, else the passages). Prints "no record" on a miss. When claims about an entity are newer than any shown, a line gives the latest date |
 | `kg page <entity> [--budget N]` | Entity page within a token budget: newest claims in full, older ones rolled up by month |
-| `kg trace <entity>` / `kg why <words>` / `kg neighbors <entity>` / `kg passage <words> [--entity E --from DATE]` | Dated lineage, claim lookup, shared-claim neighbours (2 hops, capped), full-text with a prefilter |
-| `kg claims -` | Add claims from a JSON array through the write rule (verbatim quote, known entities; speaker and date come from the passage) |
-| `kg extract-queue [--limit N --entity E]`, `kg extract-input <ref>`, `kg log <ref>` | Inputs for `skill/kg-extract.sh`, which runs one small-model call per session (8 a day at most; `BACKTRAIL_KG_CAP=N` changes the limit for one run) |
+| `kg trace <entity>` / `kg why <words>` / `kg neighbors <entity>` / `kg passage <words>` | Dated lineage, claim lookup by words, shared-claim neighbours (2 hops, capped), the hybrid search routed to claims |
 | `kg suggest` / `kg entity add <name> [--kind K --alias A]` | Suggest new entities and alias spellings (nothing is written); add one by hand |
 | `kg state` | Thread state suggested from session activity alone (nothing is changed) |
-| `kg merge <keep id> <drop id>` | Merge a duplicate claim into another: evidence and entities move over and the duplicate is closed as superseded |
+| `kg merge <keep id> <drop id>` | Merge a duplicate claim into another: its entities move over and the duplicate is closed as superseded |
 | `kg lint` | Graph checks (also part of `check`) |
-| `kg export <file>` / `kg restore <file>` | Backup as JSONL; evidence is re-located by source and quote on restore |
-| `build` | Ingest all sources, then build the graph from them (first run) |
+| `kg export <file>` / `kg restore <file>` | Backup of entities and all claims as JSONL; each quote is re-located by source on restore |
+| `build` | Ingest all sources, create the configured entities (`config.json` key `entities`) and embed (first run) |
 | `demo` | Write a demo store (requires `BACKTRAIL_HOME`) |
 | `hooks [status\|install\|remove]` | Show, add or remove the Claude Code hooks in `~/.claude/settings.json`; the old file is copied to `settings.json.bak-backtrail` first |
 
-`relate <A> <B> <kind> --source <ref> --quote "..." [--state proposed]` files a relation between two threads
-(`spun out of`, `forked from`, `built on`, `replaced by`) with a quote from a source. `relate-input <ref>` prints the
-packet for a model to propose relations.
+`relate <A> <B> <kind> --source <ref> --quote "..." [--state proposed]` files a relation between two projects
+(`spun out of`, `forked from`, `built on`, `replaced by`) with a quote from a source. It is stored as a relation claim.
+`extract.sh` proposes relations in the same pass as decisions and steps.
 
 App screens: Today, thread, source (cited passage highlighted), search, items, log, and the graph. The graph shows
 entities as nodes (size is the number of claims, a line means claims about both). Selecting a node opens its
 lineage, shared-claim neighbours and claims, each with date, speaker, quote and a link to the source passage. The
 panel also lists suggested entities and aliases that can be added with one click. A project page still has a map of
 its own notes. The app can tick a step, confirm or dismiss `looks done?`, answer a question, add an idea, and accept
-or reject suggested items. Thread lineage drawn on the graph comes from relation claims (`relate` writes them).
+or reject suggested items. Thread lineage drawn on the graph comes from relation claims (`relate`, `link` and `extract.sh` write them).
 
 ## Configuration
 
@@ -74,7 +71,7 @@ indexed. It holds custom thread rules, note folders and repositories:
 | `generic_projects` | Project folder names that never decide a thread (default `["home"]`) |
 | `repos` | Repository path to thread table, used for commit matching |
 | `aliases` | Alternative names used for mention edges |
-| `compile` | `min_owner_turns` (4), `daily_cap` (8), `max_chars` (24000) |
+| `compile` | `daily_cap` (8): extraction runs a day |
 | `port` | Server port (8799) |
 | `embeddings` | On by default with `url` `http://127.0.0.1:11434` and `model` `embeddinggemma-2:270m`. Keys: `url` (an Ollama-compatible server, `http://` only), `model`, and optionally `query_prefix`, `document_prefix` (default to `task: search result | query: ` and `title: none | text: ` for `embeddinggemma` models, `search_query: ` and `search_document: ` for `nomic` models, empty otherwise) and `batch_cap` (passages per background run, default 2000). `false` turns embeddings off. Changing `model` discards stored vectors and re-embeds. |
 
@@ -111,8 +108,8 @@ Titles were written by a model from the cited passage, so the queries are not ty
 
 - `SessionStart`: `bt brief` prints open questions and threads in motion.
 - `SessionEnd`: `<path>/skill/session-end.sh` runs `ingest` and `embed` in the background when a session closes. It
-  does not call a model. Setting `BACKTRAIL_COMPILE_ON_END=1` in the hook's environment also compiles the session with
-  a small model, which costs tokens.
+  does not call a model. Setting `BACKTRAIL_COMPILE_ON_END=1` in the hook's environment also runs `skill/extract.sh` on the
+  session with a small model, which costs tokens.
 
 ## Demo store
 
@@ -128,7 +125,7 @@ an entity or time prefilter past about 2 million.
 Keyword search uses SQLite FTS5, which handles far more than the 11,800 passages in the test store.
 Parts that do not scale unchanged: vectors are compared by brute force over an in-memory copy (about 36 MB at 768 dimensions and 11,800
 passages, a few hundred thousand passages at most before it needs an index); `graph()` rebuilds the whole graph per
-request with one FTS query per thread; the item index is rebuilt in memory whenever items change. None of these has
+request with one FTS query per thread; the item index is rebuilt in memory whenever facts change. None of these has
 been measured beyond that size.
 
 ## Source layout
@@ -140,5 +137,11 @@ that the caller replaces. Short statements stay inline.
 ## Other limits
 
 - Thread assignment is regular-expression based; unmatched sources stay in `Unsorted`.
-- A compile run of one session on a small model cost 0.0013 and 0.0041 USD in two runs (3,300 and 10,700 input tokens).
+- One extraction run of a session on a small model cost 0.0019 to 0.0033 USD in three runs (3,100 to 6,200 input tokens).
+- Only the text of user and assistant turns is stored, in chunks of at most 2,400 characters. Tool calls, tool output,
+  thinking and images are not. On one store this was about 0.5% of the bytes in the transcript files (5.9 MB of
+  1.8 GB over 26 days).
+- Claude Code removes session transcripts after 30 days by default (setting `cleanupPeriodDays`). A session is indexed
+  when it ends and the store keeps its text, but a session that was never indexed before its file was removed is lost.
+  The data directory then holds the only copy of the text, so it needs its own backup.
 - The session-end hook and the session-start brief hook are configured separately in the Claude Code settings.

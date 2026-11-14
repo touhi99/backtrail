@@ -5,18 +5,20 @@ description: File decisions, steps and questions into the Backtrail store from r
 
 # Backtrail thinking job
 
-Backtrail indexes Claude Code sessions, notes and artifact snapshots. Items are filed against threads and must
+Backtrail indexes Claude Code sessions, notes and artifact snapshots. Facts are filed against threads and must
 cite an indexed source with a verbatim quote. The store is read through the `backtrail` binary
 (`target/release/backtrail` in the project folder). Never write status into notes.
 
 ## Cheap path (default)
 
-Compiling sessions is overview work and does not need a large model. `skill/compile.sh <session ref>...` runs one
-single-shot call per session on a small model (`BACKTRAIL_COMPILE_MODEL`, default `haiku`) with no tools, no project
-instructions and no saved session. It pipes `backtrail compile-input <ref>` in and `backtrail import -` out, then
-records the cost with `compile-log`. `skill/session-end.sh` is the SessionEnd hook body: it runs `compile-queue
---session <id>` and starts `compile.sh` in the background. While `BACKTRAIL_COMPILE` is set, `brief` and the hook exit
-at once, so a compile run cannot start another. Main sessions do not file items themselves.
+Extraction is overview work and does not need a large model. `skill/extract.sh <session ref>...` (or `--session ID`,
+`--limit N`, `--entity NAME`) runs one single-shot call per session on a small model (`BACKTRAIL_COMPILE_MODEL`, default
+`haiku`) with no tools, no project instructions and no saved session. It pipes `backtrail extract-input <ref>` in and
+`backtrail import -` out, then records the cost with `extract-log`. One call returns decisions, steps, questions,
+state and rationale claims, and relations, so a session is read once. `skill/session-end.sh` is the SessionEnd hook
+body: it runs `ingest` and `embed`, and starts `extract.sh` in the background only when `BACKTRAIL_COMPILE_ON_END=1`.
+While `BACKTRAIL_COMPILE` is set, `brief` and the hook exit at once, so an extraction run cannot start another. Main
+sessions do not file facts themselves.
 
 Other commands for keeping the store accurate without raw SQL:
 - `backtrail flag <id> --as live|in_effect|superseded|done --reason "..."` labels a proposed item after checking it
@@ -33,7 +35,7 @@ Other commands for keeping the store accurate without raw SQL:
 3. `backtrail show <ref>` prints a source. Read it before filing anything.
 4. File each finding with
    `backtrail add <decision|step|question|turn> --thread "<thread>" --title "<=110 chars" --body "<=320 chars" --source "<ref>" --quote "<verbatim text from that source>" --origin suggested --state proposed`
-   or several at once with `backtrail import items.json`. The command rejects a missing source, a quote not
+   or several at once with `backtrail import facts.json` (also takes `state`, `rationale` and `relation` items with `entities`). The command rejects a missing source, a quote not
    found in the source, or text over the limit.
 5. Close a step only with evidence: `backtrail done <id> --by claude --proof "<what shows it>"`.
    Check the claim first (run the command, read the code, list the git tags).
@@ -50,7 +52,10 @@ Other commands for keeping the store accurate without raw SQL:
 
 ## Rules
 
-- Suggested items stay `proposed` until the user accepts them in the app.
+- File suggestions as `--state proposed`. The binary keeps a decision, rationale or state claim on its own when the quote
+  is a turn the user typed and says it directly, and it is not a likely repeat of an earlier fact; everything else stays
+  `proposed` until the user accepts it in the app.
+- Cite a session as `session:<session id>`, or a unique prefix of it (`session:<first 8 characters>`).
 - A title is a fair reading of the quote, not a guess. If the source does not say it, do not file it.
 - Questions are things only the user can decide. Do not file a question the sources already answer.
 - Nothing about buying or ordering is filed as a task.

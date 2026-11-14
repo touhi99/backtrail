@@ -2,7 +2,7 @@
 SELECT
   title,
   answer
-FROM nodes
+FROM claims
 WHERE type='question'
   AND state='answered'
   AND thread=?1
