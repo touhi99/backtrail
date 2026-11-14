@@ -10,7 +10,7 @@ const hidden = { opacity: 0, width: 1, height: 1, border: 0 }
 const H = () => (<><Handle type="target" position={Position.Left} style={hidden} /><Handle type="source" position={Position.Right} style={hidden} /></>)
 const stateColor = (s: string) => STATE[s]?.color ?? '#52525b'
 
-/* ---------- focus: a project with the notes, items and neighbours around it ---------- */
+/* ---------- focus: a thread with the notes, items and neighbours around it ---------- */
 function CenterCard({ data }: NodeProps) {
   const d: any = data
   return (
@@ -188,7 +188,7 @@ export default function MapPage() {
   return (
     <div className="relative h-full min-h-[560px]">
       <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
-        <button className="btn glass" onClick={() => nav('/map')}><ArrowLeft size={14} />All projects</button>
+        <button className="btn glass" onClick={() => nav('/map')}><ArrowLeft size={14} />All threads</button>
         {thread && <button className="btn glass" onClick={() => nav(`/thread/${encodeURIComponent(thread)}`)}>Open page</button>}
         {thread && <button className="btn glass" onClick={() => capture(thread)}><Plus size={14} />Add to {thread}</button>}
         {thread && focus && (focus.items.length > 7 || focus.notes.length > 8) && <button className="btn glass" onClick={() => setAllItems(!allItems)}>{allItems ? 'Show fewer' : `Show all ${focus.items.length} items and ${focus.notes.length + focus.hidden_notes} notes`}</button>}

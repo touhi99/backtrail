@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { MessageCircleQuestion } from 'lucide-react'
-import { dayFmt, post, staleOf } from '@/lib/api'
+import { agoFmt, dayFmt, post, staleOf } from '@/lib/api'
 import { useShell } from '@/components/Shell'
 import { STATE_HEX, dayCounts, nextStep, useDetails } from '@/lib/next'
 import { Ring } from '@/components/Viz'
@@ -15,6 +15,7 @@ export default function Home() {
   const { today, reload } = useShell()
   const { later } = useLater()
   const [allQ, setAllQ] = useState(false)
+  const [tab, setTab] = useState<'decide' | 'todo' | 'asks'>('decide')
   const [openQ, setOpenQ] = useState<string | null>(null)
   const [ans, setAns] = useState('')
   const threads: any[] = today?.threads ?? []
@@ -43,6 +44,14 @@ export default function Home() {
     return { steps, decisions, days, total: days.reduce((a, b) => a + b, 0) }
   }, [details])
 
+  const todo: any[] = today?.todo ?? []
+  const asks: any[] = today?.asks ?? []
+  const buckets = [
+    { id: 'decide' as const, n: queue.length, label: 'Waiting for your decision', hint: 'Claude did or proposed it, you confirm' },
+    { id: 'todo' as const, n: todo.length, label: 'To do', hint: 'Agreed and noted, not built yet' },
+    { id: 'asks' as const, n: asks.length, label: 'Waiting on Claude', hint: 'You asked, no answer yet' },
+  ].filter((b) => b.id !== 'asks' || b.n > 0)
+  const list = tab === 'todo' ? todo : asks
   const color = (name: string) => STATE_HEX[threads.find((t) => t.name === name)?.state ?? 'moving'] ?? '#8b8b95'
   const when = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
   const mx = Math.max(1, ...week.days)
@@ -59,8 +68,32 @@ export default function Home() {
 
         <TrailCard />
 
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3" role="tablist">
+          {buckets.map((b) => (
+            <button key={b.id} role="tab" aria-selected={tab === b.id} onClick={() => setTab(b.id)} title={b.hint}
+              className={`nx-panel flex flex-col gap-1 !rounded-2xl p-4 text-left transition ${tab === b.id ? '!border-[#34d399]' : 'hover:border-[#34343c]'}`}>
+              <span className="text-[28px] font-semibold leading-none tabular-nums">{b.n}</span>
+              <span className="text-[14px] font-medium">{b.label}</span>
+              <span className="text-[12px] text-mut">{b.hint}</span>
+            </button>
+          ))}
+        </div>
+
         <div className="flex flex-wrap items-stretch gap-5">
-          <FocusDeck queue={queue} refresh={reload} resetKey="home" projectOf={(i) => i.thread ? { name: i.thread, color: color(i.thread) } : undefined} />
+          {tab === 'decide' && <FocusDeck queue={queue} refresh={reload} resetKey="home" projectOf={(i) => i.thread ? { name: i.thread, color: color(i.thread) } : undefined} />}
+          {tab !== 'decide' && (
+            <section className="nx-panel nx-in min-w-0 overflow-hidden !rounded-2xl" style={{ flex: '999 1 560px' }}>
+              {list.length === 0 && <div className="px-5 py-6 text-[14px] text-mut">Nothing here.</div>}
+              {list.map((x) => (
+                <Link key={x.id} to={`/thread/${encodeURIComponent(x.thread)}?item=${encodeURIComponent(x.id)}`} className="row-hover flex items-center gap-3 border-t border-line px-5 py-3 first:border-t-0">
+                  <span className="size-2 shrink-0 rounded-full" style={{ background: color(x.thread) }} />
+                  <span className="min-w-0 flex-1 truncate text-[14px]">{x.title}</span>
+                  <span className="shrink-0 text-[12px] text-mut">{x.thread} · {agoFmt(x.created)}</span>
+                </Link>
+              ))}
+              {tab === 'asks' && list.length > 0 && <div className="border-t border-line px-5 py-3 text-[12.5px] text-mut">Typed in the app. Claude answers at the start of its next session; nothing to do here.</div>}
+            </section>
+          )}
           <aside className="nx-panel nx-in flex flex-col gap-4 !rounded-2xl p-5" style={{ flex: '1 1 280px' }}>
             <div className="text-[13px] text-mut">This week</div>
             <div className="flex items-baseline gap-2"><span className="text-[44px] font-semibold leading-none tracking-tight tabular-nums">{week.steps}</span><span className="text-[15px] text-mut">steps finished</span></div>
@@ -69,7 +102,7 @@ export default function Home() {
             </div>
             <div className="-mt-2 flex justify-between text-[12px] text-mut"><span>{DAYS} days ago</span><span>{week.total} sessions</span><span>today</span></div>
             <div className="grid grid-cols-2 gap-2.5">
-              <div className="rounded-xl bg-[#18181c] p-3"><div className="text-[20px] font-semibold tabular-nums">{moving.length}</div><div className="text-[12.5px] text-mut">projects moving</div></div>
+              <div className="rounded-xl bg-[#18181c] p-3"><div className="text-[20px] font-semibold tabular-nums">{moving.length}</div><div className="text-[12.5px] text-mut">threads moving</div></div>
               <div className="rounded-xl bg-[#18181c] p-3"><div className="text-[20px] font-semibold tabular-nums">{week.decisions}</div><div className="text-[12.5px] text-mut">decisions noted</div></div>
             </div>
           </aside>

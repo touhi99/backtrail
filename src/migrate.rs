@@ -61,6 +61,7 @@ pub fn run(c: &Connection, dir: &Path) -> Result<(), String> {
     }
     sql(c, include_str!("sql/schema.sql"))?;
     add_column(c, "chunks", "hash TEXT")?;
+    add_column(c, "claims", "check_how TEXT")?;
     sql(c, "CREATE INDEX IF NOT EXISTS chunks_hash ON chunks(hash)")?;
     if old_layout {
         unify(c)?;

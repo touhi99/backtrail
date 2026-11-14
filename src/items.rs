@@ -36,6 +36,7 @@ fn update(c: &Connection, sql: &str, args: &[&dyn rusqlite::ToSql]) -> bool {
 
 // ---- filing
 
+#[derive(Clone)]
 pub struct NewItem {
     pub kind: String,
     pub thread: String,
@@ -46,6 +47,12 @@ pub struct NewItem {
     pub state: Option<String>,
     pub origin: String,
     pub date: Option<String>,
+    /// Names or aliases of the entities the item is about; mentions in the title and body are added.
+    pub entities: Vec<String>,
+    /// The day a time-bound item stops applying (`YYYY-MM-DD`).
+    pub valid_to: Option<String>,
+    /// For a step the owner must confirm: where to look (screen, URL, file or command) and what a good result is.
+    pub check_how: Option<String>,
 }
 
 /// The write rule: an item names a known thread, cites an indexed source, quotes text found in that source and
@@ -77,6 +84,16 @@ pub fn add(c: &Connection, it: &NewItem) -> Result<String, String> {
     }
     let passage = find_quote(c, source, &it.quote)
         .ok_or_else(|| format!("quote not found in {}: \"{}\"", it.source, it.quote))?;
+    let (subjects, thread) = subjects(c, it);
+    if subjects.is_empty() {
+        return Err(
+            "name at least one entity the item is about (--entities \"A,B\"); `bt kg entity` lists them".into(),
+        );
+    }
+    let it = &NewItem {
+        thread,
+        ..it.clone()
+    };
 
     let existing: Option<String> = c
         .query_row(
@@ -102,15 +119,22 @@ pub fn add(c: &Connection, it: &NewItem) -> Result<String, String> {
         .unwrap_or_else(|| default_state(&it.kind).into());
     let filed = it.date.clone().unwrap_or_else(now);
     c.execute(
-        "INSERT INTO claims(id,type,thread,title,body,state,origin,source_id,chunk_id,quote,created,updated,speaker,asserted_at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?11,?12,coalesce(?13,?11))
-         ON CONFLICT(id) DO UPDATE SET body=?5, quote=?10, chunk_id=?9, source_id=?8",
+        "INSERT INTO claims(id,type,thread,title,body,state,origin,source_id,chunk_id,quote,created,updated,speaker,asserted_at,valid_to,check_how)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?11,?12,coalesce(?13,?11),?14,?15)
+         ON CONFLICT(id) DO UPDATE SET body=?5, quote=?10, chunk_id=?9, source_id=?8, valid_to=coalesce(?14,valid_to), check_how=coalesce(?15,check_how)",
         params![
             id, it.kind, it.thread, it.title, it.body, state, it.origin, source, passage.chunk_id, it.quote, filed,
-            passage.speaker, passage.ts
+            passage.speaker, passage.ts, it.valid_to, it.check_how
         ],
     )
     .map_err(|e| e.to_string())?;
+    for (eid, _) in &subjects {
+        c.execute(
+            "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role) VALUES(?1,?2,'subject')",
+            params![id, eid],
+        )
+        .ok();
+    }
     if it.kind == "decision" {
         let text = format!("{} {} {}", it.title, it.body, it.quote);
         crate::kg::entities::link_claim(c, &id, &it.thread, &text);
@@ -125,6 +149,47 @@ pub fn add(c: &Connection, it: &NewItem) -> Result<String, String> {
         keep(c, &id);
     }
     Ok(id)
+}
+
+/// The entities an item is about, and its thread. Entities named by the filer come first, then those whose name or
+/// alias is a whole word in the title or body. The thread is kept when it belongs to one of them; otherwise it
+/// follows the first named project entity that has a thread of its own. Mentions alone move the thread only when the
+/// given one is a topic thread (no project of that name), so a passing mention never pulls an item off its project.
+fn subjects(c: &Connection, it: &NewItem) -> (Vec<(String, String)>, String) {
+    let named: Vec<(String, String)> = it
+        .entities
+        .iter()
+        .filter_map(|n| crate::kg::entities::find(c, n))
+        .collect();
+    let mut all = named.clone();
+    for m in crate::kg::entities::mentions(c, &format!("{} {}", it.title, it.body)) {
+        if !all.iter().any(|a| a.0 == m.0) {
+            all.push(m);
+        }
+    }
+    let has_thread = |n: &str| thread_exists(c, n);
+    let is_project = |n: &str| {
+        count(
+            c,
+            "SELECT COUNT(*) FROM entities WHERE name=?1 AND kind='project'",
+            &[&n],
+        ) > 0
+    };
+    let mut thread = it.thread.clone();
+    if !all.iter().any(|a| a.1 == thread) {
+        if let Some(n) = named.iter().find(|n| has_thread(&n.1) && is_project(&n.1)) {
+            thread = n.1.clone();
+        } else if !is_project(&thread) {
+            let cands: Vec<_> = all
+                .iter()
+                .filter(|a| has_thread(&a.1) && is_project(&a.1))
+                .collect();
+            if cands.len() == 1 {
+                thread = cands[0].1.clone();
+            }
+        }
+    }
+    (all, thread)
 }
 
 fn default_state(kind: &str) -> &'static str {
@@ -323,6 +388,31 @@ pub fn toggle_doing(c: &Connection, id: &str) -> bool {
     ok
 }
 
+/// A session that holds nothing to file: it leaves the pending list. Resumed sessions share a title and thread
+/// with the one named, so they leave with it.
+pub fn skip_session(c: &Connection, source: i64, actor: &str) -> bool {
+    let ok = c
+        .execute(
+            "INSERT OR IGNORE INTO source_review(source_id,ts,actor)
+         SELECT o.id, ?2, ?3 FROM sources s JOIN sources o
+           ON o.kind='session' AND o.title IS s.title AND o.thread IS s.thread
+         WHERE s.id=?1 AND s.kind='session'",
+            rusqlite::params![source, now(), actor],
+        )
+        .unwrap_or(0)
+        > 0;
+    if ok {
+        logw(
+            c,
+            actor,
+            "skip-session",
+            &source.to_string(),
+            "nothing to file",
+        );
+    }
+    ok
+}
+
 /// The owner says a step marked "looks done?" is not done.
 pub fn not_yet(c: &Connection, id: &str) -> bool {
     let ok = update(
@@ -377,7 +467,8 @@ pub fn review(c: &Connection, id: &str, verdict: Verdict, reason: &str) -> bool 
                 update(
                     c,
                     "UPDATE claims SET state=?2, answer=?3, review=NULL, updated=?4
-                     WHERE id=?1 AND (state='proposed' OR (review='auto' AND state='settled'))",
+                     WHERE id=?1 AND (state='proposed' OR (review='auto' AND state='settled')
+                          OR (type='step' AND state IN ('open','doing','looks_done')))",
                     &[&id, &state, &reason, &ts],
                 ),
                 action,
@@ -478,16 +569,16 @@ pub fn done(c: &Connection, id: &str, by: &str, proof: &str) -> Result<bool, Str
 }
 
 /// Claude says a step is built; it shows as "looks done?" until the owner confirms.
-pub fn built(c: &Connection, id: &str, evidence: &str) -> Result<bool, String> {
+pub fn built(c: &Connection, id: &str, evidence: &str, check: Option<String>) -> Result<bool, String> {
     let evidence = clip(evidence, 300);
     if evidence.trim().is_empty() {
         return Err("--evidence is required".into());
     }
     let ok = update(
         c,
-        "UPDATE claims SET state='looks_done', done_by='claude', answer=?2, updated=?3
+        "UPDATE claims SET state='looks_done', done_by='claude', answer=?2, updated=?3, check_how=coalesce(?4,check_how)
          WHERE id=?1 AND type='step' AND state IN ('open','doing')",
-        &[&id, &evidence, &now()],
+        &[&id, &evidence, &now(), &check.map(|t| clip(&t, 300))],
     );
     if ok {
         logw(c, "claude", "built", id, &evidence);

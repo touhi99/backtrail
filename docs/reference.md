@@ -11,14 +11,18 @@ Commands run as `bt <command>`.
 | --- | --- |
 | `ingest [--force]` | Read new or changed sources (new lines only, for a session file that grew) and re-link facts whose passage changed. `--force` reads every session again in full (after a change to the chunking rule); sessions whose file is gone are kept |
 | `serve [--port N]` | Run the app |
-| `brief [--thread T]` | Rescan, then print open questions, threads in motion and stale items |
-| `add <type> --thread --title --source --quote [--body --state --origin]` | File one decision, step, question or turn |
+| `brief [--thread T \| --all]` | Rescan, then print. With no flag: one line per thread in motion (open and done steps, what waits on the owner, the next step) and the questions the owner asked. `--thread T`: open questions, next step, recent answers and stale items of one thread. `--all`: the same detail for every thread |
+| `add <type> --thread --title --entities A,B --source --quote [--body --state --origin --valid-to]` | File one decision, step, question or turn. At least one entity is required; the thread follows the entity. Lists existing items that may already settle it |
+| `resolve <id> --by <id> --reason T` | Settle an item with an existing one: a question becomes `answered`, a step or decision `superseded`, `superseded_by` names the settling item |
+| `unresolve <id>` | Put a resolved or expired item back to `proposed` |
+| `resolve --expired` | Items whose `valid_to` has passed leave the queue (also done by `resolve-queue`) |
+| `resolve-queue [--limit N]`, `resolve-packet <id>`, `resolve-apply <file\|->` | The three halves of `skill/resolve.sh`: unjudged proposed items, the text a model reads for one, and applying its verdict |
 | `import <facts.json>` or `import -` | File many facts through the same rule. Decisions, steps, questions and turns need a thread (taken from the source when missing); `state`, `rationale` and `relation` items name entities |
 | `done <step id> --by owner\|claude\|evidence --proof "..."` | Close a step; `claude` and `evidence` need proof |
 | `flag <id> --as live\|in_effect\|superseded\|done --reason "..."` | Label a proposed item |
 | `retire <id> [--by <id>] --reason "..."` | Retire an item; `--by` records the item that replaced it |
 | `set-thread <name> --state --summary` | Change a thread's state or summary |
-| `link <A> <B> <kind>` | Record a project-to-project relation by the owner, without a quote |
+| `link <A> <B> <kind>` | Record a thread-to-thread relation by the owner, without a quote |
 | `assign <session ref> <thread>` | Pin a session to a thread |
 | `search <words> [--thread T] [--kind session\|note\|artifact\|commit] [--state S] [--from DATE] [--to DATE] [--text]` | Search with filters. `--state` keeps passages whose source has a filed item in that state. `--text` forces keyword-only |
 | `embed [--limit N]` | Embed passages that have no vector yet (needs the embedding server; see the `embeddings` key) |
@@ -45,7 +49,7 @@ Commands run as `bt <command>`.
 | `demo` | Write a demo store (requires `BACKTRAIL_HOME`) |
 | `hooks [status\|install\|remove]` | Show, add or remove the Claude Code hooks in `~/.claude/settings.json`; the old file is copied to `settings.json.bak-backtrail` first |
 
-`relate <A> <B> <kind> --source <ref> --quote "..." [--state proposed]` files a relation between two projects
+`relate <A> <B> <kind> --source <ref> --quote "..." [--state proposed]` files a relation between two threads
 (`spun out of`, `forked from`, `built on`, `replaced by`) with a quote from a source. It is stored as a relation claim.
 `extract.sh` proposes relations in the same pass as decisions and steps.
 
@@ -106,10 +110,10 @@ Titles were written by a model from the cited passage, so the queries are not ty
 
 `bt hooks install` adds both hooks to `~/.claude/settings.json`; `bt hooks remove` takes them out. By hand:
 
-- `SessionStart`: `bt brief` prints open questions and threads in motion.
-- `SessionEnd`: `<path>/skill/session-end.sh` runs `ingest` and `embed` in the background when a session closes. It
-  does not call a model. Setting `BACKTRAIL_COMPILE_ON_END=1` in the hook's environment also runs `skill/extract.sh` on the
-  session with a small model, which costs tokens.
+- `SessionStart`: `bt brief` prints one line per thread in motion. Claude runs `bt brief --thread <name>` for the project at hand.
+- `SessionEnd`: `<path>/skill/session-end.sh` runs `ingest` and `embed` in the background when a session closes, then
+  `skill/extract.sh` on the session and `skill/resolve.sh` on the unjudged proposed items. Both make model calls.
+  `BACKTRAIL_COMPILE_ON_END=0` in the hook's environment skips them.
 
 ## Demo store
 

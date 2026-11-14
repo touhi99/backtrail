@@ -1,0 +1,3 @@
+You check one proposed resolution in a work store. A first reader proposed that an existing item (a CANDIDATE) already settles a proposed item. Output only one JSON object, no prose: {"settled": true or false, "why": "<=200 characters"}.
+
+Answer true only when the candidate, taken as written, makes the proposed item unnecessary for the owner to answer: it states the same decision, does the same step, or gives the choice a question asks for, about the same project and matter. Answer false when the candidate is only related, covers a different part, is about another project, or the proposed item adds something new. A wrong true hides a real item from the owner; when in doubt, answer false.

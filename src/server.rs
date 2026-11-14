@@ -179,6 +179,11 @@ fn post(c: &Connection, path: &str, body: &Value) -> Option<Value> {
     Some(match path {
         "/api/tick" => done(items::tick(c, id)),
         "/api/doing" => done(items::toggle_doing(c, id)),
+        "/api/skip_session" => done(items::skip_session(
+            c,
+            body["id"].as_i64().unwrap_or(0),
+            "owner",
+        )),
         "/api/notyet" => done(items::not_yet(c, id)),
         "/api/answer" => done_or_error(items::answer(c, id, text("text").trim()).map(done)),
         "/api/add" => {

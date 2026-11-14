@@ -151,7 +151,7 @@ pub fn pending(c: &Connection, days: i64) {
                 (SELECT substr(replace(text,char(10),' '),1,140) FROM chunks
                  WHERE source_id=s.id AND role='user' ORDER BY seq LIMIT 1) AS first
          FROM source_stat s
-         WHERE s.kind='session' AND s.thread!='Unsorted' AND s.nchunks>=6 AND s.cited=0
+         WHERE s.kind='session' AND s.thread!='Unsorted' AND s.nchunks>=6 AND s.cited=0 AND s.reviewed=0
          ORDER BY s.last_ts DESC LIMIT 200",
         &[],
     );

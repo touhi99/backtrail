@@ -34,13 +34,15 @@ Other commands for keeping the store accurate without raw SQL:
 2. `backtrail pending --days 3` lists recent sessions that no item cites.
 3. `backtrail show <ref>` prints a source. Read it before filing anything.
 4. File each finding with
-   `backtrail add <decision|step|question|turn> --thread "<thread>" --title "<=110 chars" --body "<=320 chars" --source "<ref>" --quote "<verbatim text from that source>" --origin suggested --state proposed`
-   or several at once with `backtrail import facts.json` (also takes `state`, `rationale` and `relation` items with `entities`). The command rejects a missing source, a quote not
+   `backtrail add <decision|step|question|turn> --thread "<thread>" --title "<=110 chars" --body "<=320 chars" --entities "<main subject>,<others>" --source "<ref>" --quote "<verbatim text from that source>" --origin suggested --state proposed`
+   or several at once with `backtrail import facts.json` (also takes `state`, `rationale` and `relation` items with `entities`). Every item names at least one entity (`bt kg entity` lists them) and the thread follows the entity. Add `--valid-to YYYY-MM-DD` for an item that names a relative day. After filing, the command lists existing items that may already settle the new one; if one does, run `backtrail resolve <new id> --by <existing id> --reason "..."`. The command rejects a missing source, a quote not
    found in the source, or text over the limit.
 5. Close a step only with evidence: `backtrail done <id> --by claude --proof "<what shows it>"`.
    Check the claim first (run the command, read the code, list the git tags).
 6. `backtrail check` reports lost quotes, orphan threads, notes nothing cites, stale work. `backtrail check --pairs`
    lists item pairs that may contradict each other; judge each and record a turn or decision for real conflicts.
+6a. `backtrail resolve-queue` lists proposed items no model has judged yet; `skill/resolve.sh` judges them (entities, thread, `valid_to`, whether the store already settles them), one call per item.
+6b. `backtrail built <id> --evidence "<what was built>" --check "<where to look and what a good result is>"` shows in the app as "Built, check it".
 7. `backtrail match` compares open steps with commits and marks likely matches `looks done?`; the user confirms.
 8. Artifacts: run the Artifact tool's `list`, save `[{id,title,updated}]` to a file, run `backtrail artifacts --manifest <file>`.
    Re-read each missing or stale artifact with `action read, path index.html, out_dir <data dir>/artifacts/<id>` (use a
@@ -56,6 +58,7 @@ Other commands for keeping the store accurate without raw SQL:
   is a turn the user typed and says it directly, and it is not a likely repeat of an earlier fact; everything else stays
   `proposed` until the user accepts it in the app.
 - Cite a session as `session:<session id>`, or a unique prefix of it (`session:<first 8 characters>`).
+- A step the user must confirm by hand carries `--check "<where to look and what a good result is>"` (a screen, URL, file path or command). The app shows it as "How to check".
 - A title is a fair reading of the quote, not a guess. If the source does not say it, do not file it.
 - Questions are things only the user can decide. Do not file a question the sources already answer.
 - Nothing about buying or ordering is filed as a task.

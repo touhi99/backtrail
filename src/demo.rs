@@ -269,6 +269,7 @@ pub fn demo(c: &Connection) {
         ),
     ];
     for (ty, th, ti, bo, so, qu, st, or) in items {
+        crate::kg::entities::ensure(c, th, "project", &crate::clock::now());
         let it = crate::items::NewItem {
             kind: ty.into(),
             thread: th.into(),
@@ -279,6 +280,9 @@ pub fn demo(c: &Connection) {
             state: Some(st.into()),
             origin: or.into(),
             date: Some("2026-11-09T12:00:00Z".into()),
+            entities: vec![th.into()],
+            valid_to: None,
+            check_how: None,
         };
         if let Err(e) = crate::items::add(c, &it) {
             eprintln!("demo item rejected: {e}");

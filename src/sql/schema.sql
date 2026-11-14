@@ -23,6 +23,13 @@ CREATE TABLE IF NOT EXISTS sources(
   nturns INTEGER NOT NULL DEFAULT 0
 );
 
+-- Sessions the owner or Claude read and decided hold nothing to file. They leave the pending list.
+CREATE TABLE IF NOT EXISTS source_review(
+  source_id INTEGER PRIMARY KEY,
+  ts TEXT NOT NULL,
+  actor TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS chunks(
   id INTEGER PRIMARY KEY,
   source_id INTEGER NOT NULL,
@@ -74,6 +81,8 @@ CREATE TABLE IF NOT EXISTS claims(
   stated TEXT NOT NULL DEFAULT 'stated',
   -- 'auto' when the keep rule kept the fact, 'held|<reason>' when it left it for review
   review TEXT,
+  -- for a step the owner must confirm: where to look and what a good result is
+  check_how TEXT,
   created TEXT,
   updated TEXT,
   text TEXT GENERATED ALWAYS AS (title) VIRTUAL,

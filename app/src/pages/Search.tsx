@@ -35,7 +35,7 @@ export default function Search() {
         <SearchIcon size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-mut" /><input autoFocus className="input !h-14 !rounded-2xl !pl-12 !text-[16px]" placeholder="Search notes, artifacts, conversations and commits" value={text} onChange={(e) => setText(e.target.value)} />
       </form>
       <div className="flex flex-wrap items-center gap-2">
-        <select className="input !w-auto !rounded-full !px-4" value={f.thread} onChange={(e) => set('thread', e.target.value)}><option value="">All projects</option>{(today?.threads ?? []).map((t: any) => <option key={t.name}>{t.name}</option>)}</select>
+        <select className="input !w-auto !rounded-full !px-4" value={f.thread} onChange={(e) => set('thread', e.target.value)}><option value="">All threads</option>{(today?.threads ?? []).map((t: any) => <option key={t.name}>{t.name}</option>)}</select>
         <select className="input !w-auto !rounded-full !px-4" value={f.kind} onChange={(e) => set('kind', e.target.value)}>{KIND.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
         <select className="input !w-auto !rounded-full !px-4" value={f.state} onChange={(e) => set('state', e.target.value)}>{STATE.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
         <label className="flex items-center gap-1.5 text-[12px] text-mut">From<input type="date" className="input !h-9 !w-auto !rounded-full !px-3" value={f.from} onChange={(e) => set('from', e.target.value)} /></label>

@@ -10,11 +10,14 @@ export const ts = (i: any) => Date.parse(i.source_ts ?? i.created ?? '') || 0
 
 const LATER_KEY = 'bt-later'
 const readLater = (): string[] => { try { const v = JSON.parse(localStorage.getItem(LATER_KEY) ?? '[]'); return Array.isArray(v) ? v.map(String) : [] } catch { return [] } }
-/** Ids the viewer put off with Later; kept in this browser only. */
+/** Ids the viewer put off with Later; kept in this browser only. Every instance of the hook sees a change at once. */
 export function useLater() {
   const [later, setLater] = useState<string[]>(readLater)
-  const add = (id: string) => { const n = [...later.filter((x) => x !== id), id].slice(-500); setLater(n); try { localStorage.setItem(LATER_KEY, JSON.stringify(n)) } catch { /* private window */ } }
-  return { later, add }
+  useEffect(() => { const h = () => setLater(readLater()); window.addEventListener('bt-later', h); return () => window.removeEventListener('bt-later', h) }, [])
+  const save = (n: string[]) => { setLater(n); try { localStorage.setItem(LATER_KEY, JSON.stringify(n)) } catch { /* private window */ } window.dispatchEvent(new Event('bt-later')) }
+  const add = (id: string) => save([...later.filter((x) => x !== id), id].slice(-500))
+  const remove = (id: string) => save(later.filter((x) => x !== id))
+  return { later, add, remove }
 }
 
 type Kind = 'done' | 'question' | 'step' | 'decision' | 'idea'
@@ -47,6 +50,7 @@ function FocusCard({ i, pos, total, act, later, project }: { i: any; pos: number
       <h2 className={`max-w-[26ch] font-semibold leading-[1.18] tracking-tight line-clamp-3 ${long ? 'text-[24px]' : 'text-[30px]'}`} title={i.title}>{i.title}</h2>
       {k === 'done' && i.answer && <p className="line-clamp-2 max-w-[60ch] text-[14px] text-soft">{i.answer}</p>}
       {k === 'question' && i.body && <p className="line-clamp-2 max-w-[60ch] text-[14px] text-soft">{i.body}</p>}
+      {k !== 'question' && i.quote && <blockquote className="line-clamp-3 max-w-[60ch] border-l-2 pl-3 text-[13.5px] italic text-soft" style={{ borderColor: K.color + '66' }}>“{i.quote}”</blockquote>}
       <div className="flex flex-wrap gap-2">
         {when && <span className="inline-flex h-7 items-center rounded-[9px] bg-[#1c1c21] px-2.5 text-[12.5px] text-soft">{dayFmt(when)}</span>}
         {i.source_id && <Link to={`/source/${i.source_id}${i.chunk_id ? `?c=${i.chunk_id}` : ''}`} className="inline-flex h-7 max-w-[280px] items-center gap-1.5 truncate rounded-[9px] bg-[#1c1c21] px-2.5 text-[12.5px] text-soft hover:text-ink" title={i.quote || i.source_title}><FileText size={12} className="shrink-0" /><span className="truncate">{i.source_title || 'Source'}</span></Link>}

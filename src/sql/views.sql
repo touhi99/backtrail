@@ -4,7 +4,7 @@
 -- A work item: a decision, step, question or turn, with the source it cites and who last changed it.
 CREATE TEMP VIEW IF NOT EXISTS item AS
 SELECT
-  n.id, n.type, n.thread, n.title, n.body, n.state, n.origin, n.tag, n.done_by, n.answer, n.stale, n.review,
+  n.id, n.type, n.thread, n.title, n.body, n.state, n.origin, n.tag, n.done_by, n.answer, n.stale, n.review, n.check_how,
   n.quote, n.created, n.updated, n.superseded_by, n.source_id, n.chunk_id,
   s.ref AS source_ref, s.title AS source_title, s.kind AS source_kind, s.last_ts AS source_ts,
   (SELECT l.actor FROM log l WHERE l.target=n.id ORDER BY l.id DESC LIMIT 1) AS by_actor
@@ -45,7 +45,8 @@ FROM threads t;
 CREATE TEMP VIEW IF NOT EXISTS source_stat AS
 SELECT
   s.id, s.ref, s.kind, s.title, s.project, s.thread, s.first_ts, s.last_ts, s.nchunks,
-  (SELECT COUNT(*) FROM claims n WHERE n.source_id=s.id AND n.type IN ('decision','step','question','turn')) AS cited
+  (SELECT COUNT(*) FROM claims n WHERE n.source_id=s.id AND n.type IN ('decision','step','question','turn')) AS cited,
+  (SELECT COUNT(*) FROM source_review r WHERE r.source_id=s.id) AS reviewed
 FROM sources s;
 
 -- An entity with its other spellings and the number of claims about it.

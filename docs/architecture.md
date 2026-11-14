@@ -28,6 +28,7 @@ the database. Sources (session logs, notes, git history, artifact snapshots) are
 | `check.rs` | `check`, `check --pairs`, `pending`, `match`, `artifacts`, `show` and `log`. |
 | `server.rs` | Local HTTP server (`tiny_http`, loopback only): routes, request guard and the background scan. Each route calls one function. |
 | `ingest/` | Readers for sessions, notes, artifact snapshots and git (`sessions.rs`, `notes.rs`, `git.rs`), thread assignment (`threads.rs`), relinking and the daily backup (`mod.rs`). |
+| `resolve.rs` | Candidates for a proposed item (shared entities, rarity-weighted words, nearest passages), the model packet, applying a verdict (entities, thread, `valid_to`, settling item), `resolve`, `unresolve`, expiry. |
 | `kg/` | Knowledge graph: claim write rule and relations (`claims.rs`), entities (`entities.rs`), history queries (`query.rs`), extraction queue and packet (`extract.rs`), graph pages (`screen.rs`), lint, export and restore. |
 | `embed.rs` | Embedding client, vector table and brute-force nearest-neighbour lookup. |
 | `config.rs`, `clock.rs` | `config.json`, read once per process; UTC timestamps. |
@@ -63,8 +64,9 @@ configured batch size.
 Hooks (diagram: README, "How it works"):
 
 - SessionStart runs `bt brief`, which rescans and prints open questions and threads in motion. It never embeds.
-- SessionEnd runs `skill/session-end.sh` in the background: `ingest`, `embed`. Extraction (`skill/extract.sh`, one
-  small-model call per session) runs only when `BACKTRAIL_COMPILE_ON_END=1`, because it costs tokens.
+- SessionEnd runs `skill/session-end.sh` in the background: `ingest`, `embed`, then extraction
+  (`skill/extract.sh`, one small-model call per session) and resolution (`skill/resolve.sh`, one call per proposed
+  item). `BACKTRAIL_COMPILE_ON_END=0` skips both.
 
 ## Search
 

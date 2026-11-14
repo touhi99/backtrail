@@ -16,10 +16,10 @@ const TYPE: Record<string, { icon: any; c: string }> = {
   question: { icon: CircleHelp, c: '#fbbf24' }, step: { icon: ListTodo, c: '#60a5fa' }, decision: { icon: Scale, c: '#c084fc' }, turn: { icon: Sparkles, c: '#8b8b95' },
 }
 const HELP: Record<string, string> = {
-  all: 'Every decision, step and question filed across projects. The tag shows who filed it, You or Claude. Filter to narrow it; open a title for its project, or act on a row at the right.',
+  all: 'Every decision, step and question filed across threads. The tag shows who filed it, You or Claude. Filter to narrow it; open a title for its thread, or act on a row at the right.',
   decision: 'Choices made in sessions. A suggested decision is accepted to keep it or rejected to drop it. A kept decision stays standing until marked replaced.',
-  step: 'Todos and bugs. Open the project to start, tick or confirm them.',
-  question: 'Questions that wait for an answer. Answer them on Today or on the project page.',
+  step: 'Todos and bugs. Open the thread to start, tick or confirm them.',
+  question: 'Questions that wait for an answer. Answer them on Today or on the thread page.',
 }
 const CLOSED = ['done', 'answered', 'settled', 'rejected', 'parked']
 const STATE_C: Record<string, string> = { open: '#fbbf24', doing: '#60a5fa', done: '#34d399', looks_done: '#34d399', settled: '#c084fc', answered: '#34d399', proposed: '#8b8b95', rejected: '#fb7185', parked: '#8b8b95' }
@@ -43,7 +43,7 @@ export default function Items() {
       <div className="nx-in flex items-end justify-between"><div><div className="text-[13px] text-mut">Everything filed</div><h2 className="text-[30px] font-semibold leading-tight tracking-tight" title={HELP[f.type] ?? HELP.all}>Items</h2></div>
         <div className="text-right"><div className="nx-big">{rows?.length ?? 0}</div></div></div>
       <div className="nx-in mt-4 flex flex-wrap items-center gap-2" style={{ ['--d' as any]: '40ms' }}>{sel('type')}{sel('state')}{sel('kind')}
-        <select className="input !w-auto !rounded-full !px-4" value={f.thread} onChange={(e) => set('thread', e.target.value)}><option value="">All projects</option>{(today?.threads ?? []).map((t: any) => <option key={t.name}>{t.name}</option>)}</select></div>
+        <select className="input !w-auto !rounded-full !px-4" value={f.thread} onChange={(e) => set('thread', e.target.value)}><option value="">All threads</option>{(today?.threads ?? []).map((t: any) => <option key={t.name}>{t.name}</option>)}</select></div>
       {mix.length > 0 && (
         <div className="nx-in mt-4" style={{ ['--d' as any]: '80ms' }}>
           <div className="flex h-2 gap-[3px] overflow-hidden rounded-full">{mix.map(([s, n]) => <span key={s} title={`${s.replace('_', ' ')}: ${n}`} className="rounded-full" style={{ flex: n, background: STATE_C[s] ?? '#52525b' }} />)}</div>

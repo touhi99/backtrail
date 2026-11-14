@@ -99,14 +99,112 @@ pub fn today(c: &Connection) -> Value {
                 (SELECT COUNT(*) FROM item) AS items",
         &[],
     );
+    // To do: steps noted on a live project that are open or in progress.
+    let todo = rows(
+        c,
+        "SELECT i.* FROM item i JOIN threads t ON t.name=i.thread
+         WHERE i.type='step' AND i.state IN ('open','doing') AND i.origin!='suggested' AND t.state!='dropped'
+         ORDER BY i.created DESC LIMIT 60",
+        &[],
+    );
+    // Pending sessions: real sessions in the last 3 days that no item cites, so no decision came out of them.
+    let pending: Vec<Value> = rows(
+        c,
+        "SELECT s.id, s.ref, s.title, s.thread, s.last_ts, s.nchunks FROM source_stat s
+         WHERE s.kind='session' AND s.thread!='Unsorted' AND s.nchunks>=6 AND s.cited=0 AND s.reviewed=0
+         ORDER BY s.last_ts DESC LIMIT 200",
+        &[],
+    )
+    .into_iter()
+    .filter(|r| days_ago(s(r, "last_ts")) <= 3)
+    .collect::<Vec<_>>()
+    .into_iter()
+    .filter({
+        // a resumed session has several rows with one title; show it once
+        let mut seen = HashSet::new();
+        move |r| seen.insert((s(r, "title").to_string(), s(r, "thread").to_string()))
+    })
+    .collect();
     json!({
+        "todo": todo, "pending": pending,
         "waiting": waiting_on_owner(c), "asks": waiting_on_claude(c), "suggested": suggested, "looks": looks_done,
         "threads": threads(c), "moved": moved, "stale": stale(c), "totals": totals[0], "date": now(),
     })
 }
 
-/// The session-start brief (`bt brief`): open questions, threads in motion and stale work, as text.
-pub fn brief(c: &Connection, only: Option<&str>) {
+/// The short session-start brief (`bt brief` with no flag): one line per project in motion, so a session in a
+/// folder that holds many projects is not handed all of their detail. Questions the owner asked still print in
+/// full, because Claude has to answer them.
+fn brief_short(c: &Connection) {
+    println!("Backtrail · {}", &now()[..10]);
+    let waiting = waiting_on_owner(c);
+    let stale = stale(c);
+    let count = |list: &[Value], name: &str| list.iter().filter(|r| s(r, "thread") == name).count();
+    println!(
+        "Projects in motion (detail for one: `bt brief --thread \"<name>\"`, everything: `bt brief --all`):"
+    );
+    for t in threads(c).iter().filter(|t| s(t, "state") == "moving") {
+        let name = s(t, "name");
+        let mut line = format!("  - {name}: {} open, {} done", t["open_s"], t["done_s"]);
+        for (n, what) in [
+            (count(&waiting, name), "waiting on the owner"),
+            (count(&stale, name), "stale"),
+        ] {
+            if n > 0 {
+                line += &format!(", {n} {what}");
+            }
+        }
+        let next = rows(
+            c,
+            "SELECT title FROM item WHERE type='step' AND state='open' AND thread=?1 ORDER BY created LIMIT 1",
+            &[&name],
+        );
+        if let Some(step) = next.first() {
+            line += &format!(" · next: {}", s(step, "title"));
+        }
+        println!("{line}");
+    }
+    // Questions waiting on the owner in projects that are not in motion.
+    let moving: HashSet<String> = threads(c)
+        .iter()
+        .filter(|t| s(t, "state") == "moving")
+        .map(|t| s(t, "name").to_string())
+        .collect();
+    let mut elsewhere: BTreeMap<String, usize> = BTreeMap::new();
+    for q in waiting.iter().filter(|q| !moving.contains(s(q, "thread"))) {
+        *elsewhere.entry(s(q, "thread").to_string()).or_default() += 1;
+    }
+    if !elsewhere.is_empty() {
+        let list: Vec<String> = elsewhere.iter().map(|(n, k)| format!("{n} {k}")).collect();
+        println!(
+            "Also waiting on the owner, in projects not in motion: {}",
+            list.join(", ")
+        );
+    }
+    let asks = waiting_on_claude(c);
+    if !asks.is_empty() {
+        println!(
+            "\nAsked by the owner, waiting on Claude ({}): answer each with `backtrail reply <id> --text ...`",
+            asks.len()
+        );
+        for q in &asks {
+            println!(
+                "  - {} [{}] {} {}",
+                s(q, "id"),
+                s(q, "thread"),
+                s(q, "title"),
+                s(q, "body")
+            );
+        }
+    }
+}
+
+/// The session-start brief (`bt brief`): the short form, or with `full` (or a project) open questions, threads in
+/// motion and stale work, as text.
+pub fn brief(c: &Connection, only: Option<&str>, full: bool) {
+    if only.is_none() && !full {
+        return brief_short(c);
+    }
     let wanted = |row: &Value, key: &str| only.is_none_or(|thread| s(row, key) == thread);
     println!("Backtrail brief · {}", &now()[..10]);
 
@@ -175,7 +273,10 @@ pub fn brief(c: &Connection, only: Option<&str>) {
         }
     }
 
-    let stale = stale(c);
+    let stale: Vec<Value> = stale(c)
+        .into_iter()
+        .filter(|x| wanted(x, "thread"))
+        .collect();
     if !stale.is_empty() {
         println!("\nGone stale:");
         for x in &stale {

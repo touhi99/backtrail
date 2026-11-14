@@ -46,5 +46,5 @@
 <rect class="lb" x="515.4" y="291" width="49.199999999999996" height="14"/><text class="r" x="540.0" y="302" text-anchor="middle">vectors</text>
 <path class="ln" d="M450,350 L808,350"/>
 <rect class="lb" x="552.2" y="331" width="155.6" height="14"/><text class="r" x="630.0" y="342" text-anchor="middle">store vectors by text hash</text>
-<text class="r" x="30" y="494">Extraction with a model (extract.sh) runs only when BACKTRAIL_COMPILE_ON_END=1.</text>
+<text class="r" x="30" y="494">Extraction (extract.sh) and resolution (resolve.sh) call a model; BACKTRAIL_COMPILE_ON_END=0 skips them.</text>
 </svg>

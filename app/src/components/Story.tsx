@@ -4,7 +4,7 @@ import { Check, RotateCcw } from 'lucide-react'
 import { dayFmt, useApi } from '@/lib/api'
 import ItemActions from '@/components/ItemActions'
 
-/** A project's story, built from its thread data (/api/thread): what exists, how it went, what was settled, what was made. */
+/** A thread's story, built from its thread data (/api/thread): what exists, how it went, what was settled, what was made. */
 
 const DAY = 864e5
 const ts = (d: string) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10))
@@ -138,7 +138,7 @@ export function StoryHero({ s, state, color }: { s: Story; state: string; color:
         </div>
       </div>
       {art ? <Thumb id={art.id} title={art.t} sub={`latest thing made, ${dayFmt(art.d)}`} />
-        : <div className="grid place-items-center rounded-2xl border border-dashed border-line text-[13px] text-mut">No artifact was made for this project.</div>}
+        : <div className="grid place-items-center rounded-2xl border border-dashed border-line text-[13px] text-mut">No artifact was made for this thread.</div>}
     </section>
   )
 }

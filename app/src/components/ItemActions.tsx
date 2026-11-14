@@ -5,12 +5,12 @@ import { useShell } from '@/components/Shell'
 /** A small "Filed by You / Claude" tag. */
 export const Who = ({ i }: { i: any }) => <span className="nx-chip !h-[18px] !px-2 !text-[11px]" style={{ background: i.origin === 'owner' ? '#f4f4f51a' : '#60a5fa1f', color: i.origin === 'owner' ? '#f4f4f5' : '#60a5fa' }} title={i.origin === 'owner' ? 'You typed this in the app' : 'Claude filed this from a session'}>{i.origin === 'owner' ? 'You' : 'Claude'}</span>
 
-/** Re-file an item you typed under the wrong project. */
+/** Re-file an item you typed under the wrong thread. */
 function Move({ i, done }: { i: any; done: () => void }) {
   const { today } = useShell()
   if (i.origin !== 'owner' || i.state === 'done') return null
   return (
-    <select className="input !h-7 !w-auto !rounded-lg !px-2 !text-[12px] text-mut" value="" title="Typed in the wrong project? Move it." onChange={async (e) => { if (e.target.value) { await post('/api/move', { id: i.id, thread: e.target.value }); done() } }}>
+    <select className="input !h-7 !w-auto !rounded-lg !px-2 !text-[12px] text-mut" value="" title="Typed in the wrong thread? Move it." onChange={async (e) => { if (e.target.value) { await post('/api/move', { id: i.id, thread: e.target.value }); done() } }}>
       <option value="">Move to…</option>
       {(today?.threads ?? []).filter((t: any) => t.name !== i.thread && t.name !== 'Unsorted').map((t: any) => <option key={t.name}>{t.name}</option>)}
     </select>

@@ -9,7 +9,7 @@ import Items from '@/pages/Items'
 import Log from '@/pages/Log'
 import Graph from '@/pages/Graph'
 
-/** The project overview map is gone: /map goes to the Graph. A project's own focus view (notes as cards) is still MapPage. */
+/** The thread overview map is gone: /map goes to the Graph. A thread's own focus view (notes as cards) is still MapPage. */
 function MapRoute() {
   const [sp] = useSearchParams()
   return sp.get('thread') ? <MapPage /> : <Navigate to="/graph" replace />

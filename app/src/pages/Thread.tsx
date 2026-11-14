@@ -25,10 +25,22 @@ function Panel({ title, count, children, className = '', id }: { title: string; 
   )
 }
 const Empty = ({ children }: { children: React.ReactNode }) => <div className="px-5 pb-5 text-[13px] text-mut">{children}</div>
-const Src = ({ i }: { i: any }) => i.source_id ? <Link to={`/source/${i.source_id}${i.chunk_id ? `?c=${i.chunk_id}` : ''}`} className="mt-1 inline-flex items-center gap-1.5 text-[12px] text-mut hover:text-ink"><FileText size={12} />{i.source_title}</Link> : null
+const Src = ({ i }: { i: any }) => i.source_id ? <Link to={`/source/${i.source_id}${i.chunk_id ? `?c=${i.chunk_id}` : ''}`} className="mt-1 inline-flex items-center gap-1.5 text-[12px] text-mut hover:text-ink" title={i.state === 'looks_done' ? 'Where the step was planned. It does not show the built result.' : undefined}><FileText size={12} />{i.state === 'looks_done' ? 'Planned in: ' : ''}{i.source_title}</Link> : null
 
 type View = 'steps' | 'journey' | 'decisions' | 'made' | 'sources' | 'archive' | 'claude'
 const VIEWS: [View, string][] = [['steps', 'All steps'], ['journey', 'Journey'], ['decisions', 'Decisions'], ['made', 'Made'], ['sources', 'Sources'], ['archive', 'Archive'], ['claude', 'Claude Code']]
+
+function PutOff({ q, back, done }: { q: any; back: () => void; done: () => void }) {
+  const [ans, setAns] = useState('')
+  return (
+    <form className="flex flex-wrap items-center gap-2.5 border-t border-[#1f1f24] py-2.5 first:border-t-0" onSubmit={async (e) => { e.preventDefault(); if (ans.trim()) { await post('/api/answer', { id: q.id, text: ans }); done() } }}>
+      <span className="min-w-[200px] flex-1 text-[14px]" title={q.title}>{q.title}</span>
+      <input className="nx-input !h-9 max-w-[260px]" maxLength={320} placeholder="Type your answer" value={ans} onChange={(e) => setAns(e.target.value)} aria-label="Answer" />
+      <button className="btn primary !h-9" type="submit">Answer</button>
+      <button className="btn ghost !h-9" type="button" onClick={back}>Back to card</button>
+    </form>
+  )
+}
 
 export default function Thread() {
   const { name = '' } = useParams()
@@ -37,7 +49,7 @@ export default function Thread() {
   const [sp] = useSearchParams()
   const focus = sp.get('item')
   const [view, setView] = useState<View | null>(null)
-  const { later } = useLater()
+  const { later, remove } = useLater()
   useEffect(() => { setView(null) }, [name])
   useEffect(() => { const h = () => reload(); window.addEventListener('tm:changed', h); return () => window.removeEventListener('tm:changed', h) }, [reload])
   const story = useMemo(() => (d?.thread ? buildStory(d) : null), [d])
@@ -65,6 +77,7 @@ export default function Thread() {
   const th = d.thread
   const c = STATE_HEX[th.state] ?? '#8b8b95'
   const refresh = () => { reload(); reloadShell() }
+  const putOff = items.filter((i) => i.type === 'question' && i.state === 'open' && i.origin !== 'owner' && later.includes(i.id))
   const steps = items.filter((i) => i.type === 'step' && !['proposed', 'rejected', 'parked'].includes(i.state))
   const doneN = steps.filter((s) => s.state === 'done').length
   const checkN = steps.filter((s) => s.state === 'looks_done').length
@@ -90,12 +103,19 @@ export default function Thread() {
         {s.state === 'done' && <CheckCheck size={12} color="#04130c" strokeWidth={3} />}
       </button>
       <div className="min-w-0">
-        <div className={`text-[14px] ${s.state === 'done' ? 'text-mut line-through' : 'font-medium'}`}>{s.tag === 'bug' && <Bug size={13} className="mr-1.5 inline text-dropped" />}{s.title}{STEP_STATUS[s.state] && <span title={STEP_STATUS[s.state].hint} className="nx-chip ml-2 align-middle" style={{ background: STEP_STATUS[s.state].color + '22', color: STEP_STATUS[s.state].color }}>{STEP_STATUS[s.state].label}</span>}</div>
-        {(s.body || (s.state === 'done' && s.answer)) && <More label="Detail" className="mr-3 text-[12.5px] text-mut">{s.body}{s.state === 'done' && s.answer ? <span style={{ color: c }}> {s.answer}</span> : null}</More>}
+        <div className={`text-[16px] ${s.state === 'done' ? 'text-mut line-through' : 'font-medium'}`}>{s.tag === 'bug' && <Bug size={13} className="mr-1.5 inline text-dropped" />}{s.title}{STEP_STATUS[s.state] && <span title={STEP_STATUS[s.state].hint} className="nx-chip ml-2 align-middle" style={{ background: STEP_STATUS[s.state].color + '22', color: STEP_STATUS[s.state].color }}>{STEP_STATUS[s.state].label}</span>}</div>
+        {s.state !== 'done' && s.check_how && <More label="How to check" className="mr-3 mt-1 text-[12.5px] text-mut">{s.check_how}</More>}
+        {s.state === 'looks_done' && s.answer && <p className="mr-3 mt-1 text-[13px] text-soft"><span className="text-mut">Claude says it built: </span>{s.answer}</p>}
+        {s.body && s.state !== 'done' && <p className="mr-3 mt-1 text-[13px] text-soft">{s.body}</p>}
+        {s.state === 'done' && (s.body || s.answer) && <More label="Detail" className="mr-3 text-[12.5px] text-mut">{s.body}{s.state === 'done' && s.answer ? <span style={{ color: c }}> {s.answer}</span> : null}</More>}
         <Src i={s} />
         {s.origin === 'owner' && s.state !== 'done' && <div className="mt-1.5"><ItemActions i={s} done={refresh} /></div>}
       </div>
-      {(s.state === 'open' || s.state === 'doing') && <button className={`btn sm ${s.state === 'doing' ? '' : 'ghost'}`} onClick={() => tick('/api/doing', { id: s.id })}>{s.state === 'doing' ? 'Back to to-do' : 'Mark in progress'}</button>}
+      <div className="flex items-center gap-2">
+        {(s.state === 'open' || s.state === 'doing') && <button className={`btn sm ${s.state === 'doing' ? '' : 'ghost'}`} onClick={() => tick('/api/doing', { id: s.id })}>{s.state === 'doing' ? 'Back to to-do' : 'Mark in progress'}</button>}
+        {s.state !== 'done' && <button className="btn sm" onClick={() => tick('/api/tick', { id: s.id })}>Done</button>}
+        {s.state !== 'done' && <button className="btn sm ghost" title="Not a problem or not needed any more. Kept on file, out of the list." onClick={() => { const reason = prompt('Why ignore it?'); if (reason !== null) tick('/api/review', { id: s.id, accept: false, park: true, reason }) }}>Ignore</button>}
+      </div>
     </div>
   )
   const propRow = (i: any) => {
@@ -145,6 +165,13 @@ export default function Thread() {
             ))}
           </aside>
         </div>
+
+        {putOff.length > 0 && (
+          <section className="nx-panel nx-in !rounded-2xl px-5 py-4">
+            <div className="mb-2 text-[13px] text-mut">Put off with Later ({putOff.length}). These still count in the sidebar.</div>
+            {putOff.map((q) => <PutOff key={q.id} q={q} back={() => remove(q.id)} done={refresh} />)}
+          </section>
+        )}
 
         <section className="nx-in">
           <div className="mb-3 flex items-baseline justify-between"><h3 className="text-[17px] font-semibold">Up next</h3><button className="text-[13px] text-mut hover:text-ink" onClick={() => setView('steps')}>All steps</button></div>
@@ -202,7 +229,7 @@ export default function Thread() {
             <div className="flex flex-wrap items-center gap-2 px-5 pb-4">
               <code className="min-w-0 flex-1 truncate rounded-xl border border-line bg-[#0c0c0e] px-3.5 py-2.5 text-[12px] text-soft">claude "$(backtrail brief --thread '{th.name}')"</code>
               <button className="btn" onClick={() => copy(`claude "$(backtrail brief --thread '${th.name}')"`)}><Copy size={13} />Copy</button>
-              {['Review', 'Extend', 'Explore'].map((v) => <button key={v} className="btn" onClick={() => copy(`${v} the Backtrail project "${th.name}". Use backtrail brief, search and show; file proposed items with a source and a verbatim quote (skill/SKILL.md).`)}>{v}</button>)}
+              {['Review', 'Extend', 'Explore'].map((v) => <button key={v} className="btn" onClick={() => copy(`${v} the Backtrail thread "${th.name}". Use backtrail brief, search and show; file proposed items with a source and a verbatim quote (skill/SKILL.md).`)}>{v}</button>)}
             </div>
           </Panel>
         )}

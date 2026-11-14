@@ -4,14 +4,14 @@ import { dayFmt, useApi } from '@/lib/api'
 import { STATE_HEX, STATE_NAME } from '@/lib/next'
 import '@/next.css'
 
-/** Every project on one time axis: when it was worked on, what came out of it, how it ended, and what grew out of what. */
+/** Every thread on one time axis: when it was worked on, what came out of it, how it ended, and what grew out of what. */
 
 const DAY = 864e5
 const ts = (d: string) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10))
 const iso = (t: number) => new Date(t).toISOString().slice(0, 10)
 const ORDER = ['built', 'moving', 'parked', 'dropped'] as const
 
-/** Lanes for every project with a session; with `days`, only the last `days` days and the projects active in them. */
+/** Lanes for every thread with a session; with `days`, only the last `days` days and the threads active in them. */
 function useTrail(days?: number) {
   const { data } = useApi('/api/trail') as { data: any }
   return useMemo(() => {
@@ -97,7 +97,7 @@ export function TrailCard() {
   return (
     <section className="nx-panel nx-in mt-5 px-5 pb-3 pt-4" style={{ ['--d' as any]: '280ms' }}>
       <div className="mb-1 flex items-baseline justify-between gap-3">
-        <h3 className="text-[15px] font-semibold">Last two weeks <span className="ml-2 text-[12.5px] font-normal text-mut">{full.ps.length} projects worked on{more > 0 ? `, the ${m.ps.length} most recent shown` : ''}</span></h3>
+        <h3 className="text-[15px] font-semibold">Last two weeks <span className="ml-2 text-[12.5px] font-normal text-mut">{full.ps.length} threads worked on{more > 0 ? `, the ${m.ps.length} most recent shown` : ''}</span></h3>
         <Link to="/graph?view=trail" className="text-[12.5px] font-medium text-accent hover:underline">Full trail</Link>
       </div>
       <TrailLanes m={m} compact />
@@ -112,7 +112,7 @@ export default function Trail({ tabs }: { tabs: ReactNode }) {
   const made = ps.reduce((a, p) => a + p.made.length, 0)
   return (
     <div className="nx-page">
-      <div className="nx-in"><div className="text-[13px] text-mut">Every project on one timeline, how each one ended, and what came out of it</div>
+      <div className="nx-in"><div className="text-[13px] text-mut">Every thread on one timeline, how each one ended, and what came out of it</div>
         <div className="flex items-center gap-4"><h2 className="text-[28px] font-semibold leading-tight tracking-tight">Graph</h2>{tabs}</div></div>
 
       <div className="mt-5 grid grid-cols-5 gap-3 max-[1100px]:grid-cols-3">
@@ -126,7 +126,7 @@ export default function Trail({ tabs }: { tabs: ReactNode }) {
 
       <section className="nx-panel nx-in mt-5 px-5 pb-3 pt-4" style={{ ['--d' as any]: '240ms' }}>
         <div className="mb-2 flex flex-wrap items-baseline justify-between gap-3">
-          <h3 className="text-[15px] font-semibold">Trail <span className="ml-2 text-[12.5px] font-normal text-mut">click a project to open its story</span></h3>
+          <h3 className="text-[15px] font-semibold">Trail <span className="ml-2 text-[12.5px] font-normal text-mut">click a thread to open its story</span></h3>
           <div className="flex flex-wrap gap-4 text-[12px] text-mut">
             {ORDER.map((st) => <span key={st} className="flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: STATE_HEX[st] }} />{STATE_NAME[st]}</span>)}
             <span className="flex items-center gap-1.5"><span className="size-2 rotate-45 bg-[#c084fc]" />Made</span>

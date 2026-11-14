@@ -1,23 +1,29 @@
 # Backtrail
 
 Backtrail indexes Claude Code sessions and Markdown notes into one SQLite file and shows them in a local web app,
-grouped into threads, one per project. Decisions, steps and open questions are recorded on each thread, and each one
+grouped into threads. Decisions, steps and open questions are recorded on each thread, and each one
 links to the session or note it came from with the exact quote.
 
 Status: prototype. Tested on macOS only.
+
+## Terms
+
+A thread is one line of work, such as an app, a product idea or a topic. It collects the sessions and notes about that
+work, and the decisions, steps and questions filed from them. A thread has a state (for example in development, built,
+parked or dropped). The app and the CLI use this one word.
 
 ## How it works
 
 ![Overview](docs/architecture-overview.svg)
 
-- Claude Code keeps one folder per project in `~/.claude/projects`. Each folder becomes a thread.
+- Claude Code keeps one folder per working directory in `~/.claude/projects`. Each folder becomes a thread.
 - Sessions and notes are read, never changed.
 - Decisions, steps and questions are proposed from sessions. A proposal is rejected if its quote is not found in the
   cited source.
 - A proposed decision, rationale or state claim is kept without review when its quote is a turn the owner typed and
   says it directly, unless an earlier fact of the same type on the same thread shares three or more content words with
   it. Everything else (steps, questions, relations, the assistant's words, possible repeats) waits for review in the app.
-  A decision kept this way can still be rejected on the Items and project pages; kept rationale and state claims have
+  A decision kept this way can still be rejected on the Items and thread pages; kept rationale and state claims have
   no reject control in the app yet.
 - When a session ends, a hook indexes its new text. Session files are read from where the last read stopped, so stored
   passages keep their ids.

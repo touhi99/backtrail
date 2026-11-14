@@ -7,10 +7,12 @@ mod db;
 mod demo;
 mod embed;
 mod hooks;
+mod howto;
 mod ingest;
 mod items;
 mod kg;
 mod migrate;
+mod resolve;
 mod search;
 mod server;
 mod views;
@@ -18,15 +20,15 @@ mod views;
 use rusqlite::Connection;
 use serde_json::Value;
 
-const USAGE: &str = "backtrail ingest [--force] | build | check [--pairs] | match | artifacts [--manifest FILE] | \
+const USAGE: &str = "backtrail ingest [--force] | build | check [--pairs] | match | resolve <id> --by <id> --reason T | resolve --expired | unresolve <id> | resolve-queue [--limit N] | resolve-packet <id> | resolve-apply <file|-> | howto-queue [--limit N] [--again] | howto-packet <id> | howto-apply | artifacts [--manifest FILE] | \
 search <q> [--thread --kind --state --from --to --text] | embed [--limit N] | log [--n N] | link A B kind | \
-relate A B kind --source REF --quote Q [--state S] | pending [--days N] | show <ref> | demo (needs BACKTRAIL_HOME) | \
-add <type> --thread --title --source --quote [--body --state --origin --date] | import <facts.json|-> | \
-set-thread NAME [--state S] [--summary X] | done <step> [--by B] [--proof P] | built <step> --evidence TEXT | \
+relate A B kind --source REF --quote Q [--state S] | pending [--days N] | skip <session ref> | show <ref> | demo (needs BACKTRAIL_HOME) | \
+add <type> --thread --title --source --quote [--body --check --state --origin --date] | import <facts.json|-> | \
+set-thread NAME [--state S] [--summary X] | done <step> [--by B] [--proof P] | built <step> --evidence TEXT [--check TEXT] | \
 flag <id> --as live|in_effect|superseded|done --reason R | reply <q> --text TEXT | retire <id> [--by ID] --reason R | \
 assign <ref> <thread> | extract-input <ref> | extract-queue [--limit N] [--session ID] [--entity NAME] | \
 extract-log <ref> [--failed 1] [--detail D] | kg [state|export|restore|lint|suggest|merge|entity|page|trace|why|neighbors|passage|find] | \
-brief [--thread T] | backup | serve [--port N] | hooks";
+brief [--thread T | --all] | backup | serve [--port N] | hooks";
 
 /// The command-line arguments after the command name.
 struct Args(Vec<String>);
@@ -157,6 +159,14 @@ fn import(c: &Connection, file: &str) {
                     state: x["state"].as_str().map(String::from),
                     origin: x["origin"].as_str().unwrap_or("compiled").into(),
                     date: x["date"].as_str().map(String::from),
+                    entities: x["entities"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|e| e.as_str().map(String::from))
+                        .collect(),
+                    valid_to: x["valid_to"].as_str().filter(|v| !v.is_empty()).map(String::from),
+                    check_how: x["check"].as_str().filter(|v| !v.is_empty()).map(String::from),
                 },
             )
         } else {
@@ -301,9 +311,20 @@ fn main() {
                 state: a.opt("--state"),
                 origin: a.opt("--origin").unwrap_or("compiled".into()),
                 date: a.opt("--date"),
+                entities: a
+                    .text("--entities")
+                    .split(',')
+                    .map(|e| e.trim().to_string())
+                    .filter(|e| !e.is_empty())
+                    .collect(),
+                valid_to: a.opt("--valid-to"),
+                check_how: a.opt("--check"),
             };
             match items::add(&c, &it) {
-                Ok(id) => println!("ok {id}"),
+                Ok(id) => {
+                    println!("ok {id}");
+                    resolve::print_candidates(&c, &id);
+                }
                 Err(e) => fail(&e),
             }
         }
@@ -333,7 +354,7 @@ fn main() {
             "no such step",
         ),
         "built" => report_or_fail(
-            items::built(&c, &a.at(1, "id"), &a.text("--evidence")),
+            items::built(&c, &a.at(1, "id"), &a.text("--evidence"), a.opt("--check")),
             "no such open step",
         ),
         "flag" => report_or_fail(
@@ -408,7 +429,7 @@ fn main() {
             if !db::is_demo() {
                 ingest::rescan(&c);
             }
-            views::brief(&c, a.opt("--thread").as_deref())
+            views::brief(&c, a.opt("--thread").as_deref(), a.has("--all"))
         }
         "backup" => println!(
             "{}",
@@ -417,8 +438,30 @@ fn main() {
         "check" if a.has("--pairs") => check::pairs(&c),
         "check" => check::check(&c),
         "match" => check::match_commits(&c, true),
+        "resolve" => {
+            if a.has("--expired") {
+                println!("expired {}", resolve::expire(&c));
+            } else {
+                report_or_fail(
+                    resolve::resolve(&c, &a.at(1, "item id"), &a.text("--by"), &a.text("--reason")),
+                    "no such open item",
+                );
+            }
+        }
+        "unresolve" => report(resolve::unresolve(&c, &a.at(1, "item id")), "not a resolved item"),
+        "resolve-packet" => resolve::packet(&c, &a.at(1, "item id")),
+        "resolve-apply" => resolve::apply_cli(&c, &a.at(1, "file")),
+        "howto-queue" => howto::queue(&c, a.num("--limit", 30), a.has("--again")),
+        "howto-packet" => howto::packet(&c, &a.at(1, "step id")),
+        "howto-apply" => howto::apply_cli(&c),
+        "resolve-queue" => resolve::queue(&c, a.num("--limit", 20)),
         "artifacts" => check::artifacts(&c, a.opt("--manifest").as_deref()),
         "pending" => check::pending(&c, a.num("--days", 3)),
+        "skip" => {
+            let r = db::resolve_ref(&c, &a.at(1, "session ref"));
+            let id = db::source_id(&c, &r).unwrap_or(0);
+            report(items::skip_session(&c, id, "claude"), "no such session")
+        }
         "show" => check::show(&c, &a.at(1, "source ref")),
         "log" => check::log(&c, a.num("--n", 25)),
         "embed" => embed::run_cli(&c, a.num("--limit", usize::MAX)),

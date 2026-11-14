@@ -23,7 +23,7 @@ export default function Shell({ children }: { children: ReactNode }) {
   const nav = useNavigate()
   const loc = useLocation()
   useEffect(() => { if (new URLSearchParams(loc.search).get('add')) setCap({ open: true, thread: new URLSearchParams(loc.search).get('thread') ?? undefined }) }, [loc.search])
-  const title = ({ map: 'Map', graph: 'Graph', thread: 'Project', source: 'Source', search: 'Search', items: 'Items', log: 'Log' } as any)[loc.pathname.split('/')[1]] ?? 'Home'
+  const title = ({ map: 'Map', graph: 'Graph', thread: 'Thread', source: 'Source', search: 'Search', items: 'Items', log: 'Log' } as any)[loc.pathname.split('/')[1]] ?? 'Home'
   const live = (today?.threads ?? []).filter((t: any) => t.state === 'moving')
   const others = (today?.threads ?? []).filter((t: any) => t.state !== 'moving' && t.name !== 'Unsorted')
   const [showOthers, setShowOthers] = useState(false)
@@ -45,7 +45,7 @@ export default function Shell({ children }: { children: ReactNode }) {
               {to === '/' && fresh > 0 && <span className="ml-auto size-2 rounded-full bg-accent" title="Something is waiting in the focus card" />}
             </NavLink>
           ))}
-          <div className="mt-5 px-2.5 pb-1 text-[12px] text-mut" title="Projects whose state is In development. The yellow number is how many questions in it wait for your answer.">Projects</div>
+          <div className="mt-5 px-2.5 pb-1 text-[12px] text-mut" title="Threads whose state is In development. The yellow number is how many questions in it wait for your answer.">Threads</div>
           {live.map((t: any) => (
             <Link key={t.name} to={`/thread/${encodeURIComponent(t.name)}`} className="row-hover flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] text-soft">
               <span className="size-2 rounded-full" style={{ background: STATE.moving.color }} />
@@ -55,8 +55,8 @@ export default function Shell({ children }: { children: ReactNode }) {
           ))}
           {others.length > 0 && (
             <>
-              <button type="button" onClick={toggleOthers} className="mt-4 flex items-center gap-1.5 px-2.5 pb-1 text-left text-[12px] text-mut hover:text-ink" title="Built, parked, dropped and open-idea projects">
-                <ChevronRight size={12} className={`transition ${showOthers ? 'rotate-90' : ''}`} />Other projects <span className="tabular-nums">({others.length})</span>
+              <button type="button" onClick={toggleOthers} className="mt-4 flex items-center gap-1.5 px-2.5 pb-1 text-left text-[12px] text-mut hover:text-ink" title="Built, parked, dropped and open-idea threads">
+                <ChevronRight size={12} className={`transition ${showOthers ? 'rotate-90' : ''}`} />Other threads <span className="tabular-nums">({others.length})</span>
               </button>
               {showOthers && <div>{['built', 'parked', 'open', 'dropped'].map((st) => {
                 const g = others.filter((t: any) => t.state === st)

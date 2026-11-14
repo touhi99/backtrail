@@ -30,8 +30,8 @@ export default function Capture({ thread, onClose, onDone }: { thread?: string; 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm" onMouseDown={onClose}>
       <form onSubmit={submit} onMouseDown={(e) => e.stopPropagation()} className="nx-now w-[540px] max-w-[94vw] !p-6">
-        <div className="relative mb-4 flex items-center"><div className="text-[18px] font-semibold tracking-tight">Add to a project</div><button type="button" className="btn ghost sm ml-auto" onClick={onClose}><X size={14} /></button></div>
-        <label className="relative mb-1 block text-[12px] text-mut">Project</label>
+        <div className="relative mb-4 flex items-center"><div className="text-[18px] font-semibold tracking-tight">Add to a thread</div><button type="button" className="btn ghost sm ml-auto" onClick={onClose}><X size={14} /></button></div>
+        <label className="relative mb-1 block text-[12px] text-mut">Thread</label>
         <select className="input relative mb-3 !rounded-xl" value={th} onChange={(e) => setTh(e.target.value)}>
           {threads.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
         </select>
