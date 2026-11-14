@@ -19,14 +19,20 @@ the database. Sources (session logs, notes, git history, artifact snapshots) are
 
 | File | Role |
 | --- | --- |
-| `main.rs` | Command dispatch: parses the subcommand, opens the store, calls one function. |
-| `server.rs` | Local HTTP server (`tiny_http`, loopback only), JSON API, embedded app files, timer thread, brief, check and match. |
-| `ingest.rs` | Readers for sessions, notes, memory, artifact snapshots and git; thread assignment by rules in `config.json`. |
-| `db.rs` | Schema, the write rule for items (type, length limits, a verbatim quote that must exist in an indexed source) and the one-time migration from the earlier two-store layout. |
-| `compile.rs` | Extraction cost log, retire, assign and relate. No model call. |
+| `main.rs` | Command dispatch: parses the arguments of each command and calls one function. |
+| `db.rs` | Opening the store, query helpers, source refs and the quote lookup that every write rule uses. |
+| `migrate.rs` | Schema (`sql/schema.sql`) and store versions in `PRAGMA user_version`; each migration backs up the store and runs in one transaction. |
+| `items.rs` | Work items: the write rule (type, length limits, a verbatim quote from an indexed source), the keep rule, and every change the app or the command line makes to an item. |
+| `views.rs` | Read-only page data for the app (Today, thread, focus, items, source, trail, graph) and the session-start brief. |
+| `search.rs` | Hybrid passage search (BM25 and vectors, merged by reciprocal rank fusion) and the item index. |
+| `check.rs` | `check`, `check --pairs`, `pending`, `match`, `artifacts`, `show` and `log`. |
+| `server.rs` | Local HTTP server (`tiny_http`, loopback only): routes, request guard and the background scan. Each route calls one function. |
+| `ingest/` | Readers for sessions, notes, artifact snapshots and git (`sessions.rs`, `notes.rs`, `git.rs`), thread assignment (`threads.rs`), relinking and the daily backup (`mod.rs`). |
+| `kg/` | Knowledge graph: claim write rule and relations (`claims.rs`), entities (`entities.rs`), history queries (`query.rs`), extraction queue and packet (`extract.rs`), graph pages (`screen.rs`), lint, export and restore. |
 | `embed.rs` | Embedding client, vector table and brute-force nearest-neighbour lookup. |
-| `kg.rs` | Entities and claims: the claim write rule, extraction queue and packet, queries (`find`, `why`, `trace`, `neighbors`, `page`), lint, merge, export and restore. |
-| `src/sql/*.sql` | Longer SQL statements, loaded with `include_str!`; the first line names the function that uses each. |
+| `config.rs`, `clock.rs` | `config.json`, read once per process; UTC timestamps. |
+| `demo.rs` | The demo store. |
+| `src/sql/` | `schema.sql` (tables), `views.sql` (the `item`, `fact`, `thread_stat`, `source_stat` and `entity_stat` read views that pages filter) and `migrate_unify.sql`. Other statements are inline next to the code that runs them. |
 | `app/` | React and Vite web app, built to `app/dist/` and embedded into the binary. |
 
 ## Data
@@ -94,6 +100,6 @@ whose passage no longer holds its quote at the passage that does.
 Routes: Today, Graph (network and over-time views), Items, Log, Search, Thread, Source. `/map?thread=` shows one
 project's items and notes. Today reads `/api/today`; the Graph page reads `/api/kg/graph`, `/api/kg/claims`,
 `/api/kg/lineage`, `/api/kg/suggest` and `/api/kg/growth`. All writes from the app go through `POST /api/*` handlers in
-`server.rs`, which call the same functions as the command line.
+`server.rs`, which call the same functions in `items.rs` and `kg/` as the command line.
 
 Limits: README, section "Limits", and `reference.md`, section "Scale limits".

@@ -1,8 +1,8 @@
 //! Optional local embeddings. Off unless config.json has an `embeddings` object with `url` and `model`
 //! (an Ollama-compatible server: POST <url>/api/embed). Vectors are keyed by a hash of the passage text, so a
 //! session that grows re-embeds only its new passages. Only plain `http://` URLs are supported.
-use crate::db::*;
-use crate::ingest::cfg;
+use crate::config::cfg;
+use crate::db::{id64, logw};
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use std::sync::Mutex;
@@ -12,23 +12,8 @@ const BATCH: usize = 32;
 const MAX_CHARS: usize = 3000;
 
 pub fn enabled() -> bool {
-    let e = &cfg().emb;
-    !e.0.is_empty() && !e.1.is_empty()
-}
-
-fn fnv(s: &str) -> String {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for b in s.as_bytes() {
-        h ^= *b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    format!("{h:016x}")
-}
-
-pub fn ensure(c: &Connection) {
-    c.execute_batch("CREATE TABLE IF NOT EXISTS vec(hash TEXT PRIMARY KEY, model TEXT NOT NULL, v BLOB NOT NULL);").expect("vec table");
-    let _ = c.execute("ALTER TABLE chunks ADD COLUMN hash TEXT", []);
-    let _ = c.execute("CREATE INDEX IF NOT EXISTS chunks_hash ON chunks(hash)", []);
+    let e = &cfg().embeddings;
+    !e.url.is_empty() && !e.model.is_empty()
 }
 
 fn fill_hashes(c: &Connection) {
@@ -46,7 +31,7 @@ fn fill_hashes(c: &Connection) {
     for (id, t) in todo {
         c.execute(
             "UPDATE chunks SET hash=?2 WHERE id=?1",
-            params![id, fnv(&t)],
+            params![id, id64(&t)],
         )
         .ok();
     }
@@ -54,7 +39,7 @@ fn fill_hashes(c: &Connection) {
 }
 
 fn call(texts: &[String], prefix: &str, secs: u64) -> Result<Vec<Vec<f32>>, String> {
-    let e = &cfg().emb;
+    let e = &cfg().embeddings;
     let input: Vec<String> = texts
         .iter()
         .map(|t| format!("{prefix}{}", t.chars().take(MAX_CHARS).collect::<String>()))
@@ -64,8 +49,8 @@ fn call(texts: &[String], prefix: &str, secs: u64) -> Result<Vec<Vec<f32>>, Stri
         .build()
         .into();
     let mut resp = agent
-        .post(&format!("{}/api/embed", e.0))
-        .send_json(json!({"model": e.1, "input": input}))
+        .post(&format!("{}/api/embed", e.url))
+        .send_json(json!({"model": e.model, "input": input}))
         .map_err(|x| format!("{x}"))?;
     let v: Value = resp.body_mut().read_json().map_err(|x| format!("{x}"))?;
     let arr = v["embeddings"].as_array().ok_or("no embeddings in reply")?;
@@ -117,15 +102,11 @@ pub fn coverage(c: &Connection) -> (i64, i64) {
 /// Embed up to `limit` passages that have no vector yet. Returns (embedded, still pending).
 pub fn run(c: &Connection, limit: usize) -> Result<(usize, i64), String> {
     if !enabled() {
-        return Err(
-            "embeddings are turned off in config.json (\"embeddings\": false)"
-                .into(),
-        );
+        return Err("embeddings are turned off in config.json (\"embeddings\": false)".into());
     }
-    let e = &cfg().emb;
-    ensure(c);
+    let e = &cfg().embeddings;
     fill_hashes(c);
-    c.execute("DELETE FROM vec WHERE model!=?1", params![e.1])
+    c.execute("DELETE FROM vec WHERE model!=?1", params![e.model])
         .ok();
     c.execute(
         "DELETE FROM vec WHERE hash NOT IN (SELECT hash FROM chunks WHERE hash IS NOT NULL)",
@@ -133,7 +114,7 @@ pub fn run(c: &Connection, limit: usize) -> Result<(usize, i64), String> {
     )
     .ok();
     let todo: Vec<(String, String)> = c
-        .prepare(include_str!("sql/embed_run.sql"))
+        .prepare("SELECT hash, MIN(text) FROM chunks WHERE hash IS NOT NULL AND hash NOT IN (SELECT hash FROM vec) GROUP BY hash LIMIT ?1")
         .unwrap()
         .query_map(params![limit as i64], |r| Ok((r.get(0)?, r.get(1)?)))
         .unwrap()
@@ -142,12 +123,12 @@ pub fn run(c: &Connection, limit: usize) -> Result<(usize, i64), String> {
     let mut done = 0;
     for group in todo.chunks(BATCH) {
         let texts: Vec<String> = group.iter().map(|g| g.1.clone()).collect();
-        let vs = call(&texts, &e.3, 120)?;
+        let vs = call(&texts, &e.document_prefix, 120)?;
         c.execute_batch("BEGIN").ok();
         for ((h, _), v) in group.iter().zip(vs) {
             c.execute(
                 "INSERT OR REPLACE INTO vec(hash,model,v) VALUES(?1,?2,?3)",
-                params![h, e.1, blob(&v)],
+                params![h, e.model, blob(&v)],
             )
             .ok();
         }
@@ -173,7 +154,13 @@ pub fn run_cli(c: &Connection, limit: usize) {
                 t.elapsed().as_secs_f32()
             );
             if n > 0 {
-                logw(c, "embed", "embed", &cfg().emb.1, &format!("{n} passages"));
+                logw(
+                    c,
+                    "embed",
+                    "embed",
+                    &cfg().embeddings.model,
+                    &format!("{n} passages"),
+                );
             }
         }
         Err(e) => {
@@ -192,7 +179,7 @@ pub fn nearest(c: &Connection, q: &str, k: usize) -> Result<Vec<(i64, f32)>, Str
     if !enabled() {
         return Err("off".into());
     }
-    let qv = call(&[q.to_string()], &cfg().emb.2, 4)?
+    let qv = call(&[q.to_string()], &cfg().embeddings.query_prefix, 4)?
         .pop()
         .ok_or("empty reply")?;
     let sig: String = c

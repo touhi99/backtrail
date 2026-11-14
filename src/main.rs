@@ -1,498 +1,456 @@
-mod compile;
+//! The `backtrail` command. Each command parses its arguments and calls one function; the work happens in the
+//! modules below.
+mod check;
+mod clock;
+mod config;
 mod db;
+mod demo;
 mod embed;
 mod hooks;
 mod ingest;
+mod items;
 mod kg;
+mod migrate;
+mod search;
 mod server;
+mod views;
 
-use db::*;
+use rusqlite::Connection;
 use serde_json::Value;
 
-fn arg(args: &[String], name: &str) -> Option<String> {
-    args.iter()
-        .position(|a| a == name)
-        .and_then(|i| args.get(i + 1))
-        .cloned()
+const USAGE: &str = "backtrail ingest [--force] | build | check [--pairs] | match | artifacts [--manifest FILE] | \
+search <q> [--thread --kind --state --from --to --text] | embed [--limit N] | log [--n N] | link A B kind | \
+relate A B kind --source REF --quote Q [--state S] | pending [--days N] | show <ref> | demo (needs BACKTRAIL_HOME) | \
+add <type> --thread --title --source --quote [--body --state --origin --date] | import <facts.json|-> | \
+set-thread NAME [--state S] [--summary X] | done <step> [--by B] [--proof P] | built <step> --evidence TEXT | \
+flag <id> --as live|in_effect|superseded|done --reason R | reply <q> --text TEXT | retire <id> [--by ID] --reason R | \
+assign <ref> <thread> | extract-input <ref> | extract-queue [--limit N] [--session ID] [--entity NAME] | \
+extract-log <ref> [--failed 1] [--detail D] | kg [state|export|restore|lint|suggest|merge|entity|page|trace|why|neighbors|passage|find] | \
+brief [--thread T] | backup | serve [--port N] | hooks";
+
+/// The command-line arguments after the command name.
+struct Args(Vec<String>);
+
+impl Args {
+    /// The value after `--name`.
+    fn opt(&self, name: &str) -> Option<String> {
+        self.0
+            .iter()
+            .position(|a| a == name)
+            .and_then(|i| self.0.get(i + 1))
+            .cloned()
+    }
+    fn text(&self, name: &str) -> String {
+        self.opt(name).unwrap_or_default()
+    }
+    fn num<T: std::str::FromStr>(&self, name: &str, default: T) -> T {
+        self.opt(name)
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default)
+    }
+    fn has(&self, name: &str) -> bool {
+        self.0.iter().any(|a| a == name)
+    }
+    /// The n-th positional argument (0 is the command); exits with a message when it is missing.
+    fn at(&self, n: usize, what: &str) -> String {
+        self.0
+            .get(n)
+            .cloned()
+            .unwrap_or_else(|| fail(&format!("missing {what}")))
+    }
+    /// Every argument from position `n` on, joined by spaces.
+    fn rest(&self, n: usize) -> String {
+        self.0.get(n..).unwrap_or_default().join(" ")
+    }
 }
 
-fn do_ingest(c: &rusqlite::Connection) {
-    let c = c;
-    if home().join(".demo").exists() {
+fn fail(message: &str) -> ! {
+    eprintln!("rejected: {message}");
+    std::process::exit(1)
+}
+
+/// Print `ok`, or `missing` when the change matched nothing.
+fn report(changed: bool, missing: &str) {
+    println!("{}", if changed { "ok" } else { missing });
+}
+
+/// Print the result of a change that can be refused; a refusal exits with status 1.
+fn report_or_fail(result: Result<bool, String>, missing: &str) {
+    match result {
+        Ok(changed) => report(changed, missing),
+        Err(e) => fail(&e),
+    }
+}
+
+fn ingest(c: &Connection) {
+    if db::is_demo() {
         eprintln!("demo store: ingest is disabled");
         std::process::exit(1);
     }
-    ingest::seed_threads(&c);
-    let (a, sa) = ingest::ingest_sessions(&c);
-    let (b, sb) = ingest::ingest_notes(&c);
-    let (d, sd) = ingest::ingest_artifacts(&c);
-    let (g, sg) = ingest::ingest_git(&c);
-    println!("git repos {g} ({sg} unchanged)");
-    ingest::rethread(&c);
-    let (ok, lost) = ingest::relink(&c);
-    println!("items relinked {ok}, quote no longer found {lost}");
-    if a + b + d + g > 0 {
-        logw(
-            &c,
-            "ingest",
-            "ingest",
-            "sources",
-            &format!("sessions {a}, notes {b}, artifacts {d}, git repos {g}"),
+    let r = ingest::scan(c);
+    println!("git repos {} ({} unchanged)", r.repos.0, r.repos.1);
+    println!(
+        "items relinked {}, quote no longer found {}",
+        r.quotes.0, r.quotes.1
+    );
+    let read = r.sessions.0 + r.notes.0 + r.artifacts.0 + r.repos.0;
+    if read > 0 {
+        let detail = format!(
+            "sessions {}, notes {}, artifacts {}, git repos {}",
+            r.sessions.0, r.notes.0, r.artifacts.0, r.repos.0
         );
+        db::logw(c, "ingest", "ingest", "sources", &detail);
     }
-    println!("sessions {a} new/changed ({sa} unchanged), notes {b} ({sb}), artifacts {d} ({sd})");
+    println!(
+        "sessions {} new/changed ({} unchanged), notes {} ({}), artifacts {} ({})",
+        r.sessions.0, r.sessions.1, r.notes.0, r.notes.1, r.artifacts.0, r.artifacts.1
+    );
+}
+
+/// `bt import`: a JSON array of facts. Decisions, steps, questions and turns are filed as items; state, rationale
+/// and relation facts as claims about entities.
+fn import(c: &Connection, file: &str) {
+    let raw = if file == "-" {
+        let mut s = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)
+            .unwrap_or_else(|e| fail(&e.to_string()));
+        s
+    } else {
+        std::fs::read_to_string(file).unwrap_or_else(|e| fail(&format!("{file}: {e}")))
+    };
+    let facts: Value =
+        serde_json::from_str(&raw).unwrap_or_else(|e| fail(&format!("not JSON: {e}")));
+    let (mut ok, mut bad) = (0, 0);
+    for x in facts
+        .as_array()
+        .unwrap_or_else(|| fail("expected a JSON array"))
+    {
+        let get = |k: &str| x[k].as_str().unwrap_or("").to_string();
+        let kind = get("type");
+        let title = if get("title").is_empty() {
+            get("text")
+        } else {
+            get("title")
+        };
+        let result = if items::TYPES.contains(&kind.as_str()) {
+            // Without a thread, the item goes to the thread of its source.
+            let thread = if get("thread").is_empty() {
+                let source = db::resolve_ref(c, &get("source"));
+                c.query_row("SELECT thread FROM sources WHERE ref=?1", [source], |r| {
+                    r.get::<_, Option<String>>(0)
+                })
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+            } else {
+                get("thread")
+            };
+            items::add(
+                c,
+                &items::NewItem {
+                    kind,
+                    thread,
+                    title: title.clone(),
+                    body: get("body"),
+                    source: get("source"),
+                    quote: get("quote"),
+                    state: x["state"].as_str().map(String::from),
+                    origin: x["origin"].as_str().unwrap_or("compiled").into(),
+                    date: x["date"].as_str().map(String::from),
+                },
+            )
+        } else {
+            let entities: Vec<String> = x["entities"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.as_str().map(String::from))
+                .collect();
+            let kind = if kind == "relation" {
+                format!("relation:{}", x["kind"].as_str().unwrap_or(""))
+            } else {
+                kind
+            };
+            kg::claims::add(
+                c,
+                &kg::claims::NewClaim {
+                    kind: &kind,
+                    text: &title,
+                    body: &get("body"),
+                    source: &get("source"),
+                    quote: &get("quote"),
+                    entities: &entities,
+                    stated: if get("stated") == "inferred" {
+                        "inferred"
+                    } else {
+                        "stated"
+                    },
+                    origin: "extracted",
+                },
+            )
+        };
+        match result {
+            Ok(_) => ok += 1,
+            Err(e) => {
+                bad += 1;
+                eprintln!("rejected [{title}]: {e}");
+            }
+        }
+    }
+    println!("imported {ok}, rejected {bad}");
+}
+
+fn kg_command(c: &Connection, a: &Args) {
+    match a.0.get(1).map(String::as_str) {
+        Some("state") => kg::query::state(c),
+        Some("export") => {
+            kg::export::export(c, &a.at(2, "file")).unwrap_or_else(|e| fail(&e.to_string()));
+            println!("ok")
+        }
+        Some("restore") => {
+            let (n, orphans) = kg::export::restore(c, &a.at(2, "file"));
+            println!(
+                "restored {n} rows, {orphans} claims kept without a quote (source or quote not found)"
+            )
+        }
+        Some("lint") => kg::lint::lint(c),
+        Some("suggest") => kg::entities::suggest(c),
+        Some("merge") => {
+            match kg::claims::merge(c, &a.at(2, "keep id"), &a.at(3, "duplicate id")) {
+                Ok(()) => println!("ok"),
+                Err(e) => eprintln!("{e}"),
+            }
+        }
+        Some("entity") if a.0.get(2).map(String::as_str) == Some("ignore") => {
+            kg::entities::ignore_suggestion(c, &a.at(3, "term"));
+            println!("ok")
+        }
+        Some("entity") => {
+            let aliases: Vec<String> =
+                a.0.windows(2)
+                    .filter(|w| w[0] == "--alias")
+                    .map(|w| w[1].clone())
+                    .collect();
+            let kind = a.opt("--kind").unwrap_or("project".into());
+            println!(
+                "ok {}",
+                kg::entities::add(c, &a.at(3, "name"), &kind, &aliases)
+            );
+        }
+        Some("page") => kg::query::page(c, &a.at(2, "entity"), a.num("--budget", 2000)),
+        Some("trace") => kg::query::trace(c, &a.at(2, "entity")),
+        Some("why") => {
+            kg::query::why(c, &a.rest(2));
+        }
+        Some("neighbors") => kg::query::neighbors(c, &a.at(2, "entity")),
+        Some("passage") => {
+            kg::query::ask(c, &a.rest(2));
+        }
+        Some("find") => kg::query::find(c, &a.rest(2)),
+        _ => kg::query::stats(c),
+    }
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let cmd = args.first().map(|s| s.as_str()).unwrap_or("help");
+    let a = Args(std::env::args().skip(1).collect());
+    let cmd = a.0.first().map(String::as_str).unwrap_or("help");
     if cmd == "hooks" {
-        return hooks::run(&args);
+        return hooks::run(&a.0);
     }
-    let c = open();
+    if cmd == "brief" && std::env::var("BACKTRAIL_COMPILE").is_ok() {
+        // the headless extraction model starts a session too; it gets no brief
+        return;
+    }
+    let c = db::open();
     match cmd {
         "ingest" => {
-            if args.iter().any(|a| a == "--force") {
-                // read every session again, for example after the chunking rule changed; sources whose file is gone are kept
-                c.execute("UPDATE sources SET mtime=0, bytes=0 WHERE kind='session'", []).unwrap();
-                c.execute("DELETE FROM scanned WHERE path LIKE '%.jsonl'", []).unwrap();
+            if a.has("--force") {
+                // Read every session again, for example after the chunking rule changed. Sources whose file is gone
+                // are kept.
+                c.execute(
+                    "UPDATE sources SET mtime=0, bytes=0 WHERE kind='session'",
+                    [],
+                )
+                .unwrap();
+                c.execute("DELETE FROM scanned WHERE path LIKE '%.jsonl'", [])
+                    .unwrap();
             }
-            do_ingest(&c)
+            ingest(&c)
         }
         "build" => {
             // a fresh machine: index every source, create the configured entities, then embed
-            do_ingest(&c);
-            println!("entities: {}", kg::sync_entities(&c));
+            ingest(&c);
+            println!("entities: {}", kg::entities::sync_configured(&c));
             match embed::run(&c, usize::MAX) {
                 Ok((n, left)) => println!("embedded {n} passages, {left} pending"),
                 Err(e) => eprintln!(
                     "embed skipped: {e}\nSearch works by keyword only until the embedding server is reachable. \
-                     Install Ollama, run `ollama pull embeddinggemma-2:270m`, then `backtrail embed`."
+                     Install Ollama, run `ollama pull {}`, then `backtrail embed`.",
+                    config::DEFAULT_EMBED_MODEL
                 ),
             }
         }
         "add" => {
-            // backtrail add <type> --thread T --title X --source REF --quote Q [--body B] [--state S] [--origin O]
-            let it = Item {
-                typ: args.get(1).cloned().unwrap_or_default(),
-                thread: arg(&args, "--thread").unwrap_or_default(),
-                title: arg(&args, "--title").unwrap_or_default(),
-                body: arg(&args, "--body").unwrap_or_default(),
-                source: arg(&args, "--source").unwrap_or_default(),
-                quote: arg(&args, "--quote").unwrap_or_default(),
-                state: arg(&args, "--state"),
-                origin: arg(&args, "--origin").unwrap_or("compiled".into()),
-                date: arg(&args, "--date"),
+            let it = items::NewItem {
+                kind: a.0.get(1).cloned().unwrap_or_default(),
+                thread: a.text("--thread"),
+                title: a.text("--title"),
+                body: a.text("--body"),
+                source: a.text("--source"),
+                quote: a.text("--quote"),
+                state: a.opt("--state"),
+                origin: a.opt("--origin").unwrap_or("compiled".into()),
+                date: a.opt("--date"),
             };
-            match add_item(&c, &it) {
+            match items::add(&c, &it) {
                 Ok(id) => println!("ok {id}"),
-                Err(e) => {
-                    eprintln!("rejected: {e}");
-                    std::process::exit(1);
-                }
+                Err(e) => fail(&e),
             }
         }
-        "import" => {
-            let raw = if args.get(1).map(|s| s.as_str()) == Some("-") {
-                let mut s = String::new();
-                std::io::Read::read_to_string(&mut std::io::stdin(), &mut s).expect("stdin");
-                s
-            } else {
-                std::fs::read_to_string(args.get(1).expect("file")).expect("read")
-            };
-            let v: Value = serde_json::from_str(&raw).expect("json");
-            let (mut ok, mut bad) = (0, 0);
-            for x in v.as_array().expect("array") {
-                let g = |k: &str| x[k].as_str().unwrap_or("").to_string();
-                let typ = g("type");
-                let title = if g("title").is_empty() { g("text") } else { g("title") };
-                let res = if db::TYPES.contains(&typ.as_str()) {
-                    // decision, step, question, turn: a work item or a decision on a thread
-                    let thread = if g("thread").is_empty() {
-                        c.query_row(
-                            "SELECT thread FROM sources WHERE ref=?1",
-                            rusqlite::params![resolve_ref(&c, &g("source"))],
-                            |r| r.get::<_, Option<String>>(0),
-                        )
-                        .ok()
-                        .flatten()
-                        .unwrap_or_default()
-                    } else {
-                        g("thread")
-                    };
-                    add_item(
-                        &c,
-                        &Item {
-                            typ,
-                            thread,
-                            title: title.clone(),
-                            body: g("body"),
-                            source: g("source"),
-                            quote: g("quote"),
-                            state: x["state"].as_str().map(|s| s.to_string()),
-                            origin: x["origin"].as_str().unwrap_or("compiled").into(),
-                            date: x["date"].as_str().map(|s| s.to_string()),
-                        },
-                    )
-                } else {
-                    // state, rationale, relation: a claim about named entities
-                    let ents: Vec<String> = x["entities"]
-                        .as_array()
-                        .map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect())
-                        .unwrap_or_default();
-                    let ctype = if typ == "relation" {
-                        format!("relation:{}", x["kind"].as_str().unwrap_or("related to"))
-                    } else {
-                        typ
-                    };
-                    kg::add_claim(
-                        &c,
-                        &ctype,
-                        &title,
-                        &g("body"),
-                        &g("source"),
-                        &g("quote"),
-                        &ents,
-                        if g("stated") == "inferred" { "inferred" } else { "stated" },
-                        "extracted",
-                    )
-                };
-                match res {
-                    Ok(_) => ok += 1,
-                    Err(e) => {
-                        bad += 1;
-                        eprintln!("rejected [{}]: {e}", title);
-                    }
-                }
-            }
-            println!("imported {ok}, rejected {bad}");
-        }
+        "import" => import(&c, &a.at(1, "file")),
         "set-thread" => {
-            // backtrail set-thread NAME --state moving --summary "..."
-            let name = args.get(1).expect("name");
-            if let Some(s) = arg(&args, "--state") {
-                c.execute(
-                    "UPDATE threads SET state=?2 WHERE name=?1",
-                    rusqlite::params![name, s],
-                )
-                .unwrap();
+            let name = a.at(1, "thread name");
+            if let Some(state) = a.opt("--state") {
+                c.execute("UPDATE threads SET state=?2 WHERE name=?1", [&name, &state])
+                    .unwrap();
             }
-            if let Some(s) = arg(&args, "--summary") {
+            if let Some(summary) = a.opt("--summary") {
                 c.execute(
                     "UPDATE threads SET body=?2 WHERE name=?1",
-                    rusqlite::params![name, s],
+                    [&name, &summary],
                 )
                 .unwrap();
             }
             println!("ok");
         }
-        "done" => {
-            // backtrail done <id> --by claude|evidence --proof "what shows it"
-            let id = args.get(1).expect("id");
-            let by = arg(&args, "--by").unwrap_or("claude".into());
-            let proof = arg(&args, "--proof").unwrap_or_default();
-            if by != "owner" && proof.trim().is_empty() {
-                eprintln!("rejected: a step closed by Claude or evidence needs --proof");
-                std::process::exit(1);
-            }
-            let n = c.execute("UPDATE claims SET state='done', done_by=?2, answer=?3, updated=?4 WHERE id=?1 AND type='step'", rusqlite::params![id, by, proof, chrono_now()]).unwrap();
-            logw(&c, &by, "done", id, &proof);
-            println!("{}", if n == 1 { "ok" } else { "no such step" });
-        }
-        "extract-input" => kg::extract_input(&c, args.get(1).expect("session ref")),
-        "extract-queue" => {
-            for r in kg::extract_queue(
+        "done" => report_or_fail(
+            items::done(
                 &c,
-                arg(&args, "--limit")
-                    .and_then(|d| d.parse().ok())
-                    .unwrap_or(3),
-                arg(&args, "--entity").as_deref(),
-                arg(&args, "--session").as_deref(),
-            ) {
-                println!("{r}")
-            }
-        }
-        "extract-log" => compile::record(
-            &c,
-            args.get(1).expect("session ref"),
-            arg(&args, "--failed").is_none(),
-            &arg(&args, "--detail").unwrap_or_default(),
+                &a.at(1, "id"),
+                &a.opt("--by").unwrap_or("claude".into()),
+                &a.text("--proof"),
+            ),
+            "no such step",
         ),
-        "retire" => compile::retire(
-            &c,
-            args.get(1).expect("id"),
-            arg(&args, "--by"),
-            &arg(&args, "--reason").unwrap_or_default(),
+        "built" => report_or_fail(
+            items::built(&c, &a.at(1, "id"), &a.text("--evidence")),
+            "no such open step",
         ),
-        "assign" => compile::assign(
-            &c,
-            args.get(1).expect("session ref"),
-            args.get(2).expect("thread"),
+        "flag" => report_or_fail(
+            items::flag(&c, &a.at(1, "id"), &a.text("--as"), &a.text("--reason")),
+            "no such proposed item",
         ),
-        "flag" => {
-            // backtrail flag <id> --as live|in_effect|superseded|done --reason "..."  (proposed items only; the owner still accepts or rejects)
-            let id = args.get(1).expect("id");
-            let kind = arg(&args, "--as").unwrap_or_default();
-            if !["live", "in_effect", "superseded", "done"].contains(&kind.as_str()) {
-                eprintln!("rejected: --as must be live, in_effect, superseded or done");
-                std::process::exit(1);
-            }
-            let reason: String = arg(&args, "--reason")
-                .unwrap_or_default()
-                .chars()
-                .take(200)
-                .collect();
-            if kind != "live" && reason.trim().is_empty() {
-                eprintln!("rejected: a flag other than live needs --reason");
-                std::process::exit(1);
-            }
-            let n = c
-                .execute(
-                    "UPDATE claims SET stale=?2 WHERE id=?1 AND state='proposed'",
-                    rusqlite::params![id, format!("{kind}|{reason}")],
-                )
-                .unwrap();
-            if n == 1 {
-                logw(&c, "claude", "flag", id, &format!("{kind}: {reason}"));
-            }
-            println!(
-                "{}",
-                if n == 1 {
-                    "ok"
-                } else {
-                    "no such proposed item"
-                }
-            );
-        }
-        "reply" => {
-            // backtrail reply <question id> --text "..."  (Claude answers a question the owner typed in the app)
-            let id = args.get(1).expect("id");
-            let tx: String = arg(&args, "--text")
-                .unwrap_or_default()
-                .chars()
-                .take(600)
-                .collect();
-            if tx.trim().is_empty() {
-                eprintln!("rejected: --text is required");
-                std::process::exit(1);
-            }
-            let n = c
-                .execute(
-                    include_str!("sql/main_main.sql"),
-                    rusqlite::params![id, tx, chrono_now()],
-                )
-                .unwrap();
-            if n == 1 {
-                logw(&c, "claude", "reply", id, &tx);
-            }
-            println!(
-                "{}",
-                if n == 1 {
-                    "ok"
-                } else {
-                    "no such open question from the owner"
-                }
-            );
-        }
-        "built" => {
-            // backtrail built <step id> --evidence "..."  (Claude says a step is built; the owner still confirms)
-            let id = args.get(1).expect("id");
-            let ev: String = arg(&args, "--evidence")
-                .unwrap_or_default()
-                .chars()
-                .take(300)
-                .collect();
-            if ev.trim().is_empty() {
-                eprintln!("rejected: --evidence is required");
-                std::process::exit(1);
-            }
-            let now = chrono_now();
-            let n = c
-                .execute(
-                    include_str!("sql/main_main_2.sql"),
-                    rusqlite::params![id, ev, now],
-                )
-                .unwrap();
-            if n == 1 {
-                logw(&c, "claude", "built", id, &ev);
-            }
-            println!("{}", if n == 1 { "ok" } else { "no such open step" });
-        }
-        "brief" => {
-            if std::env::var("BACKTRAIL_COMPILE").is_ok() {
-                return;
-            }
-            if !home().join(".demo").exists() {
-                server::rescan(&c);
-            }
-            server::brief(&c, arg(&args, "--thread"))
-        }
-        "backup" => println!(
-            "{}",
-            server::backup(&c).unwrap_or("already backed up today".into())
+        "reply" => report_or_fail(
+            items::reply(&c, &a.at(1, "id"), &a.text("--text")),
+            "no such open question from the owner",
         ),
-        "check" => {
-            if args.iter().any(|a| a == "--pairs") {
-                server::pairs(&c)
-            } else {
-                server::check(&c)
-            }
-        }
-        "match" => server::match_evidence(&c),
-        "artifacts" => server::artifacts(&c, arg(&args, "--manifest")),
-        "embed" => embed::run_cli(
-            &c,
-            arg(&args, "--limit")
-                .and_then(|d| d.parse().ok())
-                .unwrap_or(usize::MAX),
-        ),
-        "search" => {
-            // backtrail search <words> [--thread T] [--kind session|note|artifact|commit] [--state S] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--text]
-            let flags = ["--thread", "--kind", "--state", "--from", "--to"];
-            let mut words = vec![];
-            let mut i = 1;
-            while i < args.len() {
-                if flags.contains(&args[i].as_str()) {
-                    i += 2
-                } else if args[i] == "--text" {
-                    i += 1
-                } else {
-                    words.push(args[i].clone());
-                    i += 1
-                }
-            }
-            let f = server::Filters {
-                thread: arg(&args, "--thread").unwrap_or_default(),
-                kind: arg(&args, "--kind").unwrap_or_default(),
-                state: arg(&args, "--state").unwrap_or_default(),
-                from: arg(&args, "--from").unwrap_or_default(),
-                to: arg(&args, "--to").unwrap_or_default(),
-            };
-            server::search_cli(
+        "retire" => report(
+            items::retire(
                 &c,
-                &words.join(" "),
-                &f,
-                !args.iter().any(|a| a == "--text"),
-            )
-        }
-        "log" => server::log_cli(
-            &c,
-            arg(&args, "--n").and_then(|d| d.parse().ok()).unwrap_or(25),
+                &a.at(1, "id"),
+                a.opt("--by").as_deref(),
+                &a.text("--reason"),
+            ),
+            "no such live item",
         ),
+        "assign" => match ingest::threads::pin(&c, &a.at(1, "session ref"), &a.at(2, "thread")) {
+            Ok(found) => report(found, "no such session"),
+            Err(e) => fail(&e),
+        },
         "relate" => {
-            // backtrail relate "A" "B" "spun out of" --source session:xxxxxxxx --quote "..." [--state proposed]
-            let (a, b, k) = (
-                args.get(1).expect("from thread"),
-                args.get(2).expect("to thread"),
-                args.get(3).expect("kind"),
-            );
-            match compile::relate(
+            let state = a.opt("--state").unwrap_or("proposed".into());
+            let kind = a.at(3, "kind");
+            match kg::claims::relate(
                 &c,
-                a,
-                b,
-                k,
-                &arg(&args, "--source").unwrap_or_default(),
-                &arg(&args, "--quote").unwrap_or_default(),
-                &arg(&args, "--state").unwrap_or("proposed".into()),
+                &a.at(1, "from thread"),
+                &a.at(2, "to thread"),
+                &kind,
+                &a.text("--source"),
+                &a.text("--quote"),
+                &state,
             ) {
                 Ok(()) => println!("ok"),
-                Err(e) => {
-                    eprintln!("rejected: {e}");
-                    std::process::exit(1)
-                }
+                Err(e) => fail(&e),
             }
         }
         "link" => {
-            // backtrail link "A" "B" "built on"
-            let (a, b, k) = (
-                args.get(1).expect("from thread"),
-                args.get(2).expect("to thread"),
-                args.get(3).cloned().unwrap_or("built on".into()),
-            );
-            kg::owner_relation(&c, a, b, &k, &chrono_now());
-            logw(&c, "claude", "link", &format!("{a} -> {b}"), &k);
+            let (from, to) = (a.at(1, "from thread"), a.at(2, "to thread"));
+            let kind = a.0.get(3).cloned().unwrap_or("built on".into());
+            kg::claims::owner_relation(&c, &from, &to, &kind, &clock::now());
+            db::logw(&c, "claude", "link", &format!("{from} -> {to}"), &kind);
             println!("ok");
         }
-        "pending" => server::pending(
-            &c,
-            arg(&args, "--days")
-                .and_then(|d| d.parse().ok())
-                .unwrap_or(3),
-        ),
-        "show" => server::show(&c, args.get(1).expect("source ref")),
-        "kg" => match args.get(1).map(|s| s.as_str()) {
-            Some("state") => kg::state(&c),
-            Some("export") => {
-                kg::export(&c, args.get(2).expect("file")).expect("write");
-                println!("ok")
-            }
-            Some("restore") => {
-                let (n, o) = kg::restore(&c, args.get(2).expect("file"));
-                println!(
-                    "restored {n} rows, {o} claims kept without a quote (source or quote not found)"
-                )
-            }
-            Some("lint") => kg::lint(&c),
-            Some("suggest") => kg::suggest(&c),
-            Some("merge") => {
-                match kg::merge(
-                    &c,
-                    args.get(2).expect("keep id"),
-                    args.get(3).expect("drop id"),
-                ) {
-                    Ok(()) => println!("ok"),
-                    Err(e) => eprintln!("{e}"),
-                }
-            }
-            Some("entity") if args.get(2).map(|a| a.as_str()) == Some("ignore") => {
-                kg::ignore_term(&c, args.get(3).expect("term"));
-                println!("ok")
-            }
-            Some("entity") => {
-                let mut al = vec![];
-                let mut i = 0;
-                while i < args.len() {
-                    if args[i] == "--alias" {
-                        if let Some(a) = args.get(i + 1) {
-                            al.push(a.clone())
-                        }
-                    }
-                    i += 1
-                }
-                kg::entity_add(
-                    &c,
-                    args.get(3).expect("name"),
-                    &arg(&args, "--kind").unwrap_or("project".into()),
-                    &al,
-                )
-            }
-            Some("page") => kg::page(
+        "extract-input" => kg::extract::input(&c, &a.at(1, "session ref")),
+        "extract-queue" => {
+            let queue = kg::extract::queue(
                 &c,
-                args.get(2).expect("entity"),
-                arg(&args, "--budget")
-                    .and_then(|d| d.parse().ok())
-                    .unwrap_or(2000),
-            ),
-            Some("trace") => kg::trace(&c, args.get(2).expect("entity")),
-            Some("why") => {
-                kg::why(&c, &args[2..].join(" "));
+                a.num("--limit", 3),
+                a.opt("--entity").as_deref(),
+                a.opt("--session").as_deref(),
+            );
+            for r in queue {
+                println!("{r}")
             }
-            Some("neighbors") => kg::neighbors(&c, args.get(2).expect("entity")),
-            Some("passage") => {
-                kg::ask(&c, &args[2..].join(" "));
+        }
+        "extract-log" => {
+            let ok = a.opt("--failed").is_none();
+            let source = db::resolve_ref(&c, &a.at(1, "session ref"));
+            db::logw(
+                &c,
+                "extract",
+                if ok { "extract" } else { "extract-failed" },
+                &source,
+                &a.text("--detail"),
+            );
+            println!("ok");
+        }
+        "brief" => {
+            if !db::is_demo() {
+                ingest::rescan(&c);
             }
-            Some("find") => kg::find(&c, &args[2..].join(" ")),
-            _ => kg::stats(&c),
-        },
-        "demo" => server::demo(&c),
-        "serve" => server::serve(
-            c,
-            arg(&args, "--port")
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(ingest::cfg().port),
+            views::brief(&c, a.opt("--thread").as_deref())
+        }
+        "backup" => println!(
+            "{}",
+            ingest::backup(&c).unwrap_or("already backed up today".into())
         ),
-        _ => println!(
-            "backtrail ingest [--force] | check | match | artifacts | search <q> [--thread --kind --state --from --to --text] | embed [--limit N] | log | link A B kind | pending [--days N] | show <ref> | demo (needs BACKTRAIL_HOME) | add <type> --thread --title --source --quote | import <facts.json> | set-thread | extract-input <ref> | extract-queue [--session ID] [--entity NAME] | extract-log <ref> | retire <id> --by <id> --reason | assign <ref> <thread> | reply <q> --text TEXT | built <step> --evidence TEXT | flag <id> --as live|in_effect|superseded|done --reason | brief [--thread T] | serve [--port N]"
-        ),
+        "check" if a.has("--pairs") => check::pairs(&c),
+        "check" => check::check(&c),
+        "match" => check::match_commits(&c, true),
+        "artifacts" => check::artifacts(&c, a.opt("--manifest").as_deref()),
+        "pending" => check::pending(&c, a.num("--days", 3)),
+        "show" => check::show(&c, &a.at(1, "source ref")),
+        "log" => check::log(&c, a.num("--n", 25)),
+        "embed" => embed::run_cli(&c, a.num("--limit", usize::MAX)),
+        "search" => {
+            // every argument that is not a flag or a flag's value is a search word
+            let mut words = vec![];
+            let mut i = 1;
+            while i < a.0.len() {
+                match a.0[i].as_str() {
+                    "--thread" | "--kind" | "--state" | "--from" | "--to" => i += 2,
+                    "--text" => i += 1,
+                    word => {
+                        words.push(word);
+                        i += 1
+                    }
+                }
+            }
+            let filters = search::Filters {
+                thread: a.text("--thread"),
+                kind: a.text("--kind"),
+                state: a.text("--state"),
+                from: a.text("--from"),
+                to: a.text("--to"),
+            };
+            search::print(&c, &words.join(" "), &filters, !a.has("--text"))
+        }
+        "kg" => kg_command(&c, &a),
+        "demo" => demo::demo(&c),
+        "serve" => {
+            let port = a.num("--port", config::cfg().port);
+            server::serve(c, port)
+        }
+        _ => println!("{USAGE}"),
     }
 }
