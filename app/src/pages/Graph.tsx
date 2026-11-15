@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Minus, Plus, Search as SearchIcon, X, Maximize2 } from 'lucide-react'
+import { Minus, Plus, Search as SearchIcon, Sparkles, User, X, Maximize2 } from 'lucide-react'
 import { dayFmt, post, useApi } from '@/lib/api'
 import Trail from '@/pages/Trail'
 import More from '@/components/More'
 import Paged from '@/components/Paged'
+import Topics, { KIND_C, KINDS } from '@/components/Topics'
 import '@/next.css'
 
-const KIND_C: Record<string, string> = { project: '#60a5fa', service: '#c084fc', tool: '#fbbf24', site: '#34d399', topic: '#f472b6' }
 const STATUS_C: Record<string, string> = { active: '#34d399', proposed: '#8b8b95', superseded: '#fbbf24', retracted: '#fb7185' }
 const STATUS_L: Record<string, string> = { active: 'kept', proposed: 'suggested', superseded: 'replaced', retracted: 'rejected' }
 const WHO: Record<string, string> = { owner: 'You', assistant: 'Claude', unknown: 'Unknown' }
@@ -43,21 +43,30 @@ function layout(nodes: any[], edges: any[]) {
   return pos
 }
 
-function ClaimCard({ c, ev, showEntities }: { c: any; ev: any[]; showEntities?: boolean }) {
+function ClaimCard({ c, ev, showEntities, kindOf, onPick }: { c: any; ev: any[]; showEntities?: boolean; kindOf: (n: string) => string | undefined; onPick: (n: string) => void }) {
+  const col = STATUS_C[c.status] ?? '#8b8b95'
+  const names: string[] = showEntities && c.entities ? String(c.entities).split(' | ').filter(Boolean) : []
   return (
-    <div className="rounded-[14px] border border-line bg-white/[.025] p-3">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="nx-chip" style={{ background: `${STATUS_C[c.status] ?? '#8b8b95'}22`, color: STATUS_C[c.status] ?? '#8b8b95' }}>{STATUS_L[c.status] ?? c.status}</span>
-        <span className="text-[11.5px] text-mut">{c.type.replace('relation:', '')} · {dayFmt(c.asserted_at)} · {WHO[c.speaker] ?? c.speaker}</span>
+    <div className="rounded-[14px] border border-line bg-white/[.025] py-2.5 pl-3.5 pr-3" style={{ borderLeft: `3px solid ${col}` }}>
+      <div className="flex items-center gap-2 text-[11.5px] text-mut">
+        <span className="tabular-nums">{dayFmt(c.asserted_at)}</span>
+        <span className="inline-flex items-center gap-1 rounded-full bg-white/[.06] px-1.5 py-px text-soft">{c.speaker === 'owner' ? <User size={10} /> : <Sparkles size={10} />}{WHO[c.speaker] ?? c.speaker}</span>
+        <span className="ml-auto inline-flex items-center gap-1" style={{ color: col }}><span className="size-1.5 rounded-full" style={{ background: col }} />{STATUS_L[c.status] ?? c.status}</span>
       </div>
-      <div className="mt-1.5 line-clamp-3 text-[13.5px] leading-snug">{c.text}</div>
-      {ev.length > 0 && <More label="Quote" className="mt-1">{ev.slice(0, 2).map((v: any, i: number) => (
+      <div className={`mt-1.5 line-clamp-3 text-[14px] leading-snug ${c.status === 'superseded' ? 'text-soft' : ''}`}>{c.text}</div>
+      {names.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {names.slice(0, 4).map((n) => (
+            <button key={n} onClick={() => onPick(n)} className="inline-flex items-center gap-1 rounded-full border border-line2 px-2 py-px text-[11.5px] text-soft hover:bg-white/10"><span className="size-1.5 rounded-full" style={{ background: KIND_C[kindOf(n) ?? ''] ?? '#8b8b95' }} />{n.replace(/ \(.*\)/, '')}</button>
+          ))}
+        </div>
+      )}
+      {ev.length > 0 && <More label="Quote" className="mt-1.5">{ev.slice(0, 2).map((v: any, i: number) => (
         <div key={i} className="mt-1.5 border-l-2 border-line2 pl-2.5 text-[12px] leading-snug text-soft">
           “{v.quote}”
           <div className="mt-0.5 text-[11px] text-mut">{v.stated === 'inferred' ? 'inferred · ' : ''}<Link className="underline decoration-line2" to={`/source/${v.source_id}`}>{v.source_title ?? v.source}</Link></div>
         </div>
       ))}</More>}
-      {showEntities && c.entities && <div className="mt-1.5 truncate text-[11px] text-mut">{c.entities}</div>}
     </div>
   )
 }
@@ -89,7 +98,11 @@ function Network({ tabs }: { tabs: React.ReactNode }) {
     return m
   }, [g, focus])
   const aliases = cur ? (g?.nodes.find((n: any) => n.id === cur.id)?.aliases ?? '') : ''
-  const addEntity = async (name: string, kind: string, aliasOf = '') => { await post('/api/kg/entity', { name, kind, alias_of: aliasOf }); reloadSug(); reloadG() }
+  const [tab, setTab] = useState(sp.get('tab') ?? 'claims')
+  useEffect(() => { const t = sp.get('tab'); if (t) setTab(t) }, [sp])
+  const toReview = sug ? sug.entities.length + sug.aliases.length : 0
+  const kindOfName = (n: string) => nodes.find((x: any) => x.name === n)?.kind
+  const pickByName = (n: string) => { const m = nodes.find((x: any) => x.name === n); if (m) { setSel(m.id); setTab('claims') } }
   const entLineage = (lin ?? []).filter((l: any) => !cur || (l.path ?? '').split(' → ').includes(cur.name))
 
   useEffect(() => {
@@ -106,7 +119,8 @@ function Network({ tabs }: { tabs: React.ReactNode }) {
   }, [])
 
   const zoom = (f: number) => setView((v) => { const k = Math.min(3, Math.max(0.5, v.k * f)); return { k, x: W / 2 - ((W / 2 - v.x) / v.k) * k, y: H / 2 - ((H / 2 - v.y) / v.k) * k } })
-  const Chip = ({ v, cur: c, set, label }: any) => <button onClick={() => set(c === v ? '' : v)} className="rounded-full px-2.5 text-[12px] font-medium transition-colors" style={{ height: 26, border: '1px solid var(--color-line2)', background: c === v ? '#34d39926' : 'rgba(255,255,255,.04)', color: c === v ? '#34d399' : 'var(--color-soft)' }}>{label}</button>
+  const Chip = ({ v, cur: c, set, label, dot }: any) => <button onClick={() => set(c === v ? '' : v)} className="inline-flex items-center gap-1.5 rounded-full px-2 text-[12px] font-medium transition-colors" style={{ height: 26, border: '1px solid var(--color-line2)', background: c === v ? '#34d39926' : 'rgba(255,255,255,.04)', color: c === v ? '#34d399' : 'var(--color-soft)' }}>{dot && <span className="size-1.5 rounded-full" style={{ background: dot }} />}{label}</button>
+  const shownTab = cur && tab === 'topics' ? 'claims' : tab
 
   return (
     <div className="nx-gmap">
@@ -155,65 +169,65 @@ function Network({ tabs }: { tabs: React.ReactNode }) {
       </div>
 
       <aside className="absolute bottom-5 right-5 top-5 flex w-[420px] max-w-[calc(100%-40px)] flex-col overflow-hidden rounded-[22px] border border-line2 bg-[#141417]/95 shadow-[0_24px_60px_rgba(0,0,0,.5)] backdrop-blur-md">
-        <div className="border-b border-line px-5 pb-3 pt-4">
-          {cur ? (
-            <>
+        <div className="border-b border-line px-4 pb-3 pt-3.5">
+          {cur && (
+            <div className="mb-3">
               <div className="flex items-start gap-2">
                 <div className="min-w-0 flex-1"><div className="truncate text-[19px] font-semibold tracking-tight">{cur.name}</div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-mut"><span className="size-2 rounded-full" style={{ background: KIND_C[cur.kind] ?? '#8b8b95' }} />{cur.kind} · {cur.claims} claims{aliases ? ` · also ${aliases}` : ''}</div></div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-mut"><span className="size-2 rounded-full" style={{ background: KIND_C[cur.kind] ?? '#8b8b95' }} /><select value={cur.kind} title="Change the kind" onChange={async (e) => { await post('/api/kg/entity', { name: cur.name, kind: e.target.value }); reloadG() }} className="cursor-pointer rounded bg-transparent text-[12px] text-mut hover:text-ink">{[...new Set([cur.kind, ...KINDS.map(([k]) => k)])].map((k) => <option key={k} value={k} className="bg-[#141417]">{k}</option>)}</select> · {cur.claims} claims{aliases ? ` · also ${aliases}` : ''}</div></div>
                 <button onClick={() => setSel('')} title="Close (Esc)" className="grid size-7 place-items-center rounded-lg text-mut hover:bg-white/10"><X size={15} /></button>
               </div>
               {nbr.size > 0 && (
                 <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {[...nbr.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([id, w]) => (
-                    <button key={id} onClick={() => setSel(id)} className="rounded-full border border-line2 bg-white/[.04] px-2 text-[11.5px] text-soft hover:bg-white/10" style={{ height: 24 }}>{byId.get(id)?.name.replace(/ \(.*\)/, '')} <span className="text-mut">{w}</span></button>
+                    <button key={id} onClick={() => setSel(id)} className="inline-flex items-center gap-1 rounded-full border border-line2 bg-white/[.04] px-2 text-[11.5px] text-soft hover:bg-white/10" style={{ height: 24 }}><span className="size-1.5 rounded-full" style={{ background: KIND_C[byId.get(id)?.kind] ?? '#8b8b95' }} />{byId.get(id)?.name.replace(/ \(.*\)/, '')} <span className="text-mut">{w}</span></button>
                   ))}
                 </div>
               )}
-            </>
-          ) : (
-            <div><div className="text-[17px] font-semibold tracking-tight">All claims</div><div className="mt-0.5 text-[12px] text-mut">Click a node to narrow the list.</div></div>
-          )}
-        </div>
-        <div className="flex-1 overflow-y-auto px-4 py-3">
-          <div className="mb-3 grid gap-2 rounded-[12px] border border-line bg-white/[.025] px-3 py-2.5">
-            <div className="text-[11.5px] font-semibold uppercase tracking-wide text-mut">Filter the claims</div>
-            <div className="relative"><SearchIcon size={14} className="absolute left-3 top-[11px] text-mut" /><input className="nx-input !h-9 !w-full !pl-8 !text-[13px]" placeholder="Search the claims below" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-            <div className="flex flex-wrap items-center gap-1.5"><span className="w-[58px] text-[12px] text-mut">Status</span><Chip v="active" cur={status} set={setStatus} label="Kept" /><Chip v="proposed" cur={status} set={setStatus} label="Suggested" /><Chip v="superseded" cur={status} set={setStatus} label="Replaced" /></div>
-            <div className="flex flex-wrap items-center gap-1.5"><span className="w-[58px] text-[12px] text-mut">Said by</span><Chip v="owner" cur={speaker} set={setSpeaker} label="You" /><Chip v="assistant" cur={speaker} set={setSpeaker} label="Claude" /></div>
-            <div className="text-[11.5px] text-mut" title="Kept = accepted. Suggested = awaiting a decision. Replaced = later overruled.">Kept · Suggested · Replaced</div>
-          </div>
-          {entLineage.length > 0 && !q && !status && !speaker && (
-            <div className="mb-4">
-              <div className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide text-mut">Lineage{cur ? ` of ${cur.name.replace(/ \(.*\)/, '')}` : ''}</div>
-              <div className="flex flex-col gap-1.5">
-                {entLineage.slice(0, cur ? 20 : 8).map((l: any) => (
-                  <div key={l.id} className="rounded-[12px] border border-line bg-white/[.025] px-3 py-2">
-                    <div className="flex flex-wrap items-baseline gap-x-2 text-[12.5px]"><span className="tabular-nums text-mut">{dayFmt(l.asserted_at)}</span><span>{l.path}</span><span className="text-mut">{l.type.replace('relation:', '')}</span></div>
-                    <More label="Quote" className="mt-0.5 text-[11.5px] leading-snug text-soft">“{l.quote}”</More>
-                  </div>
-                ))}
-              </div>
             </div>
           )}
-          {!cur && sug && (sug.entities.length > 0 || sug.aliases.length > 0) && (
-            <details className="mb-4 rounded-[12px] border border-line bg-white/[.025] px-3 py-2">
-              <summary className="cursor-pointer text-[12px] font-semibold uppercase tracking-wide text-mut">Suggested entities · {sug.entities.length + sug.aliases.length}</summary>
-              <div className="mt-2 text-[11.5px] text-mut">Names found often in what you wrote that are not entities yet. Add one to link its claims.</div>
-              {sug.aliases.map((a: any) => (
-                <div key={a.alias} className="mt-1.5 flex items-center gap-2 text-[12.5px]"><span className="flex-1 truncate">{a.alias} <span className="text-mut">→ {a.entity} · {a.turns}</span></span><button className="btn sm" onClick={() => addEntity(a.alias, 'project', a.entity)}>Add alias</button></div>
-              ))}
-              {sug.entities.slice(0, 12).map((e: any) => (
-                <div key={e.term} className="mt-1.5 flex items-center gap-2 text-[12.5px]"><span className="flex-1 truncate">{e.term} <span className="text-mut">{e.turns} turns</span></span>
-                  {['topic', 'project', 'tool', 'service'].map((k) => <button key={k} className="btn sm" onClick={() => addEntity(e.term, k)}>{k}</button>)}<button className="btn sm" title="Hide this suggestion" onClick={() => addEntity(e.term, 'ignore')}>✕</button></div>
-              ))}
-            </details>
-          )}
-          <div className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide text-mut">Claims · {det?.total ?? '…'}{det && det.total > 150 ? ' (newest 150)' : ''}</div>
-          <div className="flex flex-col gap-2">
-            <Paged resetKey={`${sel}|${q}|${status}|${speaker}`} items={det?.claims ?? []} size={8}>{(pageRows: any[]) => pageRows.map((c: any) => <ClaimCard key={c.id} c={c} ev={(det.evidence ?? []).filter((v: any) => v.claim_id === c.id)} showEntities={!cur} />)}</Paged>
-            {det && det.claims.length === 0 && <div className="text-[13px] text-mut">Nothing matches.</div>}
+          <div className="flex gap-1 rounded-[11px] bg-white/[.05] p-1">
+            {([['claims', 'Claims', det?.total ?? ''], ['lineage', 'Lineage', entLineage.length || ''], ...(cur ? [] : [['topics', 'Topics', toReview || '']])] as [string, string, any][]).map(([k, l, n]) => (
+              <button key={k} type="button" onClick={() => setTab(k)} className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-[8px] text-[13px] font-medium transition-colors" style={{ background: shownTab === k ? '#2a2a30' : 'transparent', color: shownTab === k ? '#fff' : 'var(--color-soft)' }}>
+                {l}{n !== '' && <span className="rounded-full px-1.5 text-[11px] tabular-nums" style={k === 'topics' ? { background: '#fbbf2426', color: '#fbbf24' } : { color: 'var(--color-mut)' }}>{n}</span>}
+              </button>
+            ))}
           </div>
+        </div>
+        <div className="flex-1 overflow-y-auto px-4 py-3">
+          {shownTab === 'topics' && <Topics sug={sug} onChanged={() => { reloadSug(); reloadG(); window.dispatchEvent(new Event('bt-suggest')) }} />}
+          {shownTab === 'lineage' && (
+            <div className="flex flex-col gap-2">
+              {entLineage.length === 0 && <div className="text-[13px] text-mut">No lineage recorded{cur ? ' for this one' : ''}.</div>}
+              {entLineage.slice(0, 40).map((l: any) => (
+                <div key={l.id} className="rounded-[14px] border border-line bg-white/[.025] px-3 py-2.5">
+                  <div className="flex flex-wrap items-center gap-1.5 text-[13px]">
+                    {(l.path ?? '').split(' → ').map((n: string, i: number) => (
+                      <span key={i} className="inline-flex items-center gap-1.5">{i > 0 && <span className="text-mut">→</span>}<button onClick={() => pickByName(n)} className="inline-flex items-center gap-1 rounded-full border border-line2 px-2 py-px hover:bg-white/10"><span className="size-1.5 rounded-full" style={{ background: KIND_C[kindOfName(n) ?? ''] ?? '#8b8b95' }} />{n.replace(/ \(.*\)/, '')}</button></span>
+                    ))}
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-2 text-[11.5px] text-mut"><span className="rounded-full bg-white/[.06] px-1.5 py-px text-soft">{l.type.replace('relation:', '')}</span><span className="tabular-nums">{dayFmt(l.asserted_at)}</span></div>
+                  <More label="Quote" className="mt-1 text-[11.5px] leading-snug text-soft">“{l.quote}”</More>
+                </div>
+              ))}
+            </div>
+          )}
+          {shownTab === 'claims' && (
+            <>
+              <div className="mb-3 grid gap-2">
+                <div className="relative"><SearchIcon size={14} className="absolute left-3 top-[11px] text-mut" /><input className="nx-input !h-9 !w-full !pl-8 !text-[13px]" placeholder="Search the claims" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Chip v="active" cur={status} set={setStatus} label="Kept" dot={STATUS_C.active} /><Chip v="proposed" cur={status} set={setStatus} label="Suggested" dot={STATUS_C.proposed} /><Chip v="superseded" cur={status} set={setStatus} label="Replaced" dot={STATUS_C.superseded} />
+                  <span className="mx-1 h-4 w-px bg-line2" />
+                  <Chip v="owner" cur={speaker} set={setSpeaker} label="You" /><Chip v="assistant" cur={speaker} set={setSpeaker} label="Claude" />
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Paged resetKey={`${sel}|${q}|${status}|${speaker}`} items={det?.claims ?? []} size={8}>{(pageRows: any[]) => pageRows.map((c: any) => <ClaimCard key={c.id} c={c} ev={(det.evidence ?? []).filter((v: any) => v.claim_id === c.id)} showEntities={!cur} kindOf={kindOfName} onPick={pickByName} />)}</Paged>
+                {det && det.claims.length === 0 && <div className="text-[13px] text-mut">Nothing matches.</div>}
+              </div>
+            </>
+          )}
         </div>
       </aside>
     </div>

@@ -34,18 +34,21 @@ Commands run as `bt <command>`.
 | `pending [--days N]` | List recent sessions that no item cites |
 | `artifacts [--manifest list.json]` | Record publish dates and report missing or stale snapshots |
 | `extract-input <ref>` | Print one session for a model: the thread's existing items, the entity names, and the turns |
-| `extract-queue [--session ID] [--limit N] [--entity E]` | List sessions worth extracting (at most `daily_cap` a day) |
+| `extract-queue [--session ID] [--limit N] [--entity E] [--no-cap]` | List sessions worth extracting (at most `daily_cap` a day unless `--no-cap`) |
 | `extract-log <ref> [--failed 1] --detail "..."` | Record one extraction run and its cost |
 | `log [--n N]` | Print the append-only change log |
 | `backup` | Copy the store to `<data dir>/backups` (also daily on rescan, newest 3 kept) |
 | `kg` | Print claim and entity counts |
 | `kg find "<question>"` | Router for history questions: lineage trace, entity page, claims matched by their own words, then the hybrid search (claims that cite the best passages, else the passages). Prints "no record" on a miss. When claims about an entity are newer than any shown, a line gives the latest date |
 | `kg page <entity> [--budget N]` | Entity page within a token budget: newest claims in full, older ones rolled up by month |
-| `kg trace <entity>` / `kg why <words>` / `kg neighbors <entity>` / `kg passage <words>` | Dated lineage, claim lookup by words, shared-claim neighbours (2 hops, capped), the hybrid search routed to claims |
+| `--as-of YYYY-MM-DD` on `kg find`, `page`, `trace` and `neighbors` | Answer from the claims in force that day: said by then, not ended yet. A claim ends on the earliest of its `valid_to`, the day its replacement was said and its `retire` log entry. Claims show as `in force then`; "newer claims exist" notes and passages dated after the day are left out. A claim marked superseded with none of those ends on its last update (proposals parked after 14 days) or on the day of the resolver's `stale` check: the day the system noticed, not the day the world changed |
+| `kg trace <entity>` / `kg why <words>` / `kg neighbors <entity>` / `kg passage <words>` | Dated lineage, claim lookup by words, shared-claim neighbours (`neighbors --depth 1-3`, default 1; fan-out capped per hop, hubs ranked down, about 2500 tokens, cuts counted; logged as `kg-query`), the hybrid search routed to claims |
+| `kg path <entity A> <entity B>` | Shortest chain of claims between two entities (up to 5 links; the strongest link first among equal chains), each link with its newest claim, date, speaker and quote. Takes `--as-of`; prints "no record" when no chain exists |
 | `kg suggest` / `kg entity add <name> [--kind K --alias A]` | Suggest new entities and alias spellings (nothing is written); add one by hand |
 | `kg state` | Thread state suggested from session activity alone (nothing is changed) |
 | `kg merge <keep id> <drop id>` | Merge a duplicate claim into another: its entities move over and the duplicate is closed as superseded |
 | `kg lint` | Graph checks (also part of `check`) |
+| `kg export --graph <file>` | Entity graph, not a backup: nodes are entities with kind and claims in force; a link joins two entities when a claim in force names both (weight, first and last day, newest claim). `.graphml` writes GraphML, any other name JSON in NetworkX node-link form. Takes `--as-of` |
 | `kg export <file>` / `kg restore <file>` | Backup of entities and all claims as JSONL; each quote is re-located by source on restore |
 | `build` | Ingest all sources, create the configured entities (`config.json` key `entities`) and embed (first run) |
 | `demo` | Write a demo store (requires `BACKTRAIL_HOME`) |

@@ -193,3 +193,73 @@ fn locate(c: &Connection, source: Option<String>, quote: &str) -> Option<(i64, i
     let source = source_id(c, &source?)?;
     find_quote(c, source, quote).map(|p| (source, p.chunk_id))
 }
+
+fn xml(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// The entity graph for Gephi or NetworkX, not a backup: nodes are entities (name, kind, claims in force), an edge joins
+/// two entities when a claim in force names both (weight = shared claims, first and last day, newest claim's text).
+/// `.graphml` writes GraphML; any other name writes JSON in NetworkX node-link form (`links`). Honours `--as-of`.
+/// Returns (nodes, edges).
+pub fn graph(c: &Connection, path: &str) -> std::io::Result<(usize, usize)> {
+    let live = super::query::in_force();
+    let nodes: Vec<(String, String, i64)> = c
+        .prepare(&format!(
+            "SELECT e.name, ifnull(e.kind,''), (SELECT COUNT(DISTINCT a.claim_id) FROM claim_about a JOIN claims c ON c.id=a.claim_id AND {live} AND (c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%') WHERE a.entity_id=e.id) FROM entities e ORDER BY e.name"
+        ))
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .flatten()
+        .collect();
+    let edges: Vec<(String, String, i64, String, String, String)> = c
+        .prepare(&format!(
+            "SELECT x.name, y.name, COUNT(DISTINCT a.claim_id), MIN(substr(ifnull(c.asserted_at,c.created),1,10)), MAX(substr(ifnull(c.asserted_at,c.created),1,10)),
+               (SELECT t.title FROM claims t WHERE t.id=(SELECT c2.id FROM claims c2 JOIN claim_about p ON p.claim_id=c2.id AND p.entity_id=a.entity_id JOIN claim_about q ON q.claim_id=c2.id AND q.entity_id=b.entity_id WHERE {} ORDER BY c2.asserted_at DESC LIMIT 1))
+             FROM claim_about a JOIN claims c ON c.id=a.claim_id AND {live} AND (c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%')
+             JOIN claim_about b ON b.claim_id=a.claim_id AND b.entity_id>a.entity_id
+             JOIN entities x ON x.id=a.entity_id JOIN entities y ON y.id=b.entity_id
+             GROUP BY a.entity_id, b.entity_id ORDER BY 3 DESC",
+            live.replace("c.", "c2.")
+        ))
+        .unwrap()
+        .query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                r.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                r.get::<_, Option<String>>(5)?.unwrap_or_default(),
+            ))
+        })
+        .unwrap()
+        .flatten()
+        .collect();
+    let out = if path.ends_with(".graphml") {
+        let mut o = String::from(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<graphml xmlns=\"http://graphml.graphdrawing.org/xmlns\">\n<key id=\"kind\" for=\"node\" attr.name=\"kind\" attr.type=\"string\"/>\n<key id=\"claims\" for=\"node\" attr.name=\"claims\" attr.type=\"int\"/>\n<key id=\"weight\" for=\"edge\" attr.name=\"weight\" attr.type=\"int\"/>\n<key id=\"first\" for=\"edge\" attr.name=\"first\" attr.type=\"string\"/>\n<key id=\"last\" for=\"edge\" attr.name=\"last\" attr.type=\"string\"/>\n<key id=\"latest_claim\" for=\"edge\" attr.name=\"latest_claim\" attr.type=\"string\"/>\n<graph id=\"backtrail\" edgedefault=\"undirected\">\n",
+        );
+        for (n, k, cl) in &nodes {
+            o.push_str(&format!("<node id=\"{}\"><data key=\"kind\">{}</data><data key=\"claims\">{cl}</data></node>\n", xml(n), xml(k)));
+        }
+        for (a, b, w, f, l, t) in &edges {
+            o.push_str(&format!("<edge source=\"{}\" target=\"{}\"><data key=\"weight\">{w}</data><data key=\"first\">{f}</data><data key=\"last\">{l}</data><data key=\"latest_claim\">{}</data></edge>\n", xml(a), xml(b), xml(t)));
+        }
+        o.push_str("</graph>\n</graphml>\n");
+        o
+    } else {
+        serde_json::json!({
+            "directed": false, "multigraph": false, "graph": {},
+            "nodes": nodes.iter().map(|(n, k, cl)| serde_json::json!({"id": n, "kind": k, "claims": cl})).collect::<Vec<_>>(),
+            "links": edges.iter().map(|(a, b, w, f, l, t)| serde_json::json!({"source": a, "target": b, "weight": w, "first": f, "last": l, "latest_claim": t})).collect::<Vec<_>>(),
+        })
+        .to_string()
+    };
+    std::fs::write(path, out)?;
+    Ok((nodes.len(), edges.len()))
+}

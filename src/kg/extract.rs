@@ -12,6 +12,7 @@ pub fn queue(
     limit: usize,
     entity: Option<&str>,
     session_id: Option<&str>,
+    ignore_cap: bool,
 ) -> Vec<String> {
     let today = now()[..10].to_string();
     let used: i64 = c
@@ -22,12 +23,12 @@ pub fn queue(
         )
         .unwrap_or(0);
     let cap = crate::config::cfg().daily_cap;
-    let room = (cap - used).max(0) as usize;
+    let room = if ignore_cap { usize::MAX } else { (cap - used).max(0) as usize };
     // a full session id or any unique prefix of it
     let only = session_id.map(|s| {
         crate::db::resolve_ref(c, &format!("session:{}", s.trim_start_matches("session:")))
     });
-    let mut st = c.prepare("SELECT s.ref, s.id FROM sources s WHERE s.kind='session' AND (SELECT COUNT(*) FROM chunks WHERE source_id=s.id AND role='user')>=4 AND ifnull(s.thread,'Unsorted')!='Unsorted' AND NOT EXISTS (SELECT 1 FROM log l WHERE l.target=s.ref AND l.action IN ('extract','kg-extract')) AND ( SELECT COUNT(*) FROM log l WHERE l.target=s.ref AND l.action IN ('extract-failed','kg-extract-failed','compile-failed') )<2 AND NOT EXISTS ( SELECT 1 FROM chunks k WHERE k.source_id=s.id AND k.seq=0 AND (k.text LIKE 'BACKTRAIL-%' OR k.text LIKE 'Reply with%' OR k.text LIKE 'Read the file%' OR k.text LIKE 'Write a %') ) ORDER BY s.last_ts DESC").unwrap();
+    let mut st = c.prepare("SELECT s.ref, s.id FROM sources s WHERE s.kind='session' AND (SELECT COUNT(*) FROM chunks WHERE source_id=s.id AND role='user')>=4 AND ifnull(s.thread,'Unsorted')!='Unsorted' AND NOT (s.ref NOT LIKE 'session:%-%' AND EXISTS (SELECT 1 FROM sources t WHERE t.kind='session' AND t.path=s.path AND t.id!=s.id)) AND NOT EXISTS (SELECT 1 FROM log l WHERE l.target=s.ref AND l.action IN ('extract','kg-extract')) AND ( SELECT COUNT(*) FROM log l WHERE l.target=s.ref AND l.action IN ('extract-failed','kg-extract-failed','compile-failed') )<2 AND NOT EXISTS ( SELECT 1 FROM chunks k WHERE k.source_id=s.id AND k.seq=0 AND (k.text LIKE 'BACKTRAIL-%' OR k.text LIKE 'Reply with%' OR k.text LIKE 'Read the file%' OR k.text LIKE 'Write a %') ) ORDER BY s.last_ts DESC").unwrap();
     let want: Option<Vec<String>> = entity.and_then(|e| entities::find(c, e)).map(|(id, _)| {
         c.prepare("SELECT alias FROM entity_aliases WHERE entity_id=?1")
             .unwrap()
@@ -96,6 +97,58 @@ fn unextracted_mentioning(c: &Connection, entity: &str) -> Vec<String> {
     })
     .map(|x| x.0)
     .collect()
+}
+
+/// Average cost in USD of the logged extraction runs, 0.02 when none has been logged.
+pub fn usd_each(c: &Connection) -> f64 {
+    let v: Vec<f64> = c
+        .prepare("SELECT detail FROM log WHERE action='extract' AND detail LIKE 'usd=%'")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .flatten()
+        .filter_map(|d| d.strip_prefix("usd=")?.split_whitespace().next()?.parse().ok())
+        .collect();
+    if v.is_empty() { 0.02 } else { v.iter().sum::<f64>() / v.len() as f64 }
+}
+
+/// Sessions that mention the entity and would be extracted next: the same rules as `queue`, no daily cap.
+pub fn unread(c: &Connection, entity: &str) -> usize {
+    queue(c, usize::MAX, Some(entity), None, true).len()
+}
+
+/// Start `skill/extract.sh --entity E --limit N --no-cap` detached and return at once. The binary still calls no
+/// model itself; the script does. Output goes to the same log file as the SessionEnd run.
+pub fn start_in_background(
+    c: &Connection,
+    entity: &str,
+    limit: usize,
+) -> Result<serde_json::Value, String> {
+    let (_, name) = entities::find(c, entity).ok_or("no such entity")?;
+    let exe = std::env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .map_err(|e| e.to_string())?;
+    let script = exe
+        .ancestors()
+        .map(|a| a.join("skill/extract.sh"))
+        .find(|p| p.exists())
+        .ok_or("skill/extract.sh not found next to the build")?;
+    let log = std::env::temp_dir().join("backtrail-extract.log");
+    let out = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log)
+        .map_err(|e| e.to_string())?;
+    let n = unread(c, &name).min(limit);
+    std::process::Command::new(script)
+        .args(["--entity", &name, "--limit", &limit.to_string(), "--no-cap"])
+        .stdin(std::process::Stdio::null())
+        .stdout(out.try_clone().map_err(|e| e.to_string())?)
+        .stderr(out)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    crate::db::logw(c, "owner", "kg-extract-start", &name, &format!("{n} sessions"));
+    Ok(serde_json::json!({"ok": true, "started": n}))
 }
 
 /// How many sessions that name the entity in an owner turn have no claims extracted yet (tier 2 backlog).

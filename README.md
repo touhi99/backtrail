@@ -55,6 +55,7 @@ bt serve
 | `bt brief [--thread T]` | Print the brief, or one project's questions, next step and latest decisions |
 | `bt search <words>` | Search with cited sources |
 | `bt kg find "<question>"` | Answer a history question, settled claims first |
+| `bt kg neighbors <entity> [--depth N]`, `kg path <A> <B>`, `kg export --graph <file>` | Entities within N links, the shortest chain between two, a GraphML or JSON export. `--as-of YYYY-MM-DD` limits `find`, `page`, `trace`, `neighbors` and `path` to the claims in force that day |
 | `bt retire <id> [--by <id>] --reason <text>` | Retire a replaced decision |
 | `bt answer <id> --text <text>` | Record the owner's reply to an open question |
 

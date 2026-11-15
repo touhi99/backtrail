@@ -1,6 +1,6 @@
 #!/bin/bash
 # Extract decisions, steps, questions and claims from sessions with a small model, one single-shot call per session.
-# Usage: extract.sh [--entity NAME] [--limit N] [--session ID] | extract.sh <session ref>...
+# Usage: extract.sh [--entity NAME] [--limit N] [--session ID] [--no-cap] | extract.sh <session ref>...
 # The backtrail binary never calls a model: `extract-input` is piped to a headless model and the answer goes back
 # through `import -`, so the verbatim-quote, known-entity, known-thread and length rules gate every fact.
 set -u
@@ -8,12 +8,17 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 TM="$DIR/../target/release/backtrail"
 MODEL="${BACKTRAIL_COMPILE_MODEL:-haiku}"
 export BACKTRAIL_COMPILE=1   # the SessionStart and SessionEnd hooks exit at once while this is set
-ENTITY=""; LIMIT=3; SESSION=""; REFS=()
+# a login agent starts with a minimal PATH; the claude CLI usually lives in one of these
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+# without the CLI every session would fail and be logged as failed, using up the daily cap and the retry limit
+command -v claude >/dev/null 2>&1 || { echo "extract.sh: the claude CLI is not on PATH; nothing was run or logged" >&2; exit 1; }
+ENTITY=""; LIMIT=3; SESSION=""; NOCAP=""; REFS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --entity) ENTITY="$2"; shift 2 ;;
     --limit) LIMIT="$2"; shift 2 ;;
     --session) SESSION="$2"; shift 2 ;;
+    --no-cap) NOCAP=1; shift ;;
     *) REFS+=("$1"); shift ;;
   esac
 done
@@ -21,6 +26,7 @@ if [ ${#REFS[@]} -eq 0 ]; then
   args=(extract-queue --limit "$LIMIT")
   [ -n "$ENTITY" ] && args+=(--entity "$ENTITY")
   [ -n "$SESSION" ] && args+=(--session "$SESSION")
+  [ -n "$NOCAP" ] && args+=(--no-cap)
   while IFS= read -r r; do [ -n "$r" ] && REFS+=("$r"); done < <("$TM" "${args[@]}")
 fi
 cd "$(mktemp -d)" || exit 1  # no project CLAUDE.md or session history is loaded here

@@ -34,7 +34,7 @@ pub fn find(c: &Connection, name: &str) -> Option<(String, String)> {
     // The extraction packet lists entities as "Name (kind)"; a model may copy the suffix.
     look(name).or_else(|| {
         let n = name.trim_end();
-        ["project", "topic", "tool", "service", "site"]
+        ["project", "topic", "tool", "service", "model", "site"]
             .iter()
             .find_map(|k| n.strip_suffix(&format!(" ({k})")))
             .and_then(look)
@@ -64,75 +64,78 @@ pub fn mentions(c: &Connection, text: &str) -> Vec<(String, String)> {
     out
 }
 
-/// Technologies and concepts offered as `topic` entities. One is created only when owner turns in at least
+/// Technologies and concepts offered as entities, each with the kind it starts as (the owner can change a kind later). One is created only when owner turns in at least
 /// `TOPIC_MIN_SESSIONS` sessions mention it, so the list can be long without filling the graph. Ambiguous words
 /// (go, swift, bun, node) are left out; aliases are matched as whole words.
 const TOPIC_MIN_SESSIONS: i64 = 3;
 
-const TOPICS: &[(&str, &[&str])] = &[
-    ("Rust", &[]),
-    ("Python", &[]),
-    ("TypeScript", &[]),
-    ("JavaScript", &["js"]),
-    ("Bash", &[]),
-    ("HTML", &[]),
-    ("CSS", &[]),
-    ("SQL", &[]),
-    ("React", &[]),
-    ("Next.js", &["nextjs"]),
-    ("Vite", &[]),
-    ("Tailwind", &["tailwindcss"]),
-    ("Tauri", &[]),
-    ("Electron", &[]),
-    ("SwiftUI", &[]),
-    ("FastAPI", &[]),
-    ("Flask", &[]),
-    ("Django", &[]),
-    ("Node.js", &["nodejs"]),
-    ("Svelte", &[]),
-    ("Vue", &[]),
-    ("SQLite", &[]),
-    ("Postgres", &["postgresql"]),
-    ("Redis", &[]),
-    ("DuckDB", &[]),
-    ("Supabase", &[]),
-    ("Firebase", &[]),
-    ("Embeddings", &["embedding"]),
-    ("RAG", &[]),
-    ("LLM", &["llms"]),
-    ("MCP", &[]),
-    ("Knowledge graph", &["knowledge graphs"]),
-    ("Docker", &[]),
-    ("Git", &[]),
-    ("GitHub", &[]),
-    ("Cloudflare", &[]),
-    ("AWS", &[]),
-    ("Homebrew", &[]),
-    ("Playwright", &[]),
-    ("Puppeteer", &[]),
-    ("npm", &[]),
-    ("Cargo", &[]),
-    ("launchd", &[]),
-    ("Xcode", &[]),
-    ("Figma", &[]),
-    ("Stripe", &[]),
-    ("Telegram", &[]),
-    ("OpenAI", &[]),
-    ("Anthropic", &[]),
-    ("Gemini", &[]),
-    ("Claude Code", &[]),
-    ("Whisper", &[]),
-    ("ElevenLabs", &[]),
-    ("iOS", &[]),
-    ("Android", &[]),
-    ("macOS", &[]),
-    ("Chrome extension", &["chrome extensions"]),
+const TOPICS: &[(&str, &str, &[&str])] = &[
+    ("Rust", "tool", &[]),
+    ("Python", "tool", &[]),
+    ("TypeScript", "tool", &[]),
+    ("JavaScript", "tool", &["js"]),
+    ("Bash", "tool", &[]),
+    ("HTML", "tool", &[]),
+    ("CSS", "tool", &[]),
+    ("SQL", "tool", &[]),
+    ("React", "tool", &[]),
+    ("Next.js", "tool", &["nextjs"]),
+    ("Vite", "tool", &[]),
+    ("Tailwind", "tool", &["tailwindcss"]),
+    ("Tauri", "tool", &[]),
+    ("Electron", "tool", &[]),
+    ("SwiftUI", "tool", &[]),
+    ("FastAPI", "tool", &[]),
+    ("Flask", "tool", &[]),
+    ("Django", "tool", &[]),
+    ("Node.js", "tool", &["nodejs"]),
+    ("Svelte", "tool", &[]),
+    ("Vue", "tool", &[]),
+    ("SQLite", "tool", &[]),
+    ("Postgres", "tool", &["postgresql"]),
+    ("Redis", "tool", &[]),
+    ("DuckDB", "tool", &[]),
+    ("Supabase", "service", &[]),
+    ("Firebase", "service", &[]),
+    ("Embeddings", "topic", &["embedding"]),
+    ("RAG", "topic", &[]),
+    ("LLM", "topic", &["llms"]),
+    ("MCP", "topic", &[]),
+    ("Knowledge graph", "topic", &["knowledge graphs"]),
+    ("Docker", "tool", &[]),
+    ("Git", "tool", &[]),
+    ("GitHub", "service", &[]),
+    ("Cloudflare", "service", &[]),
+    ("AWS", "service", &[]),
+    ("Homebrew", "tool", &[]),
+    ("Playwright", "tool", &[]),
+    ("Puppeteer", "tool", &[]),
+    ("npm", "tool", &[]),
+    ("Cargo", "tool", &[]),
+    ("launchd", "tool", &[]),
+    ("Xcode", "tool", &[]),
+    ("Figma", "tool", &[]),
+    ("Stripe", "service", &[]),
+    ("Telegram", "service", &[]),
+    ("OpenAI", "service", &[]),
+    ("Anthropic", "service", &[]),
+    ("Gemini", "model", &[]),
+    ("Claude Code", "tool", &[]),
+    ("Whisper", "model", &[]),
+    ("ElevenLabs", "service", &[]),
+    ("iOS", "topic", &[]),
+    ("Android", "topic", &[]),
+    ("macOS", "topic", &[]),
+    ("Chrome extension", "tool", &["chrome extensions"]),
+    ("Haiku", "model", &["claude haiku", "claude-haiku-5-5"]),
+    ("Sonnet", "model", &["claude sonnet", "claude-sonnet-5-5"]),
+    ("Opus", "model", &["claude opus", "claude-opus-5-5"]),
 ];
 
 /// Create the built-in topics that the owner's turns mention often enough.
 fn seed_topics(c: &Connection) {
     let now = now();
-    for (name, aliases) in TOPICS {
+    for (name, kind, aliases) in TOPICS {
         let id = format!("e-{:x}", fxhash(&norm(name)));
         if c.query_row(
             "SELECT 1 FROM entities WHERE id=?1",
@@ -168,7 +171,7 @@ fn seed_topics(c: &Connection) {
         if n < TOPIC_MIN_SESSIONS {
             continue;
         }
-        let id = ensure(c, name, "topic", &now);
+        let id = ensure(c, name, kind, &now);
         for a in &terms {
             c.execute(
                 "INSERT OR IGNORE INTO entity_aliases(alias,entity_id) VALUES(?1,?2)",
@@ -286,6 +289,46 @@ pub fn add_alias(c: &Connection, entity: &str, alias: &str) -> bool {
     true
 }
 
+/// Up to `n` of the owner's newest turns that contain `term`, as (date, snippet around the term, source id).
+pub fn examples(c: &Connection, term: &str, n: usize) -> Vec<(String, String, i64)> {
+    let like = format!("%{}%", term.replace(['%', '_'], ""));
+    let mut st = c
+        .prepare("SELECT ifnull(c.ts,''), c.text, c.source_id FROM chunks c JOIN sources s ON s.id=c.source_id WHERE s.kind='session' AND c.role='user' AND length(c.text)<3000 AND c.text NOT LIKE '%task-notification%' AND c.text NOT LIKE 'This session is being continued%' AND c.text LIKE ?1 ORDER BY c.ts DESC LIMIT ?2")
+        .unwrap();
+    // the same message can sit in several sessions; fetch extra rows and drop repeats below
+    let n_rows = n * 4;
+    st.query_map(params![like, n_rows as i64], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+    })
+    .unwrap()
+    .flatten()
+    .map(|(ts, text, sid)| {
+        let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let chars: Vec<char> = flat.chars().collect();
+        let low: Vec<char> = flat.to_lowercase().chars().collect();
+        let t: Vec<char> = term.to_lowercase().chars().collect();
+        let at = (0..low.len().saturating_sub(t.len()) + 1)
+            .find(|&i| low.get(i..i + t.len()) == Some(&t[..]))
+            .unwrap_or(0);
+        let from = at.saturating_sub(70);
+        let to = (at + t.len() + 70).min(chars.len());
+        let mut snip: String = chars[from..to].iter().collect();
+        if from > 0 {
+            snip = format!("…{snip}");
+        }
+        if to < chars.len() {
+            snip.push('…');
+        }
+        (ts.get(..10).unwrap_or("").to_string(), snip, sid)
+    })
+    .fold(Vec::<(String, String, i64)>::new(), |mut v, x| {
+        if v.len() < n && !v.iter().any(|y| y.1 == x.1) {
+            v.push(x);
+        }
+        v
+    })
+}
+
 /// Hide a term from the entity suggestions.
 pub fn ignore_suggestion(c: &Connection, term: &str) {
     c.execute(
@@ -293,6 +336,30 @@ pub fn ignore_suggestion(c: &Connection, term: &str) {
         params![term.to_lowercase(), now()],
     )
     .unwrap();
+}
+
+/// Bring a hidden term back into the suggestions. Returns false when it was not hidden.
+pub fn unignore_suggestion(c: &Connection, term: &str) -> bool {
+    let n = c
+        .execute(
+            "DELETE FROM kg_overrides WHERE target=?1 AND field='entity_ignore'",
+            params![term.to_lowercase()],
+        )
+        .unwrap_or(0);
+    if n > 0 {
+        logw(c, "owner", "kg-unignore", term, "");
+    }
+    n > 0
+}
+
+/// Terms the owner hid from the suggestions, newest first.
+pub fn ignored_terms(c: &Connection) -> Vec<String> {
+    c.prepare("SELECT target FROM kg_overrides WHERE field='entity_ignore' ORDER BY ts DESC")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .flatten()
+        .collect()
 }
 
 /// Terms that look like names but are not entities or aliases yet, with counts; and likely alias spellings of known names.
@@ -385,8 +452,10 @@ pub fn suggest_data(c: &Connection) -> (Vec<(String, String, usize)>, Vec<(Strin
             cands.push((w.clone(), *n, ss.len(), *caps));
         }
     }
-    cands.sort_by(|a, b| b.1.cmp(&a.1));
-    alias_hits.sort_by(|a, b| b.2.cmp(&a.2));
+    // ties broken by sessions, then name: the HashMap order is random per call, so without this the cut at 150 differs
+    // between requests and the list changes length
+    cands.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.cmp(&a.2)).then(a.0.cmp(&b.0)));
+    alias_hits.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
     // A name is written capitalised in the middle of a sentence ("GitHub", "SQLite"); a common word or a typo is not.
     // The assistant's turns are the reference, since the owner rarely capitalises.
     cands.truncate(150);

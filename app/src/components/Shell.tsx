@@ -19,6 +19,9 @@ const MORE = [
 
 export default function Shell({ children }: { children: ReactNode }) {
   const { data: today, reload } = useApi('/api/today')
+  const { data: sug, reload: reloadSug } = useApi('/api/kg/suggest') as { data: any; reload: () => void }
+  useEffect(() => { window.addEventListener('bt-suggest', reloadSug); return () => window.removeEventListener('bt-suggest', reloadSug) }, [reloadSug])
+  const toReview = sug ? sug.entities.length + sug.aliases.length : 0
   const [cap, setCap] = useState<{ open: boolean; thread?: string }>({ open: false })
   const nav = useNavigate()
   const loc = useLocation()
@@ -39,7 +42,7 @@ export default function Shell({ children }: { children: ReactNode }) {
           </Link>
           {NAV.map(({ to, label, icon: Icon, end }) => (
             <NavLink key={to} to={to} end={end} className={({ isActive }) => `row-hover flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] ${isActive ? 'bg-white/[.07] font-medium text-ink shadow-[inset_0_1px_0_rgba(255,255,255,.05)]' : 'text-soft'}`}>
-              <Icon size={16} />{label}
+              <Icon size={16} />{label}{to === '/graph' && toReview > 0 && <span role="button" onClick={(e) => { e.preventDefault(); nav('/graph?tab=topics') }} className="ml-auto rounded-full bg-[#fbbf2426] px-1.5 text-[11px] tabular-nums text-[#fbbf24]" title="Topics waiting for a decision">{toReview}</span>}
             </NavLink>
           ))}
           <div className="mt-5 px-2.5 pb-1 text-[12px] text-mut" title="Threads whose state is In development.">Threads</div>

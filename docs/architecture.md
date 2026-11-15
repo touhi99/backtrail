@@ -104,7 +104,7 @@ whose passage no longer holds its quote at the passage that does.
 Routes: Home, Graph (network and over-time views), Items, Log, Search, Thread, Source. `/map?thread=` shows one
 project's items and notes. Home reads `/api/today` and `/api/thread` (one call per project in motion, for its next step
 and latest decisions); the Graph page reads `/api/kg/graph`, `/api/kg/claims`,
-`/api/kg/lineage`, `/api/kg/suggest` and `/api/kg/growth`. All writes from the app go through `POST /api/*` handlers in
+`/api/kg/lineage`, `/api/kg/suggest` (terms with example quotes) and `/api/kg/growth`. `POST /api/kg/entity` returns the claims linked and the unread sessions; `POST /api/kg/extract` starts `skill/extract.sh --entity` in the background. All writes from the app go through `POST /api/*` handlers in
 `server.rs`, which call the same functions in `items.rs` and `kg/` as the command line.
 
 Limits: README, section "Limits", and `reference.md`, section "Scale limits".

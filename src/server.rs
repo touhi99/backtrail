@@ -221,18 +221,36 @@ fn post(c: &Connection, path: &str, body: &Value) -> Option<Value> {
         "/api/kg/entity" => {
             let name = text("name").trim();
             let kind = body["kind"].as_str().unwrap_or("project");
-            done(match (name.is_empty(), kind, text("alias_of")) {
-                (true, _, _) => false,
+            let target = match (name.is_empty(), kind, text("alias_of")) {
+                (true, _, _) => None,
                 (_, "ignore", _) => {
                     kg::entities::ignore_suggestion(c, name);
-                    true
+                    return Some(done(true));
                 }
+                (_, "unignore", _) => return Some(done(kg::entities::unignore_suggestion(c, name))),
                 (_, _, "") => {
                     kg::entities::add(c, name, kind, &[name.to_lowercase()]);
-                    true
+                    Some(name)
                 }
-                (_, _, entity) => kg::entities::add_alias(c, entity, name),
-            })
+                (_, _, entity) => kg::entities::add_alias(c, entity, name).then_some(entity),
+            };
+            match target.and_then(|t| kg::entities::find(c, t)) {
+                None => done(false),
+                // how far the recompute reached: claims now linked, and sessions that mention it with no claims yet
+                Some((id, ename)) => json!({
+                    "ok": true,
+                    "entity": ename,
+                    "linked": db::count(c, "SELECT COUNT(*) FROM claim_about WHERE entity_id=?1", &[&id]),
+                    "unread": kg::extract::unread(c, &ename),
+                    "usd_each": kg::extract::usd_each(c),
+                }),
+            }
+        }
+        // reads the sessions that mention an entity with a small model, in the background (skill/extract.sh)
+        "/api/kg/extract" => {
+            let entity = text("entity");
+            let limit = body["limit"].as_u64().unwrap_or(10).clamp(1, 40);
+            done_or_error(kg::extract::start_in_background(c, entity, limit as usize))
         }
         _ => return None,
     })

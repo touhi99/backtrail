@@ -64,8 +64,10 @@ pub fn lineage(c: &Connection) -> Value {
 pub fn suggestions(c: &Connection) -> Value {
     let (aliases, terms) = entities::suggest_data(c);
     json!({
+        "hidden": entities::ignored_terms(c),
         "aliases": aliases.iter().map(|(alias, entity, turns)| json!({"alias": alias, "entity": entity, "turns": turns})).collect::<Vec<_>>(),
-        "entities": terms.iter().map(|(term, turns, sessions)| json!({"term": term, "turns": turns, "sessions": sessions})).collect::<Vec<_>>(),
+        "entities": terms.iter().enumerate().map(|(i, (term, turns, sessions))| json!({"term": term, "turns": turns, "sessions": sessions,
+            "examples": if i < 40 { entities::examples(c, term, 5).into_iter().map(|(d, s, id)| json!({"date": d, "text": s, "source_id": id})).collect::<Vec<_>>() } else { vec![] }})).collect::<Vec<_>>(),
     })
 }
 
