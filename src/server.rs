@@ -265,6 +265,7 @@ fn background_scan() {
     loop {
         let c = db::open();
         crate::ingest::rescan(&c);
+        crate::resolve::expire(&c);
         if crate::embed::enabled() {
             match crate::embed::run(&c, crate::config::cfg().embeddings.batch_cap) {
                 Err(e) if !warned => {

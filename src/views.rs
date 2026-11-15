@@ -247,11 +247,11 @@ pub fn brief(c: &Connection, only: Option<&str>, full: bool) {
         .filter(|q| wanted(q, "thread"))
         .collect();
     println!(
-        "\nClaude asked the owner, waiting on the owner ({}):",
+        "\nClaude asked the owner, waiting on the owner ({}): ask when it fits the work, then record the reply with `backtrail answer <id> --text ...`. Unanswered ones are parked after 14 days.",
         waiting.len()
     );
     for q in &waiting {
-        println!("  - [{}] {}", s(q, "thread"), s(q, "title"));
+        println!("  - {} [{}] {}", s(q, "id"), s(q, "thread"), s(q, "title"));
     }
 
     let asks: Vec<Value> = waiting_on_claude(c)

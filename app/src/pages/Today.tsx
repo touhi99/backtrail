@@ -16,8 +16,6 @@ export default function Home() {
   const moving = threads.filter((t) => t.state === 'moving')
   const details = useDetails(moving.map((t) => t.name))
   const asks: any[] = today?.asks ?? []
-  const waiting: any[] = today?.waiting ?? []
-  const waitingBy = waiting.reduce<Record<string, number>>((m, q) => ({ ...m, [q.thread]: (m[q.thread] ?? 0) + 1 }), {})
   const when = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
 
   return (
@@ -30,15 +28,6 @@ export default function Home() {
         </header>
 
         <TrailCard />
-
-        {waiting.length > 0 && (
-          <section className="nx-panel nx-in !rounded-2xl flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-4 text-[13.5px] text-soft">
-            <span>{waiting.length} {waiting.length === 1 ? 'question' : 'questions'} from Claude:</span>
-            {Object.entries(waitingBy).map(([name, n]) => (
-              <Link key={name} to={`/thread/${encodeURIComponent(name)}`} className="text-accent hover:underline">{name} {n}</Link>
-            ))}
-          </section>
-        )}
 
         {asks.length > 0 && (
           <section className="nx-panel nx-in !rounded-2xl px-5 py-4 text-[13.5px] text-soft">

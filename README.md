@@ -18,6 +18,7 @@ Status: prototype. Tested on macOS only.
 - Proposed items stay out of the brief and rank below settled ones in search. The brief and the project page show who
   confirmed each decision.
 - A replaced decision is retired with `bt retire`, or marked superseded by the opt-in `resolve.sh --reverses`.
+- Claude's proposals and open questions that are still unconfirmed 14 days after their session are parked: kept on file, listed nowhere. The brief hands open questions to Claude to ask in the session; the reply is recorded with `bt answer`.
 - On session end: ingest, embed, extract, resolve. Every 5 minutes: rescan, embed, back up. The binary calls no model;
   the model passes are scripts in `skill/`.
 
@@ -55,6 +56,7 @@ bt serve
 | `bt search <words>` | Search with cited sources |
 | `bt kg find "<question>"` | Answer a history question, settled claims first |
 | `bt retire <id> [--by <id>] --reason <text>` | Retire a replaced decision |
+| `bt answer <id> --text <text>` | Record the owner's reply to an open question |
 
 Other commands: `docs/reference.md`.
 

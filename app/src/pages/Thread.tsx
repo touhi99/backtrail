@@ -32,18 +32,6 @@ const Src = ({ i }: { i: any }) => i.source_id ? <Link to={`/source/${i.source_i
 type View = 'steps' | 'journey' | 'decisions' | 'made' | 'sources' | 'archive' | 'claude'
 const VIEWS: [View, string][] = [['steps', 'All steps'], ['journey', 'Journey'], ['decisions', 'Decisions'], ['made', 'Made'], ['sources', 'Sources'], ['archive', 'Archive'], ['claude', 'Claude Code']]
 
-function PutOff({ q, back, done }: { q: any; back?: () => void; done: () => void }) {
-  const [ans, setAns] = useState('')
-  return (
-    <form className="flex flex-wrap items-center gap-2.5 border-t border-[#1f1f24] py-2.5 first:border-t-0" onSubmit={async (e) => { e.preventDefault(); if (ans.trim()) { await post('/api/answer', { id: q.id, text: ans }); done() } }}>
-      <span className="min-w-[200px] flex-1 text-[14px]" title={q.title}>{q.title}</span>
-      <input className="nx-input !h-9 max-w-[260px]" maxLength={320} placeholder="Type your answer" value={ans} onChange={(e) => setAns(e.target.value)} aria-label="Answer" />
-      <button className="btn primary !h-9" type="submit">Answer</button>
-      {back && <button className="btn ghost !h-9" type="button" onClick={back}>Back to card</button>}
-    </form>
-  )
-}
-
 export default function Thread() {
   const { name = '' } = useParams()
   const { data: d, reload } = useApi(`/api/thread?name=${encodeURIComponent(name)}`)
@@ -79,8 +67,7 @@ export default function Thread() {
   const th = d.thread
   const c = STATE_HEX[th.state] ?? '#8b8b95'
   const refresh = () => { reload(); reloadShell() }
-  const openQs = items.filter((i) => i.type === 'question' && i.state === 'open' && i.origin !== 'owner')
-  const steps = items.filter((i) => i.type === 'step' && !['proposed', 'rejected', 'parked'].includes(i.state))
+  const steps = items.filter((i) => i.type === 'step' && !['proposed', 'rejected', 'parked', 'superseded'].includes(i.state))
   const doneN = steps.filter((s) => s.state === 'done').length
   const checkN = steps.filter((s) => s.state === 'looks_done').length
   const todo = steps.filter((s) => s.state === 'open' || s.state === 'doing').sort((a, b) => Number(b.state === 'doing') - Number(a.state === 'doing'))
@@ -93,7 +80,7 @@ export default function Thread() {
 
   const prop = items.filter((i) => i.state === 'proposed')
   const archived = prop.slice().sort((a, b) => ts(b) - ts(a))
-  const rej = items.filter((i) => i.state === 'rejected' || i.state === 'parked')
+  const rej = items.filter((i) => i.state === 'rejected' || i.state === 'parked' || (i.state === 'superseded' && i.type !== 'decision'))
   const asks = items.filter((i) => i.type === 'question' && i.state === 'open' && i.origin === 'owner')
   const copy = (t: string) => navigator.clipboard?.writeText(t)
   const hl = (id: string) => (id === focus ? { boxShadow: 'inset 0 0 0 1.5px #34d399', background: 'rgba(52,211,153,.07)' } : {})
@@ -180,13 +167,6 @@ export default function Thread() {
             ))}
           </aside>
         </div>
-
-        {openQs.length > 0 && (
-          <section className="nx-panel nx-in !rounded-2xl px-5 py-4">
-            <div className="mb-2 text-[13px] text-mut">Questions for the owner ({openQs.length})</div>
-            {openQs.map((q) => <PutOff key={q.id} q={q} done={refresh} />)}
-          </section>
-        )}
 
         <section className="nx-in">
           <div className="mb-3 flex items-baseline justify-between"><h3 className="text-[17px] font-semibold">Up next</h3><button className="text-[13px] text-mut hover:text-ink" onClick={() => setView('steps')}>All steps</button></div>
