@@ -16,10 +16,11 @@ fn clip(text: &str, max: usize) -> String {
 }
 
 const STOP: &[&str] = &[
-    "the", "and", "for", "with", "from", "that", "this", "not", "are", "was", "but", "its", "has", "have", "owner",
-    "asked", "wants", "want", "should", "would", "could", "which", "what", "how", "when", "only", "into", "than",
-    "then", "them", "they", "will", "can", "use", "new", "chose", "decided", "said", "also", "does", "did", "all",
-    "one", "any", "out", "off", "get", "set", "make", "made", "keep", "now", "for", "who", "why", "where",
+    "the", "and", "for", "with", "from", "that", "this", "not", "are", "was", "but", "its", "has",
+    "have", "owner", "asked", "wants", "want", "should", "would", "could", "which", "what", "how",
+    "when", "only", "into", "than", "then", "them", "they", "will", "can", "use", "new", "chose",
+    "decided", "said", "also", "does", "did", "all", "one", "any", "out", "off", "get", "set",
+    "make", "made", "keep", "now", "for", "who", "why", "where",
 ];
 
 /// The first five letters of each word of three letters or more, stop words left out: "removed" and "remove" count
@@ -82,31 +83,31 @@ pub fn candidates(c: &Connection, id: &str, limit: usize) -> Vec<Candidate> {
     }
     let n = docs.len().max(1) as f64;
     let mut scored: Vec<Candidate> = others
-    .iter()
-    .zip(&docs)
-    .filter_map(|(o, theirs)| {
-        let overlap: f64 = mine
-            .intersection(theirs)
-            .map(|w| (n / df.get(w.as_str()).copied().unwrap_or(1) as f64).ln())
-            .sum();
-        let vec = near
-            .get(&o["chunk"].as_i64().unwrap_or(0))
-            .copied()
-            .unwrap_or(0);
-        let shared = o["shared"].as_i64().unwrap_or(0) as usize;
-        if overlap < 2.0 && vec == 0 {
-            return None;
-        }
-        Some(Candidate {
-            id: s(o, "id").into(),
-            kind: s(o, "type").into(),
-            state: s(o, "state").into(),
-            thread: s(o, "thread").into(),
-            title: s(o, "title").into(),
-            score: (overlap * 10.0) as usize + shared.min(2) * 5 + vec,
+        .iter()
+        .zip(&docs)
+        .filter_map(|(o, theirs)| {
+            let overlap: f64 = mine
+                .intersection(theirs)
+                .map(|w| (n / df.get(w.as_str()).copied().unwrap_or(1) as f64).ln())
+                .sum();
+            let vec = near
+                .get(&o["chunk"].as_i64().unwrap_or(0))
+                .copied()
+                .unwrap_or(0);
+            let shared = o["shared"].as_i64().unwrap_or(0) as usize;
+            if overlap < 2.0 && vec == 0 {
+                return None;
+            }
+            Some(Candidate {
+                id: s(o, "id").into(),
+                kind: s(o, "type").into(),
+                state: s(o, "state").into(),
+                thread: s(o, "thread").into(),
+                title: s(o, "title").into(),
+                score: (overlap * 10.0) as usize + shared.min(2) * 5 + vec,
+            })
         })
-    })
-    .collect();
+        .collect();
     scored.sort_by(|a, b| b.score.cmp(&a.score).then(a.id.cmp(&b.id)));
     scored.truncate(limit);
     scored
@@ -118,11 +119,17 @@ pub fn print_candidates(c: &Connection, id: &str) {
     if list.is_empty() {
         return;
     }
-    println!("existing items that may already settle {id} (if one does: `backtrail resolve {id} --by <id> --reason \"...\"`):");
+    println!(
+        "existing items that may already settle {id} (if one does: `backtrail resolve {id} --by <id> --reason \"...\"`):"
+    );
     for k in list {
         println!(
             "  {} [{}] {} {}: {}",
-            k.id, k.thread, k.kind, k.state, clip(&k.title, 100)
+            k.id,
+            k.thread,
+            k.kind,
+            k.state,
+            clip(&k.title, 100)
         );
     }
 }
@@ -170,8 +177,200 @@ pub fn resolve(c: &Connection, id: &str, by: &str, reason: &str) -> Result<bool,
     Ok(true)
 }
 
-/// Undo a resolution: the item goes back to `proposed` with no answer, no settling item and no closing date.
+/// When a decision was said, as an ISO string: the claim's own date, else its source's first timestamp, else when it
+/// was filed. Dates without a time sort before a timestamp of the same day.
+fn when(c: &Connection, id: &str) -> String {
+    rows(
+        c,
+        "SELECT COALESCE(NULLIF(c.asserted_at,''), s.first_ts, c.created, '') AS w
+         FROM claims c LEFT JOIN sources s ON s.id=c.source_id WHERE c.id=?1",
+        &[&id],
+    )
+    .first()
+    .map(|r| s(r, "w").to_string())
+    .unwrap_or_default()
+}
+
+/// The older settled decisions a new settled decision may reverse: the best word and passage matches among them, then
+/// the ones that share its most specific entities, up to `limit`. Word overlap alone misses a reversal that uses
+/// different words ("Stop Vigil" against "Track open Vigil work"); an entity alone is too broad when it has hundreds
+/// of claims, so the most specific entities come first.
+pub fn reverse_candidates(c: &Connection, id: &str, limit: usize) -> Vec<Value> {
+    let said = when(c, id);
+    if said.is_empty() {
+        return vec![];
+    }
+    let older = |o: &str| o != id && when(c, o) <= said;
+    let mut ids: Vec<String> = candidates(c, id, 60)
+        .into_iter()
+        .filter(|k| k.kind == "decision" && k.state == "settled" && older(&k.id))
+        .map(|k| k.id)
+        .take(8)
+        .collect();
+    let by_entity = strings(
+        c,
+        "SELECT o.id FROM claims o
+           JOIN claim_about b ON b.claim_id=o.id
+           JOIN claim_about a ON a.entity_id=b.entity_id AND a.claim_id=?1
+          WHERE o.id!=?1 AND o.type='decision' AND o.state='settled'
+          GROUP BY o.id
+          ORDER BY MIN((SELECT COUNT(*) FROM claim_about x WHERE x.entity_id=a.entity_id)), o.id",
+        &[&id],
+    );
+    for o in by_entity {
+        if ids.len() >= limit {
+            break;
+        }
+        if !ids.contains(&o) && older(&o) {
+            ids.push(o);
+        }
+    }
+    ids.truncate(limit);
+    ids.iter()
+        .flat_map(|o| {
+            rows(
+                c,
+                "SELECT id, ifnull(thread,'') AS thread, title, ifnull(quote,'') AS quote FROM claims WHERE id=?1",
+                &[o],
+            )
+            .into_iter()
+            .map(|mut r| {
+                r["day"] = Value::from(when(c, o).chars().take(10).collect::<String>());
+                r
+            })
+        })
+        .collect()
+}
+
+/// The text a model reads to decide whether one settled decision reverses older ones.
+pub fn reverse_packet(c: &Connection, id: &str) {
+    let me = rows(
+        c,
+        "SELECT ifnull(thread,'') AS thread, title, ifnull(body,'') AS body, ifnull(quote,'') AS quote
+         FROM claims WHERE id=?1 AND type='decision' AND state='settled'",
+        &[&id],
+    );
+    let Some(me) = me.first() else {
+        eprintln!("not a settled decision");
+        std::process::exit(1)
+    };
+    println!("BACKTRAIL-REVERSE\nITEM {id}\nTODAY {}", &now()[..10]);
+    println!(
+        "THREAD {}\nDATE {}\nTITLE {}\nBODY {}\nQUOTE {}",
+        s(me, "thread"),
+        when(c, id).chars().take(10).collect::<String>(),
+        s(me, "title"),
+        s(me, "body"),
+        s(me, "quote")
+    );
+    println!("\nOLDER SETTLED DECISIONS:");
+    for k in reverse_candidates(c, id, 24) {
+        println!(
+            "- {} [{}] {}: {} | said: {}",
+            s(&k, "id"),
+            s(&k, "thread"),
+            s(&k, "day"),
+            clip(s(&k, "title"), 160),
+            clip(s(&k, "quote"), 140)
+        );
+    }
+}
+
+/// Settled decisions no reversal check has looked at yet, newest first. One with nothing older to compare with is
+/// recorded as checked without a model call.
+pub fn reverse_queue(c: &Connection, limit: usize) {
+    let mut listed = 0;
+    for id in strings(
+        c,
+        "SELECT id FROM claims WHERE type='decision' AND state='settled'
+           AND NOT EXISTS (SELECT 1 FROM log l WHERE l.target=claims.id AND l.action='reverse-checked')
+         ORDER BY COALESCE(NULLIF(asserted_at,''), created) DESC, id",
+        &[],
+    ) {
+        if listed >= limit {
+            break;
+        }
+        if reverse_candidates(c, &id, 1).is_empty() {
+            logw(c, "resolver", "reverse-checked", &id, "nothing older to compare");
+        } else {
+            println!("{id}");
+            listed += 1;
+        }
+    }
+}
+
+/// Apply a reversal verdict `{"id", "replaces": [..], "reason"}`: every older settled decision named is marked
+/// `superseded` by the new one. Each must be a settled decision that was said no later than the new one.
+fn apply_reverse(c: &Connection, v: &Value) -> Result<String, String> {
+    let id = v["id"].as_str().ok_or("no id")?;
+    let reason = clip(v["reason"].as_str().unwrap_or("").trim(), 320);
+    let settled = count(
+        c,
+        "SELECT COUNT(*) FROM claims WHERE id=?1 AND type='decision' AND state='settled'",
+        &[&id],
+    );
+    if settled == 0 {
+        return Err("the item is not a settled decision".into());
+    }
+    let said = when(c, id);
+    let mut done = vec![];
+    for old in v["replaces"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        if reason.is_empty() {
+            return Err("a reversal needs a reason".into());
+        }
+        let ok = old != id
+            && count(
+                c,
+                "SELECT COUNT(*) FROM claims WHERE id=?1 AND type='decision' AND state='settled'",
+                &[&old],
+            ) == 1
+            && !said.is_empty()
+            && when(c, old) <= said;
+        if !ok {
+            continue;
+        }
+        let ts = now();
+        c.execute(
+            "UPDATE claims SET state='superseded', answer=?2, superseded_by=?3, valid_to=?4, updated=?4 WHERE id=?1",
+            params![old, reason, id, ts],
+        )
+        .map_err(|e| e.to_string())?;
+        logw(c, "resolver", "reverse", old, &format!("by {id}: {reason}"));
+        done.push(format!("replaces {old}"));
+    }
+    logw(c, "resolver", "reverse-checked", id, &done.join("; "));
+    Ok(done.join("; "))
+}
+
+/// Undo a resolution: the item goes back to `proposed` with no answer, no settling item and no closing date. A
+/// settled decision that a reversal replaced goes back to `settled` instead.
 pub fn unresolve(c: &Connection, id: &str) -> bool {
+    let reversed = count(
+        c,
+        "SELECT COUNT(*) FROM claims c WHERE c.id=?1 AND c.state='superseded'
+           AND EXISTS (SELECT 1 FROM log l WHERE l.target=?1 AND l.actor='resolver' AND l.action='reverse')",
+        &[&id],
+    ) > 0;
+    if reversed {
+        let ok = c
+            .execute(
+                "UPDATE claims SET state='settled', answer=NULL, superseded_by=NULL, valid_to=NULL, updated=?2 WHERE id=?1",
+                params![id, now()],
+            )
+            .unwrap_or(0)
+            == 1;
+        if ok {
+            c.execute("DELETE FROM log WHERE target=?1 AND action='reverse'", [id])
+                .ok();
+            logw(c, "owner", "unresolve", id, "back to settled");
+        }
+        return ok;
+    }
     let ok = c
         .execute(
             "UPDATE claims SET state='proposed', answer=NULL, superseded_by=NULL, valid_to=NULL, updated=?2
@@ -182,7 +381,11 @@ pub fn unresolve(c: &Connection, id: &str) -> bool {
         .unwrap_or(0)
         == 1;
     if ok {
-        c.execute("DELETE FROM log WHERE target=?1 AND action='resolve-checked'", [id]).ok();
+        c.execute(
+            "DELETE FROM log WHERE target=?1 AND action='resolve-checked'",
+            [id],
+        )
+        .ok();
         logw(c, "owner", "unresolve", id, "back to proposed");
     }
     ok
@@ -252,7 +455,11 @@ pub fn packet(c: &Connection, id: &str) {
     );
     println!("ENTITIES NOW {}", about.join(", "));
     println!("\nENTITIES (use these names exactly):");
-    for r in rows(c, "SELECT name, ifnull(kind,'') AS kind FROM entities ORDER BY name", &[]) {
+    for r in rows(
+        c,
+        "SELECT name, ifnull(kind,'') AS kind FROM entities ORDER BY name",
+        &[],
+    ) {
         println!("- {} ({})", s(&r, "name"), s(&r, "kind"));
     }
     println!("\nTHREADS:");
@@ -261,19 +468,34 @@ pub fn packet(c: &Connection, id: &str) {
     }
     println!("\nCANDIDATES:");
     for k in candidates(c, id, 8) {
-        println!("- {} [{}] {} {}: {}", k.id, k.thread, k.kind, k.state, clip(&k.title, 160));
+        println!(
+            "- {} [{}] {} {}: {}",
+            k.id,
+            k.thread,
+            k.kind,
+            k.state,
+            clip(&k.title, 160)
+        );
     }
 }
 
 /// Apply a model's verdict: `{"id", "entities", "thread", "valid_to", "resolves_by", "reason"}`. Entities and thread
 /// are checked against the store; a resolution needs an existing item and a reason.
 pub fn apply(c: &Connection, v: &Value) -> Result<String, String> {
+    if v.get("replaces").is_some() {
+        return apply_reverse(c, v);
+    }
     let id = v["id"].as_str().ok_or("no id")?;
     let kind: String = c
         .query_row("SELECT type FROM claims WHERE id=?1", [id], |r| r.get(0))
         .map_err(|_| "no such item".to_string())?;
     let mut done = vec![];
-    for name in v["entities"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+    for name in v["entities"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
         if let Some((eid, _)) = crate::kg::entities::find(c, name) {
             c.execute(
                 "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role) VALUES(?1,?2,'subject')",
@@ -285,18 +507,34 @@ pub fn apply(c: &Connection, v: &Value) -> Result<String, String> {
     }
     if let Some(t) = v["thread"].as_str().filter(|t| !t.is_empty()) {
         let now_thread: String = c
-            .query_row("SELECT ifnull(thread,'') FROM claims WHERE id=?1", [id], |r| r.get(0))
+            .query_row(
+                "SELECT ifnull(thread,'') FROM claims WHERE id=?1",
+                [id],
+                |r| r.get(0),
+            )
             .unwrap_or_default();
         // the entity is the subject and the thread follows it: a project thread moves only to the thread of the
         // item's main entity; an item on a topic thread may move to any project thread
-        let main = v["entities"].as_array().and_then(|a| a.first()).and_then(Value::as_str).unwrap_or("");
-        let on_project = count(c, "SELECT COUNT(*) FROM entities WHERE name=?1 AND kind='project'", &[&now_thread]) > 0;
+        let main = v["entities"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let on_project = count(
+            c,
+            "SELECT COUNT(*) FROM entities WHERE name=?1 AND kind='project'",
+            &[&now_thread],
+        ) > 0;
         if t != now_thread && (!on_project || t == main) && crate::items::move_to(c, id, t) {
             done.push(format!("thread {t} (was {now_thread})"));
         }
     }
     if let Some(day) = v["valid_to"].as_str().filter(|d| d.len() >= 10) {
-        c.execute("UPDATE claims SET valid_to=?2 WHERE id=?1 AND valid_to IS NULL", params![id, day]).ok();
+        c.execute(
+            "UPDATE claims SET valid_to=?2 WHERE id=?1 AND valid_to IS NULL",
+            params![id, day],
+        )
+        .ok();
         done.push(format!("valid_to {day}"));
         expire(c);
     }
@@ -306,7 +544,13 @@ pub fn apply(c: &Connection, v: &Value) -> Result<String, String> {
             done.push(format!("resolved by {by}"));
         }
     }
-    logw(c, "resolver", "resolve-checked", id, &format!("{kind}: {}", done.join("; ")));
+    logw(
+        c,
+        "resolver",
+        "resolve-checked",
+        id,
+        &format!("{kind}: {}", done.join("; ")),
+    );
     Ok(done.join("; "))
 }
 
@@ -319,7 +563,14 @@ pub fn apply_cli(c: &Connection, file: &str) {
     }
     match serde_json::from_str::<Value>(&raw) {
         Ok(v) => match apply(c, &v) {
-            Ok(done) => println!("{}", if done.is_empty() { "kept as is".into() } else { done }),
+            Ok(done) => println!(
+                "{}",
+                if done.is_empty() {
+                    "kept as is".into()
+                } else {
+                    done
+                }
+            ),
             Err(e) => {
                 eprintln!("rejected: {e}");
                 std::process::exit(1)

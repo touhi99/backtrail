@@ -449,11 +449,13 @@ fn main() {
             }
         }
         "unresolve" => report(resolve::unresolve(&c, &a.at(1, "item id")), "not a resolved item"),
+        "resolve-packet" if a.has("--reverses") => resolve::reverse_packet(&c, &a.at(1, "item id")),
         "resolve-packet" => resolve::packet(&c, &a.at(1, "item id")),
         "resolve-apply" => resolve::apply_cli(&c, &a.at(1, "file")),
         "howto-queue" => howto::queue(&c, a.num("--limit", 30), a.has("--again")),
         "howto-packet" => howto::packet(&c, &a.at(1, "step id")),
         "howto-apply" => howto::apply_cli(&c),
+        "resolve-queue" if a.has("--reverses") => resolve::reverse_queue(&c, a.num("--limit", 20)),
         "resolve-queue" => resolve::queue(&c, a.num("--limit", 20)),
         "artifacts" => check::artifacts(&c, a.opt("--manifest").as_deref()),
         "pending" => check::pending(&c, a.num("--days", 3)),
