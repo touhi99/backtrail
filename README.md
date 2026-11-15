@@ -8,7 +8,7 @@ Status: prototype. Tested on macOS only.
 
 ## How it works
 
-![Overview](docs/architecture-overview.svg)
+![Backend](docs/architecture-backend.svg)
 
 - Each Claude Code working directory becomes a thread, one line of work. Sessions and notes are read, never changed.
 - Decisions, steps and questions are proposed from sessions. A proposal is rejected when its quote is not in the cited
@@ -18,6 +18,8 @@ Status: prototype. Tested on macOS only.
 - Proposed items stay out of the brief and rank below settled ones in search. The brief and the project page show who
   confirmed each decision.
 - A replaced decision is retired with `bt retire`, or marked superseded by the opt-in `resolve.sh --reverses`.
+- On session end: ingest, embed, extract, resolve. Every 5 minutes: rescan, embed, back up. The binary calls no model;
+  the model passes are scripts in `skill/`.
 
 Detail: `docs/architecture.md`, `docs/reference.md`.
 
