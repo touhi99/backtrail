@@ -16,7 +16,7 @@ Extraction is overview work and does not need a large model. `skill/extract.sh <
 `haiku`) with no tools, no project instructions and no saved session. It pipes `backtrail extract-input <ref>` in and
 `backtrail import -` out, then records the cost with `extract-log`. One call returns decisions, steps, questions,
 state and rationale claims, and relations, so a session is read once. `skill/session-end.sh` is the SessionEnd hook
-body: it runs `ingest` and `embed`, and starts `extract.sh` in the background only when `BACKTRAIL_COMPILE_ON_END=1`.
+body: it runs `ingest` and `embed`, and starts `extract.sh` and `resolve.sh` in the background unless `BACKTRAIL_COMPILE_ON_END=0`.
 While `BACKTRAIL_COMPILE` is set, `brief` and the hook exit at once, so an extraction run cannot start another. Main
 sessions do not file facts themselves.
 

@@ -280,7 +280,7 @@ pub fn why(c: &Connection, q: &str) -> bool {
     };
     let args: Vec<&dyn rusqlite::ToSql> = ws.iter().map(|w| w as &dyn rusqlite::ToSql).collect();
     let sql = format!(
-        "SELECT c.id FROM claims c WHERE c.status!='retracted' AND (c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%'){} AND ({score})>={need} ORDER BY ({score}) DESC, c.asserted_at DESC LIMIT 5",
+        "SELECT c.id FROM claims c WHERE c.status!='retracted' AND (c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%'){} AND ({score})>={need} ORDER BY (CASE c.status WHEN 'active' THEN 0 WHEN 'proposed' THEN 1 ELSE 2 END), ({score}) DESC, c.asserted_at DESC LIMIT 5",
         excl()
     );
     let ids: Vec<String> = c

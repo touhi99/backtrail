@@ -132,6 +132,40 @@ pub fn today(c: &Connection) -> Value {
     })
 }
 
+/// The latest settled decisions of a project that are still in force: not marked superseded, not past their
+/// `valid_to`. Each carries who confirmed it (`how`): the owner's own typed words (the keep rule), the owner's
+/// accept in the app, or a note. The date falls back to the source's date when the claim has none.
+pub fn decided(c: &Connection, thread: &str, limit: i64) -> Vec<Value> {
+    let today = now()[..10].to_string();
+    let mut found = rows(
+        c,
+        "SELECT c.id, c.title, c.review, k.role AS role, c.source_id, c.chunk_id,
+                substr(COALESCE(NULLIF(c.asserted_at,''), s.first_ts, ''), 1, 10) AS day
+         FROM claims c LEFT JOIN chunks k ON k.id=c.chunk_id LEFT JOIN sources s ON s.id=c.source_id
+         WHERE c.type='decision' AND c.state='settled' AND c.thread=?1
+           AND IFNULL(c.stale,'') NOT LIKE 'superseded%' AND IFNULL(c.superseded_by,'')=''
+           AND (IFNULL(c.valid_to,'')='' OR c.valid_to>=?2)
+         ORDER BY day DESC, c.id LIMIT ?3",
+        &[&thread, &today, &limit],
+    );
+    for d in &mut found {
+        let how = if s(d, "review") == "auto" {
+            "owner-stated"
+        } else if matches!(s(d, "role"), "note" | "artifact") {
+            "from a note"
+        } else {
+            "owner-accepted"
+        };
+        let day = Some(s(d, "day"))
+            .filter(|x| !x.is_empty())
+            .unwrap_or("undated")
+            .to_string();
+        d["how"] = json!(how);
+        d["day"] = json!(day);
+    }
+    found
+}
+
 /// The short session-start brief (`bt brief` with no flag): one line per project in motion, so a session in a
 /// folder that holds many projects is not handed all of their detail. Questions the owner asked still print in
 /// full, because Claude has to answer them.
@@ -260,15 +294,29 @@ pub fn brief(c: &Connection, only: Option<&str>, full: bool) {
         }
         let answered = rows(
             c,
-            "SELECT title, answer FROM item WHERE type='question' AND state='answered' AND thread=?1
+            "SELECT title, answer, origin FROM item WHERE type='question' AND state='answered' AND thread=?1
              ORDER BY updated DESC LIMIT 2",
             &[&name],
         );
         for q in &answered {
+            // A question the owner asked is answered by Claude; one Claude asked is answered by the owner.
+            let who = if s(q, "origin") == "owner" {
+                "owner asked, Claude answered"
+            } else {
+                "owner answered"
+            };
+            println!("      {who} \"{}\": {}", s(q, "title"), s(q, "answer"));
+        }
+        let decided = decided(c, name, 5);
+        if !decided.is_empty() {
+            println!("      decided, latest settled:");
+        }
+        for d in &decided {
             println!(
-                "      owner answered \"{}\": {}",
-                s(q, "title"),
-                s(q, "answer")
+                "        {} · {} ({})",
+                s(d, "day"),
+                s(d, "title"),
+                s(d, "how")
             );
         }
     }
@@ -318,7 +366,7 @@ pub fn thread(c: &Connection, name: &str) -> Value {
          ORDER BY f.asserted_at",
         &[&name],
     );
-    json!({"thread": thread.first(), "items": items, "sources": sources, "claims": claims})
+    json!({"thread": thread.first(), "items": items, "sources": sources, "claims": claims, "decided": decided(c, name, 8)})
 }
 
 /// The Items page: every item, filtered by type, state, thread and thread kind (empty means any).

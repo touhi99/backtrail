@@ -11,7 +11,7 @@ Commands run as `bt <command>`.
 | --- | --- |
 | `ingest [--force]` | Read new or changed sources (new lines only, for a session file that grew) and re-link facts whose passage changed. `--force` reads every session again in full (after a change to the chunking rule); sessions whose file is gone are kept |
 | `serve [--port N]` | Run the app |
-| `brief [--thread T \| --all]` | Rescan, then print. With no flag: one line per thread in motion (open and done steps, what waits on the owner, the next step) and the questions the owner asked. `--thread T`: open questions, next step, recent answers and stale items of one thread. `--all`: the same detail for every thread |
+| `brief [--thread T \| --all]` | Rescan, then print. With no flag: one line per thread in motion (open and done steps, what waits on the owner, the next step) and the questions the owner asked. `--thread T`: open questions, next step, recent answers, the latest five settled decisions still in force (each with its date and who confirmed it: `owner-stated`, `owner-accepted` or `from a note`) and stale items of one thread. `--all`: the same detail for every thread. A question the owner asked and Claude answered is labelled "owner asked, Claude answered" |
 | `add <type> --thread --title --entities A,B --source --quote [--body --state --origin --valid-to]` | File one decision, step, question or turn. At least one entity is required; the thread follows the entity. Lists existing items that may already settle it |
 | `resolve <id> --by <id> --reason T` | Settle an item with an existing one: a question becomes `answered`, a step or decision `superseded`, `superseded_by` names the settling item |
 | `unresolve <id>` | Put a resolved or expired item back to `proposed` |
@@ -53,7 +53,11 @@ Commands run as `bt <command>`.
 (`spun out of`, `forked from`, `built on`, `replaced by`) with a quote from a source. It is stored as a relation claim.
 `extract.sh` proposes relations in the same pass as decisions and steps.
 
-App screens: Today, thread, source (cited passage highlighted), search, items, log, and the graph. The graph shows
+App screens: Home (the trail of the last two weeks, and one card per project in motion with its next step and latest
+decisions, and a link to each project with open questions), project page (latest decisions with who confirmed each,
+open questions to answer, steps, a search limited to the project; proposed
+items sit under the Archive view as "Unconfirmed suggestions"), source (cited passage highlighted), search, items, log,
+and the graph. The graph shows
 entities as nodes (size is the number of claims, a line means claims about both). Selecting a node opens its
 lineage, shared-claim neighbours and claims, each with date, speaker, quote and a link to the source passage. The
 panel also lists suggested entities and aliases that can be added with one click. A project page still has a map of
@@ -84,7 +88,9 @@ indexed. It holds custom thread rules, note folders and repositories:
 Search ranks passages by keyword (BM25) and, when the embedding server answers, by vector similarity. Otherwise keyword only, with a note in the result. The two rankings
 are merged by reciprocal rank fusion. Each passage's score is then adjusted by what the store knows about it: the
 thread's state (dropped or parked lowers it), and whether a kept, suggested or rejected item cites the passage or its
-source. The result lists these reasons. Filed items are searched in a separate index over title and body.
+source. The result lists these reasons. Filed items are searched in a separate index over title and body and listed
+kept states first (settled, done, open, answered, looks done, doing), then proposed and superseded ones, each group by
+text relevance. `kg find` orders claims the same way: active, then proposed, then superseded.
 
 `bt embed` stores one vector per distinct passage text, keyed by a hash of the text, so a session that grows
 embeds only its new passages. Vectors come from a local Ollama-compatible server and stay in the same SQLite file.
@@ -118,7 +124,8 @@ Titles were written by a model from the cited passage, so the queries are not ty
 ## Demo store
 
 A store with invented content: `BACKTRAIL_HOME=/tmp/bt-demo bt demo`, then
-`BACKTRAIL_HOME=/tmp/bt-demo bt serve --port 8800`. Screenshots from it are in `docs/demo/`.
+`BACKTRAIL_HOME=/tmp/bt-demo bt serve --port 8800`. Screenshots from it are in `docs/demo/` (home, project page, search,
+graph, items).
 
 ## Scale limits
 
