@@ -1,32 +1,32 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 560" font-family="Helvetica, Arial, sans-serif" role="img">
       <style>
-.bx{fill:#fff;stroke:#c9cfd9;stroke-width:1.4}.bn{fill:#e3ebfc;stroke:#2c5fd8;stroke-width:2}
-.t{font-weight:600;font-size:13px;fill:#1b2330}.s{font-size:12px;fill:#5d6878}.el{font-size:11.5px;fill:#5d6878}
-.ed{stroke:#1b2330;fill:none;stroke-width:1.5}.chip{fill:#2c5fd8}.ct{font-weight:600;font-size:10.5px;fill:#fff;text-anchor:middle}
-</style><rect width="1000" height="560" fill="#fff"/><defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#1b2330"/></marker></defs>
+.bx{fill:#141416;stroke:#2e2e33;stroke-width:1.4}.bn{fill:#0f2a24;stroke:#2dd4a0;stroke-width:2}
+.t{font-weight:600;font-size:13px;fill:#f2f2f3}.s{font-size:12px;fill:#9a9aa3}.el{font-size:11.5px;fill:#9a9aa3}
+.ed{stroke:#8b8b93;fill:none;stroke-width:1.5}.chip{fill:#2e2e33}.ct{font-weight:600;font-size:10.5px;fill:#c4c4cb;text-anchor:middle}
+</style><rect width="1000" height="560" fill="#0b0b0c"/><defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#8b8b93"/></marker></defs>
       <text class="el" x="20" y="28">SOURCES (read only)</text><text class="el" x="210" y="28">INGEST</text>
       <text class="el" x="400" y="28">STORE</text><text class="el" x="650" y="28">MODEL PASSES (claude CLI)</text>
 
-      <rect class="bx" x="20" y="50" width="150" height="60" rx="8"/><text class="t" x="32" y="76">Claude Code sessions</text><text class="s" x="32" y="94">deleted after 30 days</text>
+      <rect class="bx" x="20" y="50" width="150" height="60" rx="8"/><text class="t" x="32" y="76">Claude Code sessions</text><text class="s" x="32" y="94">transcripts</text>
       <rect class="bx" x="20" y="130" width="150" height="60" rx="8"/><text class="t" x="32" y="156">Notes, pages</text><text class="s" x="32" y="174">Markdown, artifacts</text>
       <rect class="bx" x="20" y="210" width="150" height="60" rx="8"/><text class="t" x="32" y="236">Git commits</text><text class="s" x="32" y="254">matched to steps</text>
       <rect class="bx" x="210" y="90" width="150" height="170" rx="8"/><text class="t" x="224" y="114">Ingest</text>
-      <text class="s" x="224" y="136">SessionEnd hook</text><text class="s" x="224" y="156">rescan every 5 min</text><text class="s" x="224" y="176">append-only read</text>
-      <text class="s" x="224" y="196">tokens redacted</text><text class="s" x="224" y="216">daily backup, 3 kept</text><text class="s" x="224" y="236">embed via Ollama</text>
+      <text class="s" x="224" y="136">session-end hook</text><text class="s" x="224" y="156">rescan every 5 min</text><text class="s" x="224" y="176">read only</text>
+      <text class="s" x="224" y="196">secrets redacted</text><text class="s" x="224" y="216">daily backup</text><text class="s" x="224" y="236">embed via Ollama</text>
       <path class="ed" d="M170 80 L190 80 L190 120 L208 120" marker-end="url(#a)"/><path class="ed" d="M170 160 L208 160" marker-end="url(#a)"/><path class="ed" d="M170 240 L190 240 L190 200 L208 200" marker-end="url(#a)"/>
       <path class="ed" d="M360 175 L398 175" marker-end="url(#a)"/><text class="el" x="366" y="166">text</text>
 
       <rect class="bx" x="400" y="40" width="200" height="330" rx="8"/><text class="t" x="414" y="62">SQLite, one file</text>
       <rect class="bx" x="412" y="74" width="176" height="52" rx="6"/><text class="t" x="422" y="94">Passages</text><text class="s" x="422" y="112">full-text index, vectors</text>
-      <rect class="bx" x="412" y="136" width="176" height="100" rx="6"/><text class="t" x="422" y="156">Claims</text>
-      <text class="s" x="422" y="174">decision, step, question,</text><text class="s" x="422" y="190">state, rationale, relation</text><text class="s" x="422" y="206">each with quote and date</text><text class="s" x="422" y="222">and a state</text>
-      <rect class="bx" x="412" y="246" width="176" height="52" rx="6"/><text class="t" x="422" y="266">Entities</text><text class="s" x="422" y="284">link claims to subjects</text>
-      <rect class="bx" x="412" y="308" width="176" height="50" rx="6"/><text class="t" x="422" y="328">Threads, log</text><text class="s" x="422" y="346">every change recorded</text>
+      <rect class="bx" x="412" y="136" width="176" height="62" rx="6"/><text class="t" x="422" y="156">Claims</text>
+      <text class="s" x="422" y="174">decisions, steps, questions</text><text class="s" x="422" y="190">each with quote, date, state</text>
+      <rect class="bx" x="412" y="208" width="176" height="52" rx="6"/><text class="t" x="422" y="228">Entities</text><text class="s" x="422" y="246">link claims to subjects</text>
+      <rect class="bx" x="412" y="270" width="176" height="50" rx="6"/><text class="t" x="422" y="290">Threads, log</text><text class="s" x="422" y="308">every change recorded</text>
 
-      <rect class="bx" x="650" y="40" width="190" height="70" rx="8"/><text class="t" x="662" y="62">Extract</text><text class="s" x="662" y="80">haiku, one call a session</text><text class="s" x="662" y="96">proposes claims</text>
+      <rect class="bx" x="650" y="40" width="190" height="70" rx="8"/><text class="t" x="662" y="62">Extract</text><text class="s" x="662" y="80">one call per session</text><text class="s" x="662" y="96">proposes claims</text>
       <rect class="bx" x="650" y="130" width="190" height="90" rx="8"/><text class="t" x="662" y="152">Write path (in binary)</text><text class="s" x="662" y="172">quote must be in source</text><text class="s" x="662" y="188">entities required</text><text class="s" x="662" y="204">owner-typed: settled</text>
-      <rect class="bx" x="650" y="235" width="190" height="70" rx="8"/><text class="t" x="662" y="257">Resolve</text><text class="s" x="662" y="275">sonnet, opus confirms</text><text class="s" x="662" y="291">entities, thread, duplicates</text>
-      <rect class="bn" x="650" y="320" width="190" height="70" rx="8"/><text class="t" x="662" y="342">Reverse</text><text class="s" x="662" y="360">settled vs older decisions</text><text class="s" x="662" y="376">two models must agree</text>
+      <rect class="bx" x="650" y="235" width="190" height="70" rx="8"/><text class="t" x="662" y="257">Resolve</text><text class="s" x="662" y="275">links entities and threads</text><text class="s" x="662" y="291">merges duplicates</text>
+      <rect class="bx" x="650" y="320" width="190" height="70" rx="8"/><text class="t" x="662" y="342">Reverse</text><text class="s" x="662" y="360">compares settled decisions</text><text class="s" x="662" y="376">marks reversed decisions</text>
       <rect class="chip" x="776" y="326" width="58" height="18" rx="9"/><text class="ct" x="805" y="339">opt-in</text>
       <path class="ed" d="M588 100 L620 100 L620 75 L648 75" marker-end="url(#a)"/><text class="el" x="604" y="66">text</text>
       <path class="ed" d="M745 110 L745 128" marker-end="url(#a)"/>
@@ -37,8 +37,8 @@
       <path class="ed" d="M500 370 L500 390 M310 390 L750 390"/>
       <path class="ed" d="M310 390 L310 408" marker-end="url(#a)"/><path class="ed" d="M530 390 L530 408" marker-end="url(#a)"/><path class="ed" d="M750 390 L750 408" marker-end="url(#a)"/>
       <text class="el" x="20" y="455">READ BY</text>
-      <rect class="bx" x="210" y="410" width="200" height="90" rx="8"/><text class="t" x="224" y="434">Session brief</text><text class="s" x="224" y="454">hook prints it, Claude reads it</text><text class="s" x="224" y="472">settled decisions, open steps</text>
-      <rect class="bx" x="430" y="410" width="200" height="90" rx="8"/><text class="t" x="444" y="434">Search</text><text class="s" x="444" y="454">bt search, bt kg find</text><text class="s" x="444" y="472">settled first, with quotes</text>
-      <rect class="bx" x="650" y="410" width="200" height="90" rx="8"/><text class="t" x="664" y="434">Web app, port 8799</text><text class="s" x="664" y="454">Home, project, graph</text><text class="s" x="664" y="472">reads /api/*, no model</text>
+      <rect class="bx" x="210" y="410" width="200" height="90" rx="8"/><text class="t" x="224" y="434">Session brief</text><text class="s" x="224" y="454">printed at session start</text><text class="s" x="224" y="472">settled decisions, open steps</text>
+      <rect class="bx" x="430" y="410" width="200" height="90" rx="8"/><text class="t" x="444" y="434">Search</text><text class="s" x="444" y="454">full-text and vectors</text><text class="s" x="444" y="472">settled first, with quotes</text>
+      <rect class="bx" x="650" y="410" width="200" height="90" rx="8"/><text class="t" x="664" y="434">Web app</text><text class="s" x="664" y="454">Home, project, graph</text><text class="s" x="664" y="472">no model call</text>
       <text class="s" x="20" y="535">Claim states: proposed, then settled (typed by the owner, accepted, or from a note), then superseded or rejected.</text>
     </svg>
