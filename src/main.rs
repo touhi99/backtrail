@@ -361,6 +361,10 @@ fn main() {
             items::flag(&c, &a.at(1, "id"), &a.text("--as"), &a.text("--reason")),
             "no such proposed item",
         ),
+        "answer" => report_or_fail(
+            items::answer(&c, &a.at(1, "id"), a.text("--text").trim()),
+            "no such open question",
+        ),
         "reply" => report_or_fail(
             items::reply(&c, &a.at(1, "id"), &a.text("--text")),
             "no such open question from the owner",
@@ -435,6 +439,7 @@ fn main() {
             "{}",
             ingest::backup(&c).unwrap_or("already backed up today".into())
         ),
+        "keep" => println!("kept {}", items::keep_all(&c)),
         "check" if a.has("--pairs") => check::pairs(&c),
         "check" => check::check(&c),
         "match" => check::match_commits(&c, true),

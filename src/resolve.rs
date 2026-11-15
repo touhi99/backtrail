@@ -408,6 +408,32 @@ pub fn expire(c: &Connection) -> usize {
         .ok();
         logw(c, "resolver", "expire", id, "valid_to passed");
     }
+    ids.len() + park_stale(c)
+}
+
+/// Days after which Claude's own proposals and open questions are parked if nobody has settled them.
+const PARK_DAYS: i64 = 14;
+
+/// Claude's proposals and open questions whose session is more than `PARK_DAYS` days old and that are still
+/// unconfirmed leave every list without being deleted: they become `superseded` with the reason in `answer`, and `unresolve` brings one back. Items the owner
+/// filed are never parked.
+fn park_stale(c: &Connection) -> usize {
+    let ids = strings(
+        c,
+        "SELECT c.id FROM claims c LEFT JOIN sources s ON s.id=c.source_id
+          WHERE c.origin!='owner' AND c.type IN ('decision','step','question')
+            AND (c.state='proposed' OR (c.state='open' AND c.type='question'))
+            AND substr(COALESCE(NULLIF(c.asserted_at,''), s.first_ts, c.created),1,10) < date('now', ?1)",
+        &[&format!("-{PARK_DAYS} days")],
+    );
+    for id in &ids {
+        c.execute(
+            "UPDATE claims SET state='superseded', answer=?2, updated=?3 WHERE id=?1",
+            params![id, format!("parked: no activity for {PARK_DAYS} days"), now()],
+        )
+        .ok();
+        logw(c, "resolver", "expire", id, "parked: no activity");
+    }
     ids.len()
 }
 
