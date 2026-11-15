@@ -305,7 +305,9 @@ pub fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
            AND (?4='' OR substr(IFNULL(s.last_ts,n.created),1,10)>=?4)
            AND (?5='' OR substr(IFNULL(s.last_ts,n.created),1,10)<=?5)
            AND (?6='' OR n.state=?6) AND (n.state!='rejected' OR ?6='rejected')
-         ORDER BY bm25(item_fts, 3.0, 1.0) LIMIT 20",
+         ORDER BY (CASE WHEN n.state IN ('settled','done','open','answered','looks_done','doing')
+                         AND IFNULL(n.stale,'') NOT LIKE 'superseded%' THEN 0 ELSE 1 END),
+                  bm25(item_fts, 3.0, 1.0) LIMIT 20",
         &filters(&fts, f),
     ));
     res

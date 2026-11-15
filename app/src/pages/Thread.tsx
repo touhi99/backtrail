@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Bug, Check, CheckCheck, CircleHelp, Copy, FileText, Lightbulb, MessageCircleQuestion, MessagesSquare, Network, Pin, Plus, Sparkles } from 'lucide-react'
 import { dayFmt, post, STALE_LABEL, staleOf, useApi } from '@/lib/api'
 import { useShell } from '@/components/Shell'
@@ -9,12 +9,14 @@ import More from '@/components/More'
 import Paged from '@/components/Paged'
 import Fold from '@/components/Fold'
 import { SegRing } from '@/components/Viz'
-import { FocusDeck, useLater, ts, WEEK } from '@/components/Focus'
+import { useLater, ts, WEEK } from '@/components/Focus'
 import { STATE_HEX, STEP_STATUS } from '@/lib/next'
 import '@/next.css'
 
 const SRC_COLOR: Record<string, string> = { session: '#60a5fa', note: '#8b8b95', artifact: '#c084fc', commit: '#34d399', owner: '#f4f4f5' }
 const DAY = 864e5
+// Who confirmed a decision: shown next to each one on the project page.
+const HOW: Record<string, string> = { 'owner-stated': '#34d399', 'owner-accepted': '#60a5fa', 'from a note': '#8b8b95' }
 
 function Panel({ title, count, children, className = '', id }: { title: string; count?: number | string; children: React.ReactNode; className?: string; id?: string }) {
   return (
@@ -30,14 +32,14 @@ const Src = ({ i }: { i: any }) => i.source_id ? <Link to={`/source/${i.source_i
 type View = 'steps' | 'journey' | 'decisions' | 'made' | 'sources' | 'archive' | 'claude'
 const VIEWS: [View, string][] = [['steps', 'All steps'], ['journey', 'Journey'], ['decisions', 'Decisions'], ['made', 'Made'], ['sources', 'Sources'], ['archive', 'Archive'], ['claude', 'Claude Code']]
 
-function PutOff({ q, back, done }: { q: any; back: () => void; done: () => void }) {
+function PutOff({ q, back, done }: { q: any; back?: () => void; done: () => void }) {
   const [ans, setAns] = useState('')
   return (
     <form className="flex flex-wrap items-center gap-2.5 border-t border-[#1f1f24] py-2.5 first:border-t-0" onSubmit={async (e) => { e.preventDefault(); if (ans.trim()) { await post('/api/answer', { id: q.id, text: ans }); done() } }}>
       <span className="min-w-[200px] flex-1 text-[14px]" title={q.title}>{q.title}</span>
       <input className="nx-input !h-9 max-w-[260px]" maxLength={320} placeholder="Type your answer" value={ans} onChange={(e) => setAns(e.target.value)} aria-label="Answer" />
       <button className="btn primary !h-9" type="submit">Answer</button>
-      <button className="btn ghost !h-9" type="button" onClick={back}>Back to card</button>
+      {back && <button className="btn ghost !h-9" type="button" onClick={back}>Back to card</button>}
     </form>
   )
 }
@@ -47,6 +49,7 @@ export default function Thread() {
   const { data: d, reload } = useApi(`/api/thread?name=${encodeURIComponent(name)}`)
   const { capture, reload: reloadShell } = useShell()
   const [sp] = useSearchParams()
+  const nav = useNavigate()
   const focus = sp.get('item')
   const [view, setView] = useState<View | null>(null)
   const { later, remove } = useLater()
@@ -68,7 +71,6 @@ export default function Thread() {
     if (!focus || !d) return
     const it = items.find((i) => i.id === focus)
     if (!it) return
-    if (queue.some((q) => q.id === focus)) return
     setView(it.type === 'step' && it.state !== 'proposed' ? 'steps' : it.state === 'proposed' || it.state === 'rejected' || it.state === 'parked' ? 'archive' : it.type === 'decision' ? 'decisions' : 'steps')
     setTimeout(() => document.getElementById(`item-${focus}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 200)
   }, [focus, d])
@@ -77,7 +79,7 @@ export default function Thread() {
   const th = d.thread
   const c = STATE_HEX[th.state] ?? '#8b8b95'
   const refresh = () => { reload(); reloadShell() }
-  const putOff = items.filter((i) => i.type === 'question' && i.state === 'open' && i.origin !== 'owner' && later.includes(i.id))
+  const openQs = items.filter((i) => i.type === 'question' && i.state === 'open' && i.origin !== 'owner')
   const steps = items.filter((i) => i.type === 'step' && !['proposed', 'rejected', 'parked'].includes(i.state))
   const doneN = steps.filter((s) => s.state === 'done').length
   const checkN = steps.filter((s) => s.state === 'looks_done').length
@@ -90,7 +92,7 @@ export default function Thread() {
   ].filter((x) => x.n > 0)
 
   const prop = items.filter((i) => i.state === 'proposed')
-  const archived = prop.filter((i) => staleOf(i) || now - ts(i) >= WEEK || later.includes(i.id)).sort((a, b) => ts(b) - ts(a))
+  const archived = prop.slice().sort((a, b) => ts(b) - ts(a))
   const rej = items.filter((i) => i.state === 'rejected' || i.state === 'parked')
   const asks = items.filter((i) => i.type === 'question' && i.state === 'open' && i.origin === 'owner')
   const copy = (t: string) => navigator.clipboard?.writeText(t)
@@ -140,12 +142,25 @@ export default function Thread() {
             <h2 className="text-[26px] font-semibold leading-tight tracking-tight">{th.name}</h2>
             {th.summary && <p className="truncate text-[13.5px] text-mut">{th.summary}</p>}
           </div>
+          <form className="order-last w-full md:order-none md:w-64" onSubmit={(e) => { e.preventDefault(); const q = String(new FormData(e.currentTarget).get('q') ?? '').trim(); if (q) nav(`/search?q=${encodeURIComponent(q)}&thread=${encodeURIComponent(th.name)}`) }}>
+            <input name="q" className="input" placeholder={`Search ${th.name}`} aria-label="Search this project" />
+          </form>
           <Link className="btn ghost" to={`/map?thread=${encodeURIComponent(th.name)}`}><Network size={14} />Map</Link>
           <button className="btn" onClick={() => capture(th.name)}><Plus size={14} />Add</button>
         </header>
 
         <div className="flex flex-wrap items-stretch gap-5">
-          <FocusDeck queue={queue} refresh={refresh} resetKey={name} focus={focus} />
+          <section className="nx-panel nx-in min-w-0 overflow-hidden !rounded-2xl" style={{ flex: '999 1 520px' }}>
+            <div className="flex items-baseline justify-between px-5 pb-2 pt-4"><h3 className="text-[15px] font-semibold">Latest decisions</h3><button className="text-[13px] text-mut hover:text-ink" onClick={() => setView('decisions')}>All decisions</button></div>
+            {(d.decided ?? []).length === 0 && <Empty>No settled decisions yet.</Empty>}
+            {(d.decided ?? []).map((x: any) => (
+              <Link key={x.id} to={x.source_id ? `/source/${x.source_id}${x.chunk_id ? `?c=${x.chunk_id}` : ''}` : '#'} className="nx-row" style={{ gridTemplateColumns: '78px minmax(0,1fr) auto' }} title="Open the source">
+                <span className="text-[12.5px] tabular-nums text-mut">{x.day}</span>
+                <span className="text-[14px]">{x.title}</span>
+                <span className="nx-chip" style={{ background: (HOW[x.how] ?? '#8b8b95') + '22', color: HOW[x.how] ?? '#8b8b95' }}>{x.how}</span>
+              </Link>
+            ))}
+          </section>
 
           <aside className="flex flex-col gap-3" style={{ flex: '1 1 260px' }}>
             <div className="nx-panel nx-in flex items-center gap-4 !rounded-2xl p-[18px]">
@@ -166,10 +181,10 @@ export default function Thread() {
           </aside>
         </div>
 
-        {putOff.length > 0 && (
+        {openQs.length > 0 && (
           <section className="nx-panel nx-in !rounded-2xl px-5 py-4">
-            <div className="mb-2 text-[13px] text-mut">Put off with Later ({putOff.length}). These still count in the sidebar.</div>
-            {putOff.map((q) => <PutOff key={q.id} q={q} back={() => remove(q.id)} done={refresh} />)}
+            <div className="mb-2 text-[13px] text-mut">Questions for the owner ({openQs.length})</div>
+            {openQs.map((q) => <PutOff key={q.id} q={q} done={refresh} />)}
           </section>
         )}
 
@@ -217,7 +232,7 @@ export default function Thread() {
         )}
         {view === 'archive' && (
           <div className="flex flex-col gap-4">
-            <Panel title="Older suggestions" count={archived.length}>
+            <Panel title="Unconfirmed suggestions" count={archived.length}>
               {archived.length === 0 && <Empty>Nothing here.</Empty>}
               {archived.map(propRow)}
             </Panel>

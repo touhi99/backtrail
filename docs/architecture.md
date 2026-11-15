@@ -23,7 +23,7 @@ the database. Sources (session logs, notes, git history, artifact snapshots) are
 | `db.rs` | Opening the store, query helpers, source refs and the quote lookup that every write rule uses. |
 | `migrate.rs` | Schema (`sql/schema.sql`) and store versions in `PRAGMA user_version`; each migration backs up the store and runs in one transaction. |
 | `items.rs` | Work items: the write rule (type, length limits, a verbatim quote from an indexed source), the keep rule, and every change the app or the command line makes to an item. |
-| `views.rs` | Read-only page data for the app (Today, thread, focus, items, source, trail, graph) and the session-start brief. |
+| `views.rs` | Read-only page data for the app (Home, thread, focus, items, source, trail, graph) and the session-start brief. `decided()` lists a project's latest settled decisions still in force, with who confirmed each; the brief and `/api/thread` use it. |
 | `search.rs` | Hybrid passage search (BM25 and vectors, merged by reciprocal rank fusion) and the item index. |
 | `check.rs` | `check`, `check --pairs`, `pending`, `match`, `artifacts`, `show` and `log`. |
 | `server.rs` | Local HTTP server (`tiny_http`, loopback only): routes, request guard and the background scan. Each route calls one function. |
@@ -64,6 +64,7 @@ configured batch size.
 Hooks (diagram: README, "How it works"):
 
 - SessionStart runs `bt brief`, which rescans and prints open questions and threads in motion. It never embeds.
+  `bt brief --thread <name>` adds the project's latest settled decisions; proposed items are never listed.
 - SessionEnd runs `skill/session-end.sh` in the background: `ingest`, `embed`, then extraction
   (`skill/extract.sh`, one small-model call per session) and resolution (`skill/resolve.sh`, one call per proposed
   item). `BACKTRAIL_COMPILE_ON_END=0` skips both.
@@ -71,7 +72,8 @@ Hooks (diagram: README, "How it works"):
 ## Search
 
 Keyword (BM25) and vector lists are merged by reciprocal rank fusion, then multiplied by factors for thread state and
-citations. Thread names and aliases expand the query. Weights and limits: `reference.md`, section "Search ranking".
+citations. Thread names and aliases expand the query. Filed items and `kg find` claims list settled ones before
+proposed and superseded ones. Weights and limits: `reference.md`, section "Search ranking".
 
 `bt kg find` uses the same function for its last route: it takes the best passages from the hybrid search and prints the
 claims that cite them (date, speaker, quote), or the passages when none does. Before that it tries lineage, the entity
@@ -99,8 +101,9 @@ whose passage no longer holds its quote at the passage that does.
 
 ## App
 
-Routes: Today, Graph (network and over-time views), Items, Log, Search, Thread, Source. `/map?thread=` shows one
-project's items and notes. Today reads `/api/today`; the Graph page reads `/api/kg/graph`, `/api/kg/claims`,
+Routes: Home, Graph (network and over-time views), Items, Log, Search, Thread, Source. `/map?thread=` shows one
+project's items and notes. Home reads `/api/today` and `/api/thread` (one call per project in motion, for its next step
+and latest decisions); the Graph page reads `/api/kg/graph`, `/api/kg/claims`,
 `/api/kg/lineage`, `/api/kg/suggest` and `/api/kg/growth`. All writes from the app go through `POST /api/*` handlers in
 `server.rs`, which call the same functions in `items.rs` and `kg/` as the command line.
 
