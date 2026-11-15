@@ -41,6 +41,7 @@ Other commands for keeping the store accurate without raw SQL:
    Check the claim first (run the command, read the code, list the git tags).
 6. `backtrail check` reports lost quotes, orphan threads, notes nothing cites, stale work. `backtrail check --pairs`
    lists item pairs that may contradict each other; judge each and record a turn or decision for real conflicts.
+6a'. `skill/resolve.sh --reverses [--dry]` judges settled decisions: whether a newer one reverses older ones on the same subject. A second model must confirm each reversal; `backtrail unresolve <id>` puts a replaced decision back to settled.
 6a. `backtrail resolve-queue` lists proposed items no model has judged yet; `skill/resolve.sh` judges them (entities, thread, `valid_to`, whether the store already settles them), one call per item.
 6b. `backtrail built <id> --evidence "<what was built>" --check "<where to look and what a good result is>"` shows in the app as "Built, check it".
 7. `backtrail match` compares open steps with commits and marks likely matches `looks done?`; the user confirms.
