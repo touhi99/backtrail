@@ -5,7 +5,7 @@ use crate::clock::now;
 use crate::db::norm;
 use rusqlite::{Connection, params};
 
-/// Sessions to extract claims from: enough owner turns, not automated probes, not yet extracted, newest first,
+/// Sessions to extract claims from: at least one owner turn, not automated probes, not yet extracted, newest first,
 /// within the daily cap. `entity` restricts to sessions whose owner turns mention that entity (tier 2, lazy).
 pub fn queue(
     c: &Connection,
@@ -28,7 +28,7 @@ pub fn queue(
     let only = session_id.map(|s| {
         crate::db::resolve_ref(c, &format!("session:{}", s.trim_start_matches("session:")))
     });
-    let mut st = c.prepare("SELECT s.ref, s.id FROM sources s WHERE s.kind='session' AND (SELECT COUNT(*) FROM chunks WHERE source_id=s.id AND role='user')>=4 AND ifnull(s.thread,'Unsorted')!='Unsorted' AND NOT (s.ref NOT LIKE 'session:%-%' AND EXISTS (SELECT 1 FROM sources t WHERE t.kind='session' AND t.path=s.path AND t.id!=s.id)) AND NOT EXISTS (SELECT 1 FROM log l WHERE l.target=s.ref AND l.action IN ('extract','kg-extract')) AND ( SELECT COUNT(*) FROM log l WHERE l.target=s.ref AND l.action IN ('extract-failed','kg-extract-failed','compile-failed') )<2 AND NOT EXISTS ( SELECT 1 FROM chunks k WHERE k.source_id=s.id AND k.seq=0 AND (k.text LIKE 'BACKTRAIL-%' OR k.text LIKE 'Reply with%' OR k.text LIKE 'Read the file%' OR k.text LIKE 'Write a %') ) ORDER BY s.last_ts DESC").unwrap();
+    let mut st = c.prepare("SELECT s.ref, s.id FROM sources s WHERE s.kind='session' AND (SELECT COUNT(*) FROM chunks WHERE source_id=s.id AND role='user')>=1 AND ifnull(s.thread,'Unsorted')!='Unsorted' AND NOT (s.ref NOT LIKE 'session:%-%' AND EXISTS (SELECT 1 FROM sources t WHERE t.kind='session' AND t.path=s.path AND t.id!=s.id)) AND NOT EXISTS (SELECT 1 FROM log l WHERE l.target=s.ref AND l.action IN ('extract','kg-extract')) AND ( SELECT COUNT(*) FROM log l WHERE l.target=s.ref AND l.action IN ('extract-failed','kg-extract-failed','compile-failed') )<2 AND NOT EXISTS ( SELECT 1 FROM chunks k WHERE k.source_id=s.id AND k.seq=0 AND (k.text LIKE 'BACKTRAIL-%' OR k.text LIKE 'Reply with%' OR k.text LIKE 'Read the file%' OR k.text LIKE 'Write a %') ) ORDER BY s.last_ts DESC").unwrap();
     let want: Option<Vec<String>> = entity.and_then(|e| entities::find(c, e)).map(|(id, _)| {
         c.prepare("SELECT alias FROM entity_aliases WHERE entity_id=?1")
             .unwrap()
@@ -99,7 +99,7 @@ fn unextracted_mentioning(c: &Connection, entity: &str) -> Vec<String> {
     .collect()
 }
 
-/// Average cost in USD of the logged extraction runs, 0.02 when none has been logged.
+/// Average cost in USD of the logged extraction runs, 0.01 when none has been logged (16 logged runs averaged 0.009).
 pub fn usd_each(c: &Connection) -> f64 {
     let v: Vec<f64> = c
         .prepare("SELECT detail FROM log WHERE action='extract' AND detail LIKE 'usd=%'")
@@ -109,7 +109,7 @@ pub fn usd_each(c: &Connection) -> f64 {
         .flatten()
         .filter_map(|d| d.strip_prefix("usd=")?.split_whitespace().next()?.parse().ok())
         .collect();
-    if v.is_empty() { 0.02 } else { v.iter().sum::<f64>() / v.len() as f64 }
+    if v.is_empty() { 0.01 } else { v.iter().sum::<f64>() / v.len() as f64 }
 }
 
 /// Sessions that mention the entity and would be extracted next: the same rules as `queue`, no daily cap.

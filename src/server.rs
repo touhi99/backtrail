@@ -158,7 +158,6 @@ fn get(c: &Connection, path: &str, q: &Query) -> Option<Value> {
         }
         "/api/kg" => kg::screen::entities(c),
         "/api/kg/graph" => kg::screen::graph(c),
-        "/api/kg/growth" => kg::screen::growth(c),
         "/api/kg/lineage" => kg::screen::lineage(c),
         "/api/kg/suggest" => kg::screen::suggestions(c),
         "/api/kg/claims" => kg::screen::claims(
@@ -299,7 +298,10 @@ fn background_scan() {
 }
 
 pub fn serve(c: Connection, port: u16) {
-    let server = Server::http(format!("127.0.0.1:{port}")).expect("bind");
+    let server = Server::http(format!("127.0.0.1:{port}")).unwrap_or_else(|e| {
+        eprintln!("cannot listen on 127.0.0.1:{port}: {e}. Another `bt serve` (or the login agent) probably holds the port; stop it first.");
+        std::process::exit(1);
+    });
     println!("backtrail on http://127.0.0.1:{port}");
     if !db::is_demo() {
         std::thread::spawn(background_scan);

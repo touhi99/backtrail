@@ -227,10 +227,32 @@ pub fn link_claim(c: &Connection, id: &str, thread: &str, hay: &str) -> usize {
         .collect()
     };
     let hay = norm(hay);
+    // Longest alias first: once "marvel rivals" matched, those words no longer count for the entity "marvel", which
+    // still matches where the text says "Marvel" on its own.
+    let mut pairs: Vec<(&str, &str)> = ents
+        .iter()
+        .flat_map(|(eid, _, al)| al.iter().filter(|a| !a.is_empty()).map(move |a| (a.as_str(), eid.as_str())))
+        .collect();
+    pairs.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then(a.0.cmp(b.0)));
+    let mut masked = hay.clone();
+    let mut by_alias: std::collections::HashSet<&str> = Default::default();
+    let mut i = 0;
+    while i < pairs.len() {
+        let alias = pairs[i].0;
+        let hit = has_word(&masked, alias);
+        while i < pairs.len() && pairs[i].0 == alias {
+            if hit {
+                by_alias.insert(pairs[i].1);
+            }
+            i += 1;
+        }
+        if hit {
+            masked = mask_word(&masked, alias);
+        }
+    }
     let mut n = 0;
-    for (eid, name, aliases) in &ents {
-        if norm(name) == norm(thread) || aliases.iter().any(|a| !a.is_empty() && has_word(&hay, a))
-        {
+    for (eid, name, _) in &ents {
+        if norm(name) == norm(thread) || by_alias.contains(eid.as_str()) {
             c.execute(
                 "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role) VALUES(?1,?2,'subject')",
                 params![id, eid],
@@ -242,10 +264,30 @@ pub fn link_claim(c: &Connection, id: &str, thread: &str, hay: &str) -> usize {
     n
 }
 
-/// Link every decision to the entities its text names. Run after an entity or an alias is added.
+/// `text` with every whole-word occurrence of `word` replaced by spaces of the same length.
+fn mask_word(text: &str, word: &str) -> String {
+    let mut out = String::new();
+    let mut from = 0;
+    while let Some(i) = text[from..].find(word) {
+        let (start, end) = (from + i, from + i + word.len());
+        let before = text[..start].chars().next_back().is_none_or(|ch| !ch.is_alphanumeric());
+        let after = text[end..].chars().next().is_none_or(|ch| !ch.is_alphanumeric());
+        out.push_str(&text[from..start]);
+        if before && after {
+            out.push_str(&" ".repeat(word.len()));
+        } else {
+            out.push_str(&text[start..end]);
+        }
+        from = end;
+    }
+    out.push_str(&text[from..]);
+    out
+}
+
+/// Link every decision, state and rationale to the entities its text names. Run after an entity or an alias is added.
 pub fn relink_all(c: &Connection) -> usize {
     let rows: Vec<(String, String, String)> = c
-        .prepare("SELECT id, ifnull(thread,''), title||' '||ifnull(body,'')||' '||ifnull(quote,'') FROM claims WHERE type='decision'")
+        .prepare("SELECT id, ifnull(thread,''), title||' '||ifnull(body,'')||' '||ifnull(quote,'') FROM claims WHERE type IN ('decision','state','rationale')")
         .unwrap()
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
         .unwrap()
@@ -442,7 +484,12 @@ pub fn suggest_data(c: &Connection) -> (Vec<(String, String, usize)>, Vec<(Strin
         if *n < 5 || ss.len() < 3 || known.contains(w) || ignored.contains(w) {
             continue;
         }
-        let sq = squash(w);
+        // a file name counts as its stem: "readme.md" is the entity "readme"
+        let base = [".md", ".json", ".toml", ".yaml", ".yml", ".lock", ".rs", ".ts", ".tsx", ".js", ".py", ".sh", ".html", ".css", ".svg", ".txt", ".db"]
+            .iter()
+            .find_map(|e| w.strip_suffix(e))
+            .unwrap_or(w);
+        let sq = squash(base);
         let trimmed = sq.trim_end_matches('s').to_string();
         if let Some(k) = known_sq.get(&sq).or_else(|| known_sq.get(&trimmed)) {
             alias_hits.push((w.clone(), k.clone(), *n));
