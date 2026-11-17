@@ -33,20 +33,6 @@ pub fn graph(c: &Connection) -> Value {
     })
 }
 
-/// How the graph grew: every live fact with its day, its source and its entities, oldest first.
-pub fn growth(c: &Connection) -> Value {
-    json!(rows(
-        c,
-        "SELECT f.id, substr(coalesce(nullif(f.asserted_at,''), f.source_first_ts),1,10) AS d, f.source_id AS sid,
-                f.source_title AS stitle, f.source_kind AS skind,
-                (SELECT group_concat(a.entity_id, ',') FROM claim_about a WHERE a.claim_id=f.id) AS es
-         FROM fact f
-         WHERE f.source IS NOT NULL AND f.status!='retracted'
-         ORDER BY d, f.id",
-        &[],
-    ))
-}
-
 /// Every live relation, oldest first, with its entities as `subject → object`.
 pub fn lineage(c: &Connection) -> Value {
     json!(rows(

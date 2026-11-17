@@ -191,3 +191,58 @@ pub fn pin(c: &Connection, session_ref: &str, thread: &str) -> Result<bool, Stri
     }
     Ok(found)
 }
+
+/// `bt suggest-threads`: for each project folder with sessions in `Unsorted`, the thread to assign them to. A thread
+/// is suggested when most sorted sessions of that folder are in it, or when its name is part of the folder name.
+/// Nothing is changed; each line is the `bt assign` command that applies it.
+pub fn suggest(c: &Connection) {
+    let projects = crate::db::rows(
+        c,
+        "SELECT project, COUNT(*) AS n FROM sources WHERE kind='session' AND thread=?1 AND project!='' GROUP BY project ORDER BY n DESC",
+        &[&UNSORTED],
+    );
+    let threads: Vec<String> = crate::db::rows(c, "SELECT name FROM threads WHERE name!=?1", &[&UNSORTED])
+        .iter()
+        .filter_map(|r| r["name"].as_str().map(String::from))
+        .collect();
+    let flat = |s: &str| -> String { s.to_lowercase().chars().filter(|ch| ch.is_alphanumeric()).collect() };
+    let mut shown = 0;
+    for p in projects {
+        let project = p["project"].as_str().unwrap_or("");
+        let n = p["n"].as_i64().unwrap_or(0);
+        let by_vote = crate::db::rows(
+            c,
+            "SELECT thread, COUNT(*) AS n FROM sources WHERE kind='session' AND project=?1 AND thread!=?2 GROUP BY thread ORDER BY n DESC",
+            &[&project, &UNSORTED],
+        );
+        let total: i64 = by_vote.iter().filter_map(|r| r["n"].as_i64()).sum();
+        let vote = by_vote.first().and_then(|r| {
+            let (t, k) = (r["thread"].as_str()?, r["n"].as_i64()?);
+            (total >= 3 && k * 10 >= total * 6).then(|| format!("{k} of {total} sorted sessions of this folder"))
+                .map(|why| (t.to_string(), why))
+        });
+        let named = || {
+            threads
+                .iter()
+                .find(|t| flat(t).len() >= 4 && flat(project).contains(&flat(t)))
+                .map(|t| (t.clone(), "the folder name contains the thread name".to_string()))
+        };
+        match vote.or_else(named) {
+            Some((t, why)) => {
+                shown += 1;
+                println!("{project}: {n} unsorted -> {t} ({why})");
+                for r in crate::db::rows(
+                    c,
+                    "SELECT ref FROM sources WHERE kind='session' AND thread=?1 AND project=?2 ORDER BY id",
+                    &[&UNSORTED, &project],
+                ) {
+                    println!("  bt assign {} \"{t}\"", r["ref"].as_str().unwrap_or(""));
+                }
+            }
+            None => println!("{project}: {n} unsorted, no suggestion"),
+        }
+    }
+    if shown == 0 {
+        println!("no suggestions");
+    }
+}

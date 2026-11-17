@@ -80,6 +80,24 @@ pub fn add(c: &Connection, claim: &NewClaim) -> Result<String, String> {
         about.dedup();
     }
 
+    // A relation between the same two entities in the same direction and of the same kind is one claim, however
+    // it is worded: filing it again returns the live one.
+    if relation {
+        let live: Option<String> = c
+            .query_row(
+                "SELECT c.id FROM claims c
+                 JOIN claim_about s ON s.claim_id=c.id AND s.role='subject' AND s.entity_id=?2
+                 JOIN claim_about o ON o.claim_id=c.id AND o.role='object' AND o.entity_id=?3
+                 WHERE c.type=?1 AND c.state NOT IN ('rejected','superseded') ORDER BY c.created LIMIT 1",
+                params![claim.kind, about[0], about[1]],
+                |r| r.get(0),
+            )
+            .ok();
+        if let Some(id) = live {
+            return Ok(id);
+        }
+    }
+
     // The id is a hash of the entities, type and text. Claims filed before store version 1 have a 32-bit id; one
     // of those with the same content is the same claim. A new id taken by different content is refused.
     let natural = format!("{}{}{}", about.join(","), claim.kind, norm(claim.text));

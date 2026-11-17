@@ -127,6 +127,27 @@ Titles were written by a model from the cited passage, so the queries are not ty
   `BACKTRAIL_COMPILE_ON_END=0` in the hook's environment skips them. `BACKTRAIL_REVERSE_ON_END=1` also runs
   `skill/resolve.sh --reverses --limit 5` on the newest settled decisions not yet checked.
 
+## First run on a machine with existing sessions
+
+```
+./install.sh
+bt hooks install
+bt build
+```
+
+- `bt build` indexes every session and note, then embeds. On one Mac, 457 sessions and 136 notes were indexed in 4 s and
+  11,728 passages embed in about 15 minutes. Without Ollama it prints how to install it and search stays keyword only.
+- The brief and the graph are empty at first: decisions come from a model reading a session. The `SessionEnd` hook reads
+  only the session that just ended, so earlier history stays unread. `bt build` prints how many sessions are unread and
+  the command to read them (`skill/extract.sh --no-cap --limit N`, then `skill/resolve.sh`). One run costs about
+  0.01 USD on a small model; 202 sessions were eligible in the test.
+- Without `config.json`, each Claude Code project folder becomes a thread named after the folder. Thread rules,
+  entities and note folders are set in `config.json` (see Configuration).
+- The model scripts call the `claude` CLI, so their usage counts against the account that is logged in on that machine.
+  A second machine or account sees only its own sessions; `bt kg export <file>` and `bt kg restore <file>` carry claims
+  across.
+- `bt hooks install` writes absolute paths to this checkout, so it is run on each machine.
+
 ## Demo store
 
 A store with invented content: `BACKTRAIL_HOME=/tmp/bt-demo bt demo`, then

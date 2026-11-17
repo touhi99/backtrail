@@ -20,12 +20,12 @@ function useTrail(days?: number) {
     for (const t of data.threads) per.set(t.name, { ...t, s: [] as any[], made: [] as any[], i: [] as any[] })
     for (const s of data.sources) { const p = per.get(s.thread); if (p && s.d > '2000') (s.kind === 'session' ? p.s : p.made).push(s) }
     for (const i of data.items) per.get(i.thread)?.i.push(i)
-    const today = iso(Date.now() - (Date.now() % DAY))
+    const now = new Date(), today = iso(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
     const from = days ? iso(ts(today) - (days - 1) * DAY) : ''
     if (from) for (const p of per.values()) { p.s = p.s.filter((x: any) => x.d >= from); p.made = p.made.filter((x: any) => x.d >= from); p.i = p.i.filter((x: any) => x.d >= from) }
     const ps = [...per.values()].filter((p) => p.s.length)
     if (!ps.length) return { ps, links: [], d0: from || today, days: days ?? 1 }
-    const all = ps.flatMap((p) => p.s.map((s: any) => s.d)).sort()
+    const all = ps.flatMap((p) => [...p.s, ...p.made, ...p.i].map((s: any) => s.d)).sort()
     const d0 = from || all[0], d1 = iso(Math.max(ts(all[all.length - 1]), ts(today)))
     for (const p of ps) {
       for (const x of [...p.made, ...p.i]) if (x.d < d0) x.d = d0
@@ -52,7 +52,7 @@ export function TrailLanes({ m, compact = false }: { m: NonNullable<ReturnType<t
   const [cw, setCw] = useState(0)
   useLayoutEffect(() => { if (!box.current) return; const ro = new ResizeObserver(([e]) => setCw(e.contentRect.width)); ro.observe(box.current); return () => ro.disconnect() }, [m])
   const { ps, links, d0, days } = m
-  const LW = compact ? 180 : 210, RW = 112, RH = compact ? 28 : 32, TOP = 30, W = Math.max(860, cw || 1180), PW = W - LW - RW, dw = PW / days, H = TOP + ps.length * RH + 8
+  const LW = compact ? 180 : 210, RW = 128, RH = compact ? 46 : 46, TOP = 30, W = Math.max(860, cw || 1180), PW = W - LW - RW, dw = PW / days, H = TOP + ps.length * RH + 8
   const x = (d: string) => LW + ((ts(d) - ts(d0)) / DAY + 0.5) * dw
   const idx = new Map(ps.map((p, i) => [p.name, i]))
   const y = (i: number) => TOP + i * RH + RH / 2
@@ -76,8 +76,8 @@ export function TrailLanes({ m, compact = false }: { m: NonNullable<ReturnType<t
                   <text x={22} y={yy + 4} fill="#e4e4e7" fontSize={13} fontWeight={500}>{p.name.length > 25 ? p.name.slice(0, 24) + '…' : p.name}<title>{p.summary}</title></text>
                   <rect x={x0} y={yy - 7} width={x1 - x0} height={14} rx={7} fill={c} fillOpacity={0.12} stroke={c} strokeOpacity={0.35} />
                   {Object.entries(byDay).map(([d, v]) => <circle key={d} cx={x(d)} cy={yy} r={Math.min(6.5, 2.6 + v.length * 0.9)} fill={c} onMouseMove={(e) => show(e, <><div className="font-semibold">{p.name}, {dayFmt(d)}</div><ul className="mt-1 list-disc pl-4 text-mut">{v.map((s) => <li key={s.id}>{s.title}</li>)}{(madeDay[d] ?? []).map((s) => <li key={s.id} className="text-[#c084fc]">Made: {s.title}</li>)}{(doneDay[d] ?? []).map((s, k) => <li key={k} className="text-[#34d399]">✓ {s.title}</li>)}</ul></>)} />)}
-                  {Object.entries(madeDay).map(([d, v]) => { const xm = x(d), ym = yy - 11; return <rect key={d} x={xm - 4} y={ym - 4} width={8} height={8} transform={`rotate(45 ${xm} ${ym})`} fill="#c084fc" onMouseMove={(e) => show(e, <><div className="font-semibold">Made, {dayFmt(d)}</div><ul className="mt-1 list-disc pl-4 text-mut">{v.map((s) => <li key={s.id}>{s.title}</li>)}</ul></>)} /> })}
-                  {Object.entries(doneDay).map(([d, v]) => <text key={d} x={x(d)} y={yy + 19} textAnchor="middle" fill="#34d399" fontSize={10} fontWeight={700} onMouseMove={(e) => show(e, <><div className="font-semibold">Done or decided, {dayFmt(d)}</div><ul className="mt-1 list-disc pl-4 text-mut">{v.map((s, k) => <li key={k}>{s.title}</li>)}</ul></>)}>✓{v.length > 1 ? v.length : ''}</text>)}
+                  {Object.entries(madeDay).map(([d, v]) => { const xm = x(d), ym = yy - 15; return <rect key={d} x={xm - 4} y={ym - 4} width={8} height={8} transform={`rotate(45 ${xm} ${ym})`} fill="#c084fc" onMouseMove={(e) => show(e, <><div className="font-semibold">Made, {dayFmt(d)}</div><ul className="mt-1 list-disc pl-4 text-mut">{v.map((s) => <li key={s.id}>{s.title}</li>)}</ul></>)} /> })}
+                  {Object.entries(doneDay).map(([d, v]) => <text key={d} x={x(d)} y={yy + 21} textAnchor="middle" fill="#34d399" fontSize={10} fontWeight={700} onMouseMove={(e) => show(e, <><div className="font-semibold">Done or decided, {dayFmt(d)}</div><ul className="mt-1 list-disc pl-4 text-mut">{v.map((s, k) => <li key={k}>{s.title}</li>)}</ul></>)}>✓{v.length > 1 ? v.length : ''}</text>)}
                   <text x={W - RW + 10} y={yy + 4} fill={c} fontSize={12} fontWeight={600}>{STATE_NAME[p.state] ?? p.state}</text>
                 </g>)
             })}

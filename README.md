@@ -16,6 +16,9 @@ a session-start hook prints a brief of what was already decided.
 - Decisions, steps and questions are proposed from sessions. A proposal is rejected when its quote is not in the source.
 - A decision is settled when the owner typed it, accepts it in the app, or it comes from a note. Otherwise it stays proposed.
 - Unconfirmed proposals and open questions are parked after 14 days.
+- The knowledge graph is built from those records. Entities are named in a dictionary (`bt kg entity add`); each
+  claim is linked to the entities its text names, and relations between threads come from `skill/extract.sh` or
+  `bt relate`. Each claim keeps its quote and source. `bt kg lint` lists probable duplicates.
 - The binary calls no model. The model passes are scripts in `skill/`.
 
 Detail: `docs/architecture.md`, `docs/reference.md`.
@@ -30,7 +33,8 @@ bt serve
 ```
 
 `bt serve` starts the app at `http://127.0.0.1:8799`. `BACKTRAIL_HOME` sets the data directory (default
-`~/Library/Application Support/Backtrail` on macOS, `~/.local/share/backtrail` elsewhere).
+`~/Library/Application Support/Backtrail` on macOS, `~/.local/share/backtrail` elsewhere). First run with existing
+sessions: `docs/reference.md`.
 
 ## Usage
 

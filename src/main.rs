@@ -26,7 +26,7 @@ relate A B kind --source REF --quote Q [--state S] | pending [--days N] | skip <
 add <type> --thread --title --source --quote [--body --check --state --origin --date] | import <facts.json|-> | \
 set-thread NAME [--state S] [--summary X] | done <step> [--by B] [--proof P] | built <step> --evidence TEXT [--check TEXT] | \
 flag <id> --as live|in_effect|superseded|done --reason R | reply <q> --text TEXT | retire <id> [--by ID] --reason R | \
-assign <ref> <thread> | extract-input <ref> | extract-queue [--limit N] [--session ID] [--entity NAME] | \
+assign <ref> <thread> | suggest-threads | extract-input <ref> | extract-queue [--limit N] [--session ID] [--entity NAME] | \
 extract-log <ref> [--failed 1] [--detail D] | kg [state|export|restore|lint|suggest|merge|entity|page|trace|why|neighbors|path|passage|find] | \
 brief [--thread T | --all] | backup | serve [--port N] | hooks";
 
@@ -348,6 +348,15 @@ fn main() {
                     config::DEFAULT_EMBED_MODEL
                 ),
             }
+            // the hook reads one session per session end, so earlier history stays unread until asked for
+            let unread = kg::extract::queue(&c, usize::MAX, None, None, true).len();
+            if unread > 0 {
+                println!(
+                    "{unread} sessions have not been read for decisions yet (about ${:.2} on a small model). \
+                     Read them now: skill/extract.sh --no-cap --limit {unread}, then skill/resolve.sh",
+                    unread as f64 * kg::extract::usd_each(&c)
+                );
+            }
         }
         "add" => {
             let it = items::NewItem {
@@ -427,6 +436,7 @@ fn main() {
             ),
             "no such live item",
         ),
+        "suggest-threads" => ingest::threads::suggest(&c),
         "assign" => match ingest::threads::pin(&c, &a.at(1, "session ref"), &a.at(2, "thread")) {
             Ok(found) => report(found, "no such session"),
             Err(e) => fail(&e),
