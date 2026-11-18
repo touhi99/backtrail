@@ -35,7 +35,7 @@ for ref in "${REFS[@]+"${REFS[@]}"}"; do
   raw="$(printf '%s' "$packet" | claude -p --model "$MODEL" --tools "" --no-session-persistence --output-format json \
         --setting-sources project --disable-slash-commands --strict-mcp-config --max-budget-usd 0.25 \
         --system-prompt "$(cat "$DIR/extract-prompt.md")" 2>/dev/null)"
-  REF="$ref" TM="$TM" RAW="$raw" python3 - <<'PY'
+  REF="$ref" TM="$TM" RAW="$raw" DIR="$DIR" python3 - <<'PY'
 import json, os, re, subprocess, sys
 ref, tm, raw = os.environ["REF"], os.environ["TM"], os.environ["RAW"]
 def log(ok, detail):
@@ -50,15 +50,22 @@ try:
 except Exception as e:
     log(False, f"unreadable answer: {type(e).__name__}")
     print(f"{ref}: failed ({type(e).__name__})"); sys.exit(0)
-out = []
+out, closed = [], []
 for i in items:
     if not isinstance(i, dict): continue
+    if i.get("type") == "finished":
+        # an open step this session finished: `finish` checks the quote and decides done or "built, check it"
+        f = subprocess.run([os.path.join(os.environ["DIR"], "close-step.sh"), str(i.get("step", "")), ref, str(i.get("quote", ""))], capture_output=True, text=True)
+        closed.append((f.stdout or f.stderr).strip().split("  <-")[0])
+        continue
     out.append({"type": i.get("type"), "title": i.get("title") or i.get("text", ""), "body": i.get("body", ""), "source": ref,
                 "quote": i.get("quote", ""), "entities": i.get("entities", []), "valid_to": i.get("valid_to", ""), "kind": i.get("kind", ""),
                 "stated": i.get("stated", "inferred"), "state": "proposed", "origin": "suggested"})
 r = subprocess.run([tm, "import", "-"], input=json.dumps(out), capture_output=True, text=True)
-log(True, f"{cost} items={len(out)} {r.stdout.strip()}")
+fin = f" finished={len(closed)}" if closed else ""
+log(True, f"{cost} items={len(out)}{fin} {r.stdout.strip()}")
 print(f"{ref}: {cost} · {r.stdout.strip()}")
+for line in closed: print(f"  {line}")
 sys.stderr.write(r.stderr)
 PY
 done

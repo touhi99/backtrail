@@ -15,7 +15,7 @@ Commands run as `bt <command>`.
 | `add <type> --thread --title --entities A,B --source --quote [--body --state --origin --valid-to]` | File one decision, step, question or turn. At least one entity is required; the thread follows the entity. Lists existing items that may already settle it |
 | `resolve <id> --by <id> --reason T` | Settle an item with an existing one: a question becomes `answered`, a step or decision `superseded`, `superseded_by` names the settling item |
 | `unresolve <id>` | Put a resolved or expired item back to `proposed`; a settled decision that a reversal replaced goes back to `settled` |
-| `resolve --expired` | Items whose `valid_to` has passed leave the queue (also done by `resolve-queue`). Claude's proposals and open questions whose session is more than 14 days old and that are still unconfirmed are parked the same way: state `superseded`, reason in `answer`, `unresolve` brings one back. `bt serve` runs this every 5 minutes. Items the owner filed are never parked |
+| `resolve --expired` | Items whose `valid_to` has passed leave the queue (also done by `resolve-queue`). Claude's proposals and open questions whose session is more than 14 days old and that are still unconfirmed are parked the same way: state `superseded`, reason in `answer`, `unresolve` brings one back. `bt serve` runs this every 5 minutes. Proposals on a thread whose state is `built`, `dropped` or `parked` are parked the same way. Items the owner filed are never parked |
 | `answer <question id> --text T` | Record the owner's reply to a question Claude asked; the brief lists open questions with their ids |
 | `keep` | Run the keep rule over every proposed fact |
 | `resolve-queue [--limit N]`, `resolve-packet <id>`, `resolve-apply <file\|->` | The three halves of `skill/resolve.sh`: unjudged proposed items, the text a model reads for one, and applying its verdict. With `--reverses` (`resolve-queue`, `resolve-packet`) they work on settled decisions: the packet lists the older settled decisions on the same subject (best word and passage matches, then those sharing the newest decision's most specific entities), and a verdict `{"id", "replaces": [..], "reason"}` marks each named older decision `superseded` by the new one. `resolve.sh --reverses` asks a second model to confirm each reversal before it is applied |
@@ -30,10 +30,14 @@ Commands run as `bt <command>`.
 | `embed [--limit N]` | Embed passages that have no vector yet (needs the embedding server; see the `embeddings` key) |
 | `show <ref>` | Print a source's passages |
 | `check [--pairs]` | Report lost quotes, session files that were never indexed, orphan threads, stale work; `--pairs` lists candidate contradictions |
-| `match` | Mark open steps that a later commit seems to complete as `looks done?` (word-overlap heuristic, unproven) |
+| `match` | Mark open steps that a later commit seems to complete as `looks done?` (word-overlap heuristic; it marks unrelated steps that share a phrase, so it runs only when called) |
 | `pending [--days N]` | List recent sessions that no item cites |
 | `artifacts [--manifest list.json]` | Record publish dates and report missing or stale snapshots |
-| `extract-input <ref>` | Print one session for a model: the thread's existing items, the entity names, and the turns |
+| `extract-input <ref>` | Print one session for a model: the thread's existing items, the open steps of every thread with their ids, the entity names, and the turns |
+| `finish <step> --source REF --quote Q [--verified] [--dry]` | Close an open step from a quote found in the source. It closes only with `--verified` (a second model agreed the passage shows the step finished); without, it is refused. `--dry` prints the verdict only |
+| `finish-input <step>` | Print a step and the ten passages written after it that are most like it, for `skill/finish.sh` |
+| `finish-evidence <step> --source REF --quote Q` | Print a step and the passage holding the quote, for the confirming model |
+| `finish-queue` | List steps open for more than a day |
 | `extract-queue [--session ID] [--limit N] [--entity E] [--no-cap]` | List sessions worth extracting (at most `daily_cap` a day unless `--no-cap`) |
 | `extract-log <ref> [--failed 1] --detail "..."` | Record one extraction run and its cost |
 | `log [--n N]` | Print the append-only change log |
@@ -124,6 +128,7 @@ Titles were written by a model from the cited passage, so the queries are not ty
 - `SessionStart`: `bt brief` prints one line per thread in motion. Claude runs `bt brief --thread <name>` for the project at hand.
 - `SessionEnd`: `<path>/skill/session-end.sh` runs `ingest` and `embed` in the background when a session closes, then
   `skill/extract.sh` on the session and `skill/resolve.sh` on the unjudged proposed items. Both make model calls.
+  Extraction also names open steps the session finished; `skill/close-step.sh` closes each one (see `finish`).
   `BACKTRAIL_COMPILE_ON_END=0` in the hook's environment skips them. `BACKTRAIL_REVERSE_ON_END=1` also runs
   `skill/resolve.sh --reverses --limit 5` on the newest settled decisions not yet checked.
 

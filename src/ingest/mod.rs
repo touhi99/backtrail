@@ -39,11 +39,10 @@ pub fn scan(c: &Connection) -> Report {
     }
 }
 
-/// The scan that `brief` and the server's timer run: read sources, mark steps that a commit seems to finish, and
-/// write the daily backup.
+/// The scan that `brief` and the server's timer run: read sources and write the daily backup. Commit matching
+/// (`bt match`) is no longer part of it: a shared two-word phrase marked unrelated steps as done.
 pub fn rescan(c: &Connection) {
     scan(c);
-    crate::check::match_commits(c, false);
     if !crate::db::is_demo() {
         backup(c);
     }

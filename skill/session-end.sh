@@ -1,5 +1,6 @@
 #!/bin/bash
-# SessionEnd hook: index the session that just ended, embed new passages, then extract and resolve it.
+# SessionEnd hook: index the session that just ended, embed new passages, then extract and resolve it. Extraction
+# also closes open steps the session finished (close-step.sh).
 # Runs in the background. Extraction (extract.sh) and resolution (resolve.sh) each make small model calls, (extraction is capped by `daily_cap` sessions a day); set BACKTRAIL_COMPILE_ON_END=0 in the environment of the hook to skip both.
 # Reads the hook JSON on stdin (needs session_id).
 [ -n "${BACKTRAIL_COMPILE:-}" ] && exit 0

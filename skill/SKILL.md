@@ -38,7 +38,8 @@ Other commands for keeping the store accurate without raw SQL:
    or several at once with `backtrail import facts.json` (also takes `state`, `rationale` and `relation` items with `entities`). Every item names at least one entity (`bt kg entity` lists them) and the thread follows the entity. Add `--valid-to YYYY-MM-DD` for an item that names a relative day. After filing, the command lists existing items that may already settle the new one; if one does, run `backtrail resolve <new id> --by <existing id> --reason "..."`. The command rejects a missing source, a quote not
    found in the source, or text over the limit.
 5. Close a step only with evidence: `backtrail done <id> --by claude --proof "<what shows it>"`.
-   Check the claim first (run the command, read the code, list the git tags).
+   Check the claim first (run the command, read the code, list the git tags). The SessionEnd pass also closes steps a
+   session finished (`skill/close-step.sh`); `skill/finish.sh --dry` sweeps steps left open.
 6. `backtrail check` reports lost quotes, orphan threads, notes nothing cites, stale work. `backtrail check --pairs`
    lists item pairs that may contradict each other; judge each and record a turn or decision for real conflicts.
 6a'. `skill/resolve.sh --reverses [--dry]` judges settled decisions: whether a newer one reverses older ones on the same subject. A second model must confirm each reversal; `backtrail unresolve <id>` puts a replaced decision back to settled.

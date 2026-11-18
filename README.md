@@ -17,6 +17,7 @@ over time.
 - Decisions, steps and questions are proposed from sessions. A proposal is rejected when its quote is not in the source.
 - A decision is settled when the owner typed it, accepts it in the app, or it comes from a note. Otherwise it stays proposed.
 - Unconfirmed proposals and open questions are parked after 14 days.
+- A step closes when a session shows it finished, with the quote, and a second model agrees the quote is about that step.
 - The knowledge graph is built from those records. Entities are named in a dictionary (`bt kg entity add`); each
   claim is linked to the entities its text names, and relations between threads come from `skill/extract.sh` or
   `bt relate`. Each claim keeps its quote and source. `bt kg lint` lists probable duplicates.
