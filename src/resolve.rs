@@ -411,14 +411,14 @@ pub fn expire(c: &Connection) -> usize {
     ids.len() + park_stale(c) + park_closed_threads(c)
 }
 
-/// Claude's unconfirmed proposals on a thread that is dropped or parked leave every list the same way: the project
-/// is not being worked on, so its suggestions are not to-dos. `unresolve` brings one back; owner items are kept.
+/// Claude's unconfirmed proposals on a thread that is built, dropped or parked leave every list the same way: the
+/// project is not being worked on, so its suggestions are not to-dos. `unresolve` brings one back; owner items are kept.
 fn park_closed_threads(c: &Connection) -> usize {
     let rows = crate::db::rows(
         c,
         "SELECT c.id, t.state FROM claims c JOIN threads t ON t.name=c.thread
           WHERE c.origin!='owner' AND c.type IN ('decision','step','question') AND c.state='proposed'
-            AND t.state IN ('dropped','parked')",
+            AND t.state IN ('built','dropped','parked')",
         &[],
     );
     for r in &rows {
