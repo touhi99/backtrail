@@ -73,6 +73,16 @@ panel also lists suggested entities and aliases that can be added with one click
 its own notes. The app can tick a step, confirm or dismiss `looks done?`, answer a question, add an idea, and accept
 or reject suggested items. Thread lineage drawn on the graph comes from relation claims (`relate`, `link` and `extract.sh` write them).
 
+## Install options
+
+- `install.sh` links the binary as `bt` in `$BT_BIN_DIR` (default `~/.local/bin`). On macOS it also writes and loads
+  the login agent `~/Library/LaunchAgents/dev.backtrail.serve.plist`, which runs `backtrail serve` from login, and
+  builds `mac/Backtrail.app` when Swift is present. `BT_NO_AGENT=1` and `BT_NO_MAC_APP=1` skip those. Elsewhere, run
+  `bt serve`.
+- `BACKTRAIL_HOME` sets the data directory: default `~/Library/Application Support/Backtrail` on macOS,
+  `~/.local/share/backtrail` elsewhere. The database is `0600` in a `0700` folder.
+- `mac/build.sh` rebuilds the Mac app alone.
+
 ## Configuration
 
 `<data dir>/config.json` is optional. Without it, each Claude Code project folder is one thread and only memory notes are
