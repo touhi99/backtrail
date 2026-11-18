@@ -106,9 +106,18 @@ export function TrailCard() {
 }
 
 export default function Trail({ tabs }: { tabs: ReactNode }) {
-  const m = useTrail()
-  if (!m) return <div className="nx-page"><div className="text-mut">Loading</div></div>
-  const { ps } = m
+  const full = useTrail()
+  const [sort, setSort] = useState<'last' | 'first'>('last')
+  const [only, setOnly] = useState<string | null>(null)
+  const m = useMemo(() => {
+    if (!full) return null
+    const ps = full.ps.filter((p) => !only || p.state === only).sort((a, b) => sort === 'last' ? b.last.localeCompare(a.last) || b.first.localeCompare(a.first) : a.first.localeCompare(b.first))
+    const names = new Set(ps.map((p) => p.name))
+    return { ...full, ps, links: full.links.filter((l) => names.has(l.from) && names.has(l.to)) }
+  }, [full, sort, only])
+  if (!full || !m) return <div className="nx-page"><div className="text-mut">Loading</div></div>
+  const { ps } = full
+  const seg = (on: boolean, c = '#34d399') => ({ height: 26, border: '1px solid var(--color-line2)', background: on ? c + '26' : 'rgba(255,255,255,.04)', color: on ? c : 'var(--color-soft)' })
   const made = ps.reduce((a, p) => a + p.made.length, 0)
   return (
     <div className="nx-page">
@@ -117,16 +126,20 @@ export default function Trail({ tabs }: { tabs: ReactNode }) {
 
       <div className="mt-5 grid grid-cols-5 gap-3 max-[1100px]:grid-cols-3">
         {ORDER.map((st, k) => { const g = ps.filter((p) => p.state === st); return (
-          <div key={st} className="nx-tile nx-in" style={{ ['--d' as any]: `${40 + k * 40}ms` }}>
+          <button key={st} type="button" title={only === st ? 'Show all threads' : `Show only ${STATE_NAME[st]}`} onClick={() => setOnly(only === st ? null : st)} className="nx-tile nx-in text-left" style={{ ['--d' as any]: `${40 + k * 40}ms`, opacity: only && only !== st ? 0.5 : 1, outline: only === st ? `1px solid ${STATE_HEX[st]}` : undefined }}>
             <div className="nx-big" style={{ color: STATE_HEX[st] }}>{g.length}</div><div className="mt-1 text-[13px] text-soft">{STATE_NAME[st]}</div>
             <div className="mt-1.5 text-[12px] leading-snug text-mut">{g.map((p) => p.name).join(', ')}</div>
-          </div>) })}
+          </button>) })}
         <div className="nx-tile nx-in" style={{ ['--d' as any]: '200ms' }}><div className="nx-big text-[#c084fc]">{made}</div><div className="mt-1 text-[13px] text-soft">Things made</div><div className="mt-1.5 text-[12px] text-mut">artifacts and commit runs</div></div>
       </div>
 
       <section className="nx-panel nx-in mt-5 px-5 pb-3 pt-4" style={{ ['--d' as any]: '240ms' }}>
         <div className="mb-2 flex flex-wrap items-baseline justify-between gap-3">
-          <h3 className="text-[15px] font-semibold">Trail <span className="ml-2 text-[12.5px] font-normal text-mut">click a thread to open its story</span></h3>
+          <div className="flex flex-wrap items-center gap-3">
+            <h3 className="text-[15px] font-semibold">Trail <span className="ml-2 text-[12.5px] font-normal text-mut">{only ? `${m.ps.length} ${STATE_NAME[only].toLowerCase()}, ` : ''}click a thread to open its story</span></h3>
+            <div className="flex gap-1">{([['last', 'Latest work'], ['first', 'First started']] as const).map(([k, l]) => <button key={k} type="button" onClick={() => setSort(k)} className="rounded-full px-2.5 text-[12px] font-medium" style={seg(sort === k)}>{l}</button>)}</div>
+            {only && <button type="button" onClick={() => setOnly(null)} className="rounded-full px-2.5 text-[12px] font-medium" style={seg(true, STATE_HEX[only])}>{STATE_NAME[only]} ×</button>}
+          </div>
           <div className="flex flex-wrap gap-4 text-[12px] text-mut">
             {ORDER.map((st) => <span key={st} className="flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: STATE_HEX[st] }} />{STATE_NAME[st]}</span>)}
             <span className="flex items-center gap-1.5"><span className="size-2 rotate-45 bg-[#c084fc]" />Made</span>

@@ -31,6 +31,7 @@ struct RootView: View {
                 switch store.page {
                 case .home: HomeView()
                 case .graph: GraphView()
+                case .trail: TrailPage()
                 case .thread(let name): ThreadView(name: name).id(name)
                 case .search(let q): SearchView(initial: q).id(q)
                 case .source(let id, let c): SourceView(id: id, chunk: c).id("\(id)-\(c ?? 0)")

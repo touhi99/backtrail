@@ -57,6 +57,7 @@ enum API {
 enum Page: Hashable {
     case home
     case graph
+    case trail
     case thread(String)
     case search(String)
     case source(Int, chunk: Int?)

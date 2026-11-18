@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Snapshot mode: BACKTRAIL_SNAPSHOT=/path.png renders the window offscreen to a PNG and exits.
-/// BACKTRAIL_PAGE=home or thread:<name> picks the page; BACKTRAIL_SIZE=1280x860 sets the size.
+/// BACKTRAIL_PAGE=home, graph, trail or thread:<name> picks the page; BACKTRAIL_SIZE=1280x860 sets the size.
 enum Snapshot {
     static let env = ProcessInfo.processInfo.environment
     static var path: String? { env["BACKTRAIL_SNAPSHOT"] }
@@ -10,6 +10,7 @@ enum Snapshot {
     static func page() -> Page {
         let p = env["BACKTRAIL_PAGE"] ?? "home"
         if p == "graph" { return .graph }
+        if p == "trail" { return .trail }
         if p.hasPrefix("thread:") { return .thread(String(p.dropFirst(7))) }
         if p.hasPrefix("search:") { return .search(String(p.dropFirst(7))) }
         if p.hasPrefix("source:") {

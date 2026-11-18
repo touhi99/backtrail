@@ -13,17 +13,22 @@ struct TrailLane: Identifiable {
     var id: String { name }
 }
 
-/// The lanes the web app's Home shows: threads with a session in the last `days` days, the `limit` most
-/// recently worked on first. Mirrors `useTrail(14)` and `TrailCard` in app/src/pages/Trail.tsx.
-func trailLanes(_ data: J?, days: Int = 14, limit: Int = 8) -> (lanes: [TrailLane], total: Int, days: [String]) {
-    let cal = Calendar(identifier: .gregorian)
+/// Lanes for threads with a session, most recently worked on first. With `days`, only the last `days` days;
+/// without, the whole history. Mirrors `useTrail` in app/src/pages/Trail.tsx.
+func trailLanes(_ data: J?, days: Int? = 14) -> (lanes: [TrailLane], days: [String]) {
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(identifier: "UTC")!   // day strings are UTC midnights; a local calendar drifts at DST
     let f = DateFormatter()
     f.calendar = cal
+    f.timeZone = TimeZone(identifier: "UTC")
     f.locale = Locale(identifier: "en_US_POSIX")
     f.dateFormat = "yyyy-MM-dd"
-    let today = cal.startOfDay(for: .now)
-    let axis = (0..<days).reversed().compactMap { cal.date(byAdding: .day, value: -$0, to: today) }.map { f.string(from: $0) }
-    guard let data, let from = axis.first else { return ([], 0, axis) }
+    let local = DateFormatter()
+    local.locale = f.locale
+    local.dateFormat = f.dateFormat
+    let today = local.string(from: .now)
+    guard let data, let end = f.date(from: today) else { return ([], []) }
+    var from = days.flatMap { cal.date(byAdding: .day, value: -($0 - 1), to: end) }.map { f.string(from: $0) } ?? ""
 
     var per: [String: TrailLane] = [:]
     for t in data["threads"].arr {
@@ -31,7 +36,7 @@ func trailLanes(_ data: J?, days: Int = 14, limit: Int = 8) -> (lanes: [TrailLan
     }
     for s in data["sources"].arr {
         let d = s["d"].str
-        guard d >= from, per[s["thread"].str] != nil else { continue }
+        guard d > "2000", d >= from, per[s["thread"].str] != nil else { continue }
         if s["kind"].str == "session" { per[s["thread"].str]!.sessions[d, default: []].append(s) }
         else { per[s["thread"].str]!.made[d, default: []].append(s) }
     }
@@ -41,39 +46,41 @@ func trailLanes(_ data: J?, days: Int = 14, limit: Int = 8) -> (lanes: [TrailLan
         per[i["thread"].str]!.done[d, default: []].append(i)
     }
     var lanes = per.values.filter { !$0.sessions.isEmpty }
+    if from.isEmpty { from = lanes.flatMap { Array($0.sessions.keys) + Array($0.made.keys) }.min() ?? today }
     for k in lanes.indices {
+        // items dated before the axis start sit on its first day
+        for (d, v) in lanes[k].done where d < from { lanes[k].done[d] = nil; lanes[k].done[from, default: []] += v }
         let ds = (Array(lanes[k].sessions.keys) + Array(lanes[k].made.keys)).sorted()
         lanes[k].first = ds.first ?? from
         lanes[k].last = ds.last ?? from
     }
-    lanes.sort { $0.last == $1.last ? $0.name < $1.name : $0.last > $1.last }
-    return (Array(lanes.prefix(limit)), lanes.count, axis)
+    lanes.sort { $0.last == $1.last ? $0.first > $1.first : $0.last > $1.last }
+    var axis: [String] = []
+    var d = f.date(from: from) ?? end
+    while d <= end { axis.append(f.string(from: d)); d = cal.date(byAdding: .day, value: 1, to: d)! }
+    return (lanes, axis)
 }
 
 /// Home's "Last two weeks" card: one lane per recently worked thread, as on the web Home.
 struct TrailCard: View {
     @EnvironmentObject var store: Store
-    @Environment(\.openURL) private var openURL
     @State private var data: J? = API.cached("/api/trail")
-    @State private var hover: String?
-
-    private let rowH: CGFloat = 46, labelW: CGFloat = 180, stateW: CGFloat = 128, top: CGFloat = 30
 
     var body: some View {
-        let m = trailLanes(data)
+        let all = trailLanes(data)
+        let lanes = Array(all.lanes.prefix(8))
         Group {
-            if !m.lanes.isEmpty {
+            if !lanes.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .firstTextBaseline) {
                         Text("Last two weeks").font(.system(size: 15, weight: .semibold))
-                        Text("\(m.total) threads worked on\(m.total > m.lanes.count ? ", the \(m.lanes.count) most recent shown" : "")")
+                        Text("\(all.lanes.count) threads worked on\(all.lanes.count > lanes.count ? ", the \(lanes.count) most recent shown" : "")")
                             .font(.system(size: 12.5)).foregroundStyle(Color.mut)
                         Spacer()
-                        Button("Full trail") { openURL(API.web("/graph?view=trail")) }
+                        Button("Full trail") { store.go(.trail) }
                             .buttonStyle(.plain).font(.system(size: 12.5, weight: .medium)).foregroundStyle(Color.accent)
                     }
-                    GeometryReader { geo in lanes(m, width: max(640, geo.size.width)) }
-                        .frame(height: top + CGFloat(m.lanes.count) * rowH + 8)
+                    TrailChart(lanes: lanes, days: all.days, labelW: 180)
                 }
                 .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 10)
                 .panel(radius: 16)
@@ -83,14 +90,33 @@ struct TrailCard: View {
         }
         .task(id: store.tick) { if let d = try? await API.get("/api/trail") { data = d } }
     }
+}
 
-    private func lanes(_ m: (lanes: [TrailLane], total: Int, days: [String]), width w: CGFloat) -> some View {
+/// One row per thread over the given days: a span from first to last activity, a dot per session day,
+/// a diamond for things made and a check for items done or decided. Tap a row to open the thread.
+struct TrailChart: View {
+    @EnvironmentObject var store: Store
+    let lanes: [TrailLane]
+    let days: [String]
+    var labelW: CGFloat = 210
+    @State private var hover: String?
+
+    private let rowH: CGFloat = 46, stateW: CGFloat = 128, top: CGFloat = 30
+
+    var body: some View {
+        GeometryReader { geo in chart(width: max(640, geo.size.width)) }
+            .frame(height: top + CGFloat(lanes.count) * rowH + 8)
+    }
+
+    private func chart(width w: CGFloat) -> some View {
+        let m = (lanes: lanes, days: days)
         let dw = (w - labelW - stateW) / CGFloat(m.days.count)
+        let tick = m.days.count > 21 ? 7 : 1
         let col = Dictionary(uniqueKeysWithValues: m.days.enumerated().map { ($1, $0) })
         func x(_ d: String) -> CGFloat { labelW + (CGFloat(col[d] ?? 0) + 0.5) * dw }
         return ZStack(alignment: .topLeading) {
             // day grid with labels
-            ForEach(Array(m.days.enumerated()), id: \.offset) { k, d in
+            ForEach(Array(m.days.enumerated()).filter { $0.offset % tick == 0 }, id: \.offset) { k, d in
                 Rectangle().fill(Color(hex: 0x222226)).frame(width: 1, height: CGFloat(m.lanes.count) * rowH + 16)
                     .position(x: labelW + CGFloat(k) * dw, y: top - 8 + (CGFloat(m.lanes.count) * rowH + 16) / 2)
                 Text(dayFmt(d)).font(.system(size: 11)).foregroundStyle(Color(hex: 0x6b6b75)).fixedSize()
@@ -145,5 +171,75 @@ struct TrailCard: View {
     private func tip(_ name: String, _ d: String, _ s: [J], _ made: [J], _ done: [J]) -> String {
         ([ "\(name), \(dayFmt(d))" ] + s.map { "• " + $0["title"].str } + made.map { "◆ Made: " + $0["title"].str } + done.map { "✓ " + $0["title"].str })
             .joined(separator: "\n")
+    }
+}
+
+/// Every thread on one timeline, as on the web Graph's Trail tab. Sorted by latest work or by start,
+/// and filtered to one state by clicking its tile.
+struct TrailPage: View {
+    @EnvironmentObject var store: Store
+    @State private var data: J? = API.cached("/api/trail")
+    @State private var latest = true
+    @State private var only: String?
+
+    private static let order = ["built", "moving", "parked", "dropped"]
+
+    var body: some View {
+        let all = trailLanes(data, days: nil)
+        var lanes = all.lanes.filter { only == nil || $0.state == only }
+        if !latest { lanes.sort { $0.first == $1.first ? $0.name < $1.name : $0.first < $1.first } }
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Every thread on one timeline, how each one ended, and what came out of it").font(.system(size: 13)).foregroundStyle(Color.mut)
+                    Text("Trail").font(.system(size: 28, weight: .semibold)).tracking(-0.4)
+                }
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(Self.order, id: \.self) { st in tile(st, all.lanes.filter { $0.state == st }) }
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        Text("Trail").font(.system(size: 15, weight: .semibold))
+                        Text("\(only.map { "\(lanes.count) \(STATE_NAME[$0]?.lowercased() ?? $0), " } ?? "")click a thread to open its story")
+                            .font(.system(size: 12.5)).foregroundStyle(Color.mut)
+                        Spacer()
+                        seg("Latest work", on: latest) { latest = true }
+                        seg("First started", on: !latest) { latest = false }
+                    }
+                    TrailChart(lanes: lanes, days: all.days)
+                }
+                .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 10)
+                .panel(radius: 16)
+            }
+            .padding(.horizontal, 32).padding(.top, 28).padding(.bottom, 32)
+        }
+        .background(Color.bg)
+        .task(id: store.tick) { if let d = try? await API.get("/api/trail") { data = d } }
+    }
+
+    private func tile(_ st: String, _ g: [TrailLane]) -> some View {
+        let c = STATE_COLOR[st] ?? .mut, on = only == st
+        return Button { only = on ? nil : st } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(g.count)").font(.system(size: 34, weight: .semibold)).foregroundStyle(c)
+                Text(STATE_NAME[st] ?? st).font(.system(size: 13)).foregroundStyle(Color.soft)
+                Text(g.map(\.name).joined(separator: ", ")).font(.system(size: 12)).foregroundStyle(Color.mut).lineLimit(3)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading).padding(16)
+            .panel(radius: 14, border: on ? c : .line)
+            .opacity(only != nil && !on ? 0.5 : 1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).help(on ? "Show all threads" : "Show only \(STATE_NAME[st] ?? st)")
+    }
+
+    private func seg(_ label: String, on: Bool, _ act: @escaping () -> Void) -> some View {
+        Button(action: act) {
+            Text(label).font(.system(size: 12, weight: .medium)).foregroundStyle(on ? Color.accent : Color.soft)
+                .padding(.horizontal, 10).frame(height: 26)
+                .background(Capsule().fill(on ? Color.accent.opacity(0.15) : Color.white.opacity(0.04)))
+                .overlay(Capsule().strokeBorder(Color.line, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 }
