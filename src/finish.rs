@@ -1,7 +1,7 @@
 //! Closing open steps from evidence. A model reads a session (at session end) or the passages most like a step (the
 //! backlog sweep) and names a step it saw finished, with a quote. `finish` checks the quote against the source and
-//! decides the state: a quote from an owner turn closes the step; a quote from an assistant turn closes it when a
-//! second model confirmed it (`--verified`), and otherwise marks it "Built, check it". Commit subjects were tried as
+//! closes it only when a second model confirmed that the passage shows this step finished (`--verified`). Unconfirmed,
+//! nothing changes: in a test run the first model named a step for an unrelated line. Commit subjects were tried as
 //! corroboration and dropped: on a busy thread some commit always lands within a day, and their embeddings score
 //! unrelated commits above the right one.
 use crate::db::{Passage, find_quote, logw, rows, s, source_id};
@@ -58,22 +58,20 @@ pub fn finish(c: &Connection, id: &str, source: &str, quote: &str, verified: boo
         return Err(format!("{id}: quote not found in {source}"));
     };
     let title: String = c.query_row("SELECT ifnull(title,'') FROM sources WHERE id=?1", params![sid], |r| r.get(0)).unwrap_or_default();
-    let close = speaker == "owner" || verified;
+    if !verified {
+        return Err(format!("{id}: not confirmed by a second model; left open"));
+    }
     let proof = format!(
         "\"{}\" ({}, {}){}",
         clip(quote, 180),
         if speaker == "owner" { "you" } else { "Claude" },
         clip(&title, 60),
-        if speaker != "owner" && verified { "; confirmed by a second model" } else { "" }
+        "; confirmed by a second model"
     );
-    let verdict = if close { "done" } else { "built, check it" };
+    let verdict = "done";
     if !dry {
-        if close {
-            items::done(c, id, "evidence", &clip(&proof, 300))?;
-        } else {
-            items::built(c, id, &proof, None)?;
-        }
-        logw(c, "check", "finish", id, &format!("{verdict}: {source}"));
+        items::done(c, id, "evidence", &clip(&proof, 300))?;
+        logw(c, "check", "finish", id, &format!("done: {source}"));
     }
     Ok(format!("{verdict}: [{}] {}  <-  {proof}", s(step, "thread"), s(step, "title")))
 }

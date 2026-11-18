@@ -30,11 +30,11 @@ Commands run as `bt <command>`.
 | `embed [--limit N]` | Embed passages that have no vector yet (needs the embedding server; see the `embeddings` key) |
 | `show <ref>` | Print a source's passages |
 | `check [--pairs]` | Report lost quotes, session files that were never indexed, orphan threads, stale work; `--pairs` lists candidate contradictions |
-| `match` | Mark open steps that a later commit seems to complete as `looks done?` (word-overlap heuristic, unproven) |
+| `match` | Mark open steps that a later commit seems to complete as `looks done?` (word-overlap heuristic; it marks unrelated steps that share a phrase, so it runs only when called) |
 | `pending [--days N]` | List recent sessions that no item cites |
 | `artifacts [--manifest list.json]` | Record publish dates and report missing or stale snapshots |
 | `extract-input <ref>` | Print one session for a model: the thread's existing items, the open steps of every thread with their ids, the entity names, and the turns |
-| `finish <step> --source REF --quote Q [--verified] [--dry]` | Close an open step from a quote found in the source. An owner quote closes it; an assistant quote closes it with `--verified` (a second model agreed) and otherwise marks it "Built, check it". `--dry` prints the verdict only |
+| `finish <step> --source REF --quote Q [--verified] [--dry]` | Close an open step from a quote found in the source. It closes only with `--verified` (a second model agreed the passage shows the step finished); without, it is refused. `--dry` prints the verdict only |
 | `finish-input <step>` | Print a step and the ten passages written after it that are most like it, for `skill/finish.sh` |
 | `finish-evidence <step> --source REF --quote Q` | Print a step and the passage holding the quote, for the confirming model |
 | `finish-queue` | List steps open for more than a day |

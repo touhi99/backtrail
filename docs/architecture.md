@@ -70,9 +70,9 @@ Hooks (diagram: README, "How it works"):
   (`skill/extract.sh`, one small-model call per session) and resolution (`skill/resolve.sh`, one call per proposed
   item). `BACKTRAIL_COMPILE_ON_END=0` skips both.
 - Finished steps: the extraction packet lists every open step with its id, and the model names the ones the session
-  finished, with a quote. `skill/close-step.sh` runs `finish`: the quote must be in the session; a quote from the owner
-  closes the step, and one from Claude closes it only when a second model (`BACKTRAIL_VERIFY_MODEL`, default opus)
-  confirms the passage shows that step finished, otherwise it becomes "Built, check it". `skill/finish.sh [--dry]` runs
+  finished, with a quote. `skill/close-step.sh` runs `finish`: the quote must be in the session, and a second model
+  (`BACKTRAIL_VERIFY_MODEL`, default opus) must confirm the passage shows that step finished before it closes;
+  otherwise nothing changes. `bt match` (shared phrases between step and commit subject) runs only when called. `skill/finish.sh [--dry]` runs
   the same check over steps open for more than a day, using the passages most like each step. The sessions that finish
   a step are often filed under another thread, so the list covers all threads.
 
