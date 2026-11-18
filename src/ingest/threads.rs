@@ -21,7 +21,8 @@ fn case_insensitive(pattern: &str) -> Regex {
     .unwrap()
 }
 
-/// Create the configured threads and `Unsorted`. An existing thread keeps its state and summary.
+/// Create the configured threads, a project entity for each build or plan thread, and `Unsorted`. An existing
+/// thread keeps its state and summary.
 pub fn seed(c: &Connection) {
     let ts = now();
     for t in &cfg().threads {
@@ -36,6 +37,11 @@ pub fn seed(c: &Connection) {
                 params![t.name, t.kind],
             )
             .ok();
+        }
+        // A project thread needs its project entity: the extractor and resolver file an item under the thread of
+        // its main entity, so without one the items stay on the session's thread.
+        if t.kind == "build" || t.kind == "plan" {
+            crate::kg::entities::ensure(c, &t.name, "project", &ts);
         }
     }
     c.execute(
