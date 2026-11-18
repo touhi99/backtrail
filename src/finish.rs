@@ -47,7 +47,7 @@ pub fn finish(c: &Connection, id: &str, source: &str, quote: &str, verified: boo
         &[&id],
     );
     let Some(step) = step.first() else { return Err(format!("{id}: no such step")) };
-    if !["open", "doing"].contains(&s(step, "state")) {
+    if !["open", "doing", "proposed"].contains(&s(step, "state")) {
         return Err(format!("{id}: not open (state {})", s(step, "state")));
     }
     if quote.trim().len() < 12 {
@@ -76,11 +76,11 @@ pub fn finish(c: &Connection, id: &str, source: &str, quote: &str, verified: boo
     Ok(format!("{verdict}: [{}] {}  <-  {proof}", s(step, "thread"), s(step, "title")))
 }
 
-/// Steps the backlog sweep looks at: open for more than a day.
+/// Steps the backlog sweep looks at: open, in progress or suggested, filed more than a day ago.
 pub fn queue(c: &Connection) -> Vec<String> {
     crate::db::strings(
         c,
-        "SELECT id FROM claims WHERE type='step' AND state IN ('open','doing') AND julianday('now') - julianday(created) > 1
+        "SELECT id FROM claims WHERE type='step' AND state IN ('open','doing','proposed') AND julianday('now') - julianday(created) > 1
          ORDER BY created",
         &[],
     )
