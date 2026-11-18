@@ -25,16 +25,20 @@ Detail: `docs/architecture.md`, `docs/reference.md`.
 
 ## Install
 
-Requires Rust 1.85+, Node.js, Ollama (`ollama pull embeddinggemma-2:270m`) and the `claude` CLI.
+Requires Rust 1.85+, Node.js, Ollama (`ollama pull embeddinggemma-2:270m`) and the `claude` CLI. The Mac app needs
+Swift (Xcode command line tools).
 
 ```
 ./install.sh
-bt serve
+bt hooks install
+bt build
 ```
 
-`bt serve` starts the app at `http://127.0.0.1:8799`. `BACKTRAIL_HOME` sets the data directory (default
-`~/Library/Application Support/Backtrail` on macOS, `~/.local/share/backtrail` elsewhere). First run with existing
-sessions: `docs/reference.md`.
+`install.sh` builds the binary and links it as `bt`. On macOS it also installs the login agent `dev.backtrail.serve`,
+which runs the server at `http://127.0.0.1:8799` from login, and builds `mac/Backtrail.app`. `BT_NO_AGENT=1` and
+`BT_NO_MAC_APP=1` skip those; elsewhere, run `bt serve`. `bt build` indexes the existing sessions and notes (first run:
+`docs/reference.md`). `BACKTRAIL_HOME` sets the data directory (default `~/Library/Application Support/Backtrail` on
+macOS, `~/.local/share/backtrail` elsewhere).
 
 ## Usage
 
@@ -43,8 +47,8 @@ bt hooks install     # index each session at its end, print a brief at its start
 bt search <words>    # search with cited sources
 ```
 
-`mac/build.sh` builds `mac/Backtrail.app`, a SwiftUI client for the same API: Home, project pages, Search, sources and
-the Graph. It needs `bt serve` running.
+`mac/Backtrail.app` is a SwiftUI client for the same API: Home, project pages, Search, sources and the Graph. Rebuild
+it with `mac/build.sh`.
 
 Claude runs the other commands (`brief`, `answer`, `retire`, `kg`) from the hook and `skill/SKILL.md`. List:
 `docs/reference.md`.
