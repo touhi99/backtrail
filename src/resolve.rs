@@ -408,7 +408,26 @@ pub fn expire(c: &Connection) -> usize {
         .ok();
         logw(c, "resolver", "expire", id, "valid_to passed");
     }
-    ids.len() + park_stale(c)
+    ids.len() + park_stale(c) + park_closed_threads(c)
+}
+
+/// Claude's unconfirmed proposals on a thread that is dropped or parked leave every list the same way: the project
+/// is not being worked on, so its suggestions are not to-dos. `unresolve` brings one back; owner items are kept.
+fn park_closed_threads(c: &Connection) -> usize {
+    let rows = crate::db::rows(
+        c,
+        "SELECT c.id, t.state FROM claims c JOIN threads t ON t.name=c.thread
+          WHERE c.origin!='owner' AND c.type IN ('decision','step','question') AND c.state='proposed'
+            AND t.state IN ('dropped','parked')",
+        &[],
+    );
+    for r in &rows {
+        let (id, st) = (crate::db::s(r, "id"), crate::db::s(r, "state"));
+        let why = format!("parked: project {st}");
+        c.execute("UPDATE claims SET state='superseded', answer=?2, updated=?3 WHERE id=?1", params![id, why, now()]).ok();
+        logw(c, "resolver", "expire", id, &why);
+    }
+    rows.len()
 }
 
 /// Days after which Claude's own proposals and open questions are parked if nobody has settled them.
