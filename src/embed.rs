@@ -50,7 +50,7 @@ fn call(texts: &[String], prefix: &str, secs: u64) -> Result<Vec<Vec<f32>>, Stri
         .into();
     let mut resp = agent
         .post(&format!("{}/api/embed", e.url))
-        .send_json(json!({"model": e.model, "input": input}))
+        .send_json(json!({"model": e.model, "input": input, "keep_alive": "30m"}))
         .map_err(|x| format!("{x}"))?;
     let v: Value = resp.body_mut().read_json().map_err(|x| format!("{x}"))?;
     let arr = v["embeddings"].as_array().ok_or("no embeddings in reply")?;

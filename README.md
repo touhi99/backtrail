@@ -43,6 +43,9 @@ bt hooks install     # index each session at its end, print a brief at its start
 bt search <words>    # search with cited sources
 ```
 
+`mac/build.sh` builds `mac/Backtrail.app`, a SwiftUI client for the same API: Home, project pages, Search, sources and
+the Graph. It needs `bt serve` running.
+
 Claude runs the other commands (`brief`, `answer`, `retire`, `kg`) from the hook and `skill/SKILL.md`. List:
 `docs/reference.md`.
 
