@@ -1,8 +1,9 @@
 # Backtrail
 
-Backtrail reads Claude Code sessions and Markdown notes into one SQLite file and records the decisions, steps and
-questions in them. Each record links to its source with the exact quote. A local web app and a native Mac app show the
-work by project, and a session-start hook prints a brief of what was already decided.
+Backtrail keeps the trail of work done with Claude Code. Sessions and notes are archived in one SQLite file; the
+decisions, steps and open questions in them are filed by project and linked in a graph of the things they mention, each
+with the line it came from. Claude reads the trail when a session starts, and the web and Mac apps show it by project and
+over time.
 
 | | |
 | --- | --- |
