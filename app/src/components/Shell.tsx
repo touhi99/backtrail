@@ -1,8 +1,17 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { House, ChevronRight, ListChecks, Plus, ScrollText, Search, Share2, Waypoints } from 'lucide-react'
+import { House, ChevronRight, ListChecks, Plus, ScrollText, Search, Share2 } from 'lucide-react'
 import { STATE, useApi } from '@/lib/api'
 import Capture from '@/components/Capture'
+
+/** The Backtrail mark: two points joined by a winding trail. The Mac app draws the same path. */
+function TrailMark({ size = 17, className = '' }: { size?: number; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <circle cx="5" cy="5" r="2.5" /><path d="M7.5 5H13a3.5 3.5 0 0 1 0 7h-2a3.5 3.5 0 0 0 0 7h5.5" /><circle cx="19" cy="19" r="2.5" />
+    </svg>
+  )
+}
 
 type Ctx = { today: any; reload: () => void; capture: (thread?: string) => void }
 const ShellCtx = createContext<Ctx>({ today: null, reload: () => {}, capture: () => {} })
@@ -37,7 +46,7 @@ export default function Shell({ children }: { children: ReactNode }) {
       <div className="flex h-full bg-side">
         <aside className="hidden w-60 shrink-0 flex-col gap-1 overflow-y-auto px-3 py-4 md:flex">
           <Link to="/" className="mb-3 flex items-center gap-2.5 px-2 py-1.5">
-            <span className="grid size-8 place-items-center rounded-lg bg-[#111] shadow-[0_2px_14px_rgba(52,211,153,.4)]"><Waypoints size={17} className="text-accent" /></span>
+            <span className="grid size-8 place-items-center rounded-lg bg-[#111] shadow-[0_2px_14px_rgba(52,211,153,.4)]"><TrailMark size={17} className="text-accent" /></span>
             <span className="text-[15px] font-semibold tracking-tight">Backtrail</span>
           </Link>
           {NAV.map(({ to, label, icon: Icon, end }) => (
