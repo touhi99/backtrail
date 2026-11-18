@@ -5,7 +5,8 @@ Commands are listed in `reference.md`.
 
 ## Overview
 
-One Rust binary, one SQLite file and a web app embedded in the binary. The binary is the only process that writes
+One Rust binary, one SQLite file, a web app embedded in the binary and a SwiftUI Mac app (`mac/`) that reads the same
+JSON API. The binary is the only process that writes
 the database. Sources (session logs, notes, git history, artifact snapshots) are read and never modified.
 
 - The only calls the binary makes go to the embedding server, on by default at `127.0.0.1:11434`. If it does not
@@ -35,6 +36,7 @@ the database. Sources (session logs, notes, git history, artifact snapshots) are
 | `demo.rs` | The demo store. |
 | `src/sql/` | `schema.sql` (tables), `views.sql` (the `item`, `fact`, `thread_stat`, `source_stat` and `entity_stat` read views that pages filter) and `migrate_unify.sql`. Other statements are inline next to the code that runs them. |
 | `app/` | React and Vite web app, built to `app/dist/` and embedded into the binary. |
+| `mac/` | SwiftUI Mac app, a client of the `/api` routes on `127.0.0.1:8799`. Keeps the last answer per route in memory, so a page shows it at once and refreshes. Built by `mac/build.sh`. |
 
 ## Data
 

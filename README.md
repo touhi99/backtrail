@@ -1,8 +1,8 @@
 # Backtrail
 
 Backtrail reads Claude Code sessions and Markdown notes into one SQLite file and records the decisions, steps and
-questions in them. Each record links to its source with the exact quote. A local web app shows the work by project, and
-a session-start hook prints a brief of what was already decided.
+questions in them. Each record links to its source with the exact quote. A local web app and a native Mac app show the
+work by project, and a session-start hook prints a brief of what was already decided.
 
 | | |
 | --- | --- |
@@ -43,8 +43,8 @@ macOS, `~/.local/share/backtrail` elsewhere).
 ## Usage
 
 ```
-bt hooks install     # index each session at its end, print a brief at its start
 bt search <words>    # search with cited sources
+bt brief             # what was decided and what is next, per project
 ```
 
 `mac/Backtrail.app` is a SwiftUI client for the same API: Home, project pages, Search, sources and the Graph. Rebuild
@@ -55,9 +55,15 @@ Claude runs the other commands (`brief`, `answer`, `retire`, `kg`) from the hook
 
 ## Data
 
-Reads Claude Code sessions, note folders and git repositories from `config.json`. Writes the data directory and, on
-`bt hooks install`, `~/.claude/settings.json`. Text goes to a local Ollama server; the `claude` CLI scripts in `skill/`
-send session text to Claude. The database is not encrypted; common token formats are redacted.
+- Reads: Claude Code sessions (`~/.claude/projects`), note folders, git history and artifact snapshots named in
+  `config.json`. Sources are never changed.
+- Writes: the data directory (database, daily backups, logs); `~/.claude/settings.json` on `bt hooks install`;
+  `~/Library/LaunchAgents/dev.backtrail.serve.plist` on `install.sh` (macOS).
+- Network: the binary sends passage text to the embedding server (`127.0.0.1:11434` by default) and nothing else. The
+  server listens on `127.0.0.1:8799` only. The Mac app talks only to that server; links it cannot show open the same
+  server in the browser. The `skill/` scripts send session text to Claude through the `claude` CLI, on the logged-in
+  account: the SessionEnd hook runs them unless `BACKTRAIL_COMPILE_ON_END=0`.
+- The database is not encrypted; common token formats are redacted.
 
 ## Limits
 
