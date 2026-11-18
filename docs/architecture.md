@@ -6,11 +6,10 @@ Commands are listed in `reference.md`.
 ## Overview
 
 One Rust binary, one SQLite file, a web app embedded in the binary and a SwiftUI Mac app (`mac/`) that reads the same
-JSON API. The binary is the only process that writes
-the database. Sources (session logs, notes, git history, artifact snapshots) are read and never modified.
+JSON API. The binary writes the database; sources (session logs, notes, git history, artifact snapshots) are read.
 
-- The only calls the binary makes go to the embedding server, on by default at `127.0.0.1:11434`. If it does not
-  answer, search is keyword only. `"embeddings": false` in `config.json` turns it off.
+- The binary calls the embedding server, on by default at `127.0.0.1:11434`. When it does not answer, search is
+  keyword only. `"embeddings": false` in `config.json` turns it off.
 - The server listens on `127.0.0.1` and answers `403` to a request whose `Host` or `Origin` header names another
   machine, so a page on another site cannot read or write the store.
 - Facts (decisions, steps, questions, claims) are produced by Claude Code sessions or `skill/extract.sh`, and written

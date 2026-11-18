@@ -12,14 +12,14 @@ work by project, and a session-start hook prints a brief of what was already dec
 
 ![Backend](docs/architecture-backend.svg)
 
-- Each working directory becomes a thread. Sessions and notes are read, never changed.
+- Each working directory becomes a thread.
 - Decisions, steps and questions are proposed from sessions. A proposal is rejected when its quote is not in the source.
 - A decision is settled when the owner typed it, accepts it in the app, or it comes from a note. Otherwise it stays proposed.
 - Unconfirmed proposals and open questions are parked after 14 days.
 - The knowledge graph is built from those records. Entities are named in a dictionary (`bt kg entity add`); each
   claim is linked to the entities its text names, and relations between threads come from `skill/extract.sh` or
   `bt relate`. Each claim keeps its quote and source. `bt kg lint` lists probable duplicates.
-- The binary calls no model. The model passes are scripts in `skill/`.
+- Extraction and resolution are scripts in `skill/` that call the `claude` CLI.
 
 Detail: `docs/architecture.md`, `docs/reference.md`.
 
@@ -56,15 +56,14 @@ Claude runs the other commands (`brief`, `answer`, `retire`, `kg`) from the hook
 ## Data
 
 - Reads: Claude Code sessions (`~/.claude/projects`), note folders, git history and artifact snapshots named in
-  `config.json`. Sources are never changed.
+  `config.json`.
 - Writes: the data directory (database, daily backups, logs); `~/.claude/settings.json` on `bt hooks install`;
   `~/Library/LaunchAgents/dev.backtrail.serve.plist` on `install.sh` (macOS).
-- Network: the binary sends passage text to the embedding server (`127.0.0.1:11434` by default) and nothing else. The
-  server listens on `127.0.0.1:8799` only. The Mac app talks only to that server; links it cannot show open the same
-  server in the browser. The `skill/` scripts send session text to Claude through the `claude` CLI, on the logged-in
-  account: the SessionEnd hook runs them unless `BACKTRAIL_COMPILE_ON_END=0`.
-- Storage: the database is readable by its owner only (file `0600`, folder `0700`) and not encrypted, the same as the
-  session files it reads. Common token formats are redacted before storing.
+- Network: the server listens on `127.0.0.1:8799`; the web app and the Mac app use it. The binary sends passage text to
+  the embedding server (`127.0.0.1:11434` by default). The `skill/` scripts send session text to Claude through the
+  `claude` CLI on the logged-in account; the SessionEnd hook runs them unless `BACKTRAIL_COMPILE_ON_END=0`.
+- Storage: the database file is `0600` in a `0700` folder and is not encrypted. Common token formats are redacted
+  before storing.
 
 ## Limits
 
