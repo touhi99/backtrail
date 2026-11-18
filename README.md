@@ -1,9 +1,8 @@
 # Backtrail
 
-Backtrail keeps the trail of work done with Claude Code. Sessions and notes are archived in one SQLite file; the
-decisions, steps and open questions in them are filed by project and linked in a graph of the things they mention, each
-with the line it came from. Claude reads the trail when a session starts, and the web and Mac apps show it by project and
-over time.
+Backtrail keeps the trail of work done with Claude Code. Sessions and notes are archived in one SQLite file, and the
+decisions, steps and open questions in them are filed by project, each with the line it came from. Claude reads the
+trail when a session starts; a web app and a Mac app show it by project, over time and as a graph.
 
 | | |
 | --- | --- |
@@ -11,24 +10,20 @@ over time.
 
 ## How it works
 
-![Backend](docs/architecture-backend.svg)
+- A session is read when it ends. Each item is filed with a verbatim quote, checked against the source.
+- A decision is settled when the user typed it, accepts it in an app, or it comes from a note.
+- A step closes when a session shows it finished and a second model agrees.
+- Unconfirmed items are parked after 14 days, or when their project is built, dropped or parked.
+- Things the work mentions (projects, tools, models) form a graph across projects.
 
-- Each working directory becomes a thread.
-- Decisions, steps and questions are proposed from sessions. A proposal is rejected when its quote is not in the source.
-- A decision is settled when the owner typed it, accepts it in the app, or it comes from a note. Otherwise it stays proposed.
-- Unconfirmed proposals and open questions are parked after 14 days.
-- A step closes when a session shows it finished, with the quote, and a second model agrees the quote is about that step.
-- The knowledge graph is built from those records. Entities are named in a dictionary (`bt kg entity add`); each
-  claim is linked to the entities its text names, and relations between threads come from `skill/extract.sh` or
-  `bt relate`. Each claim keeps its quote and source. `bt kg lint` lists probable duplicates.
-- Extraction and resolution are scripts in `skill/` that call the `claude` CLI.
+Detail: [`docs/architecture.md`](docs/architecture.md).
 
-Detail: `docs/architecture.md`, `docs/reference.md`.
+## Requirements
+
+Rust 1.85+, Node.js and the `claude` CLI. Optional: Ollama (`embeddinggemma-2:270m`) for search by meaning; Swift
+(Xcode command line tools) for the Mac app.
 
 ## Install
-
-Requires Rust 1.85+, Node.js, Ollama (`ollama pull embeddinggemma-2:270m`) and the `claude` CLI. The Mac app needs
-Swift (Xcode command line tools).
 
 ```
 ./install.sh
@@ -36,40 +31,24 @@ bt hooks install
 bt build
 ```
 
-`install.sh` builds the binary and links it as `bt`. On macOS it also installs the login agent `dev.backtrail.serve`,
-which runs the server at `http://127.0.0.1:8799` from login, and builds the optional Mac app `mac/Backtrail.app`. `BT_NO_AGENT=1` and
-`BT_NO_MAC_APP=1` skip those; elsewhere, run `bt serve`. `bt build` indexes the existing sessions and notes (first run:
-`docs/reference.md`). `BACKTRAIL_HOME` sets the data directory (default `~/Library/Application Support/Backtrail` on
-macOS, `~/.local/share/backtrail` elsewhere).
+On macOS, `install.sh` also installs a login agent that runs the server and builds the Mac app; elsewhere, run
+`bt serve`. Options and first-run notes: [`docs/reference.md`](docs/reference.md).
 
 ## Usage
 
-```
-bt search <words>    # search with cited sources
-bt brief             # what was decided and what is next, per project
-```
-
-`mac/Backtrail.app` is a SwiftUI client for the same API: Home, project pages, Search, sources and the Graph. Rebuild
-it with `mac/build.sh`.
-
-Claude runs the other commands (`brief`, `answer`, `retire`, `kg`) from the hook and `skill/SKILL.md`. List:
-`docs/reference.md`.
+- Web app: `http://127.0.0.1:8799`. Mac app: `mac/Backtrail.app`.
+- `bt search <words>` searches with cited sources; `bt brief` prints what was decided and what is next.
+- Full command list: [`docs/reference.md`](docs/reference.md).
 
 ## Data
 
-- Reads: Claude Code sessions (`~/.claude/projects`), note folders, git history and artifact snapshots named in
-  `config.json`.
-- Writes: the data directory (database, daily backups, logs); `~/.claude/settings.json` on `bt hooks install`;
-  `~/Library/LaunchAgents/dev.backtrail.serve.plist` on `install.sh` (macOS).
-- Network: the server listens on `127.0.0.1:8799`; the web app and the Mac app use it. The binary sends passage text to
-  the embedding server (`127.0.0.1:11434` by default). The `skill/` scripts send session text to Claude through the
-  `claude` CLI on the logged-in account; the SessionEnd hook runs them unless `BACKTRAIL_COMPILE_ON_END=0`.
-- Storage: the database file is `0600` in a `0700` folder and is not encrypted. Common token formats are redacted
-  before storing.
+- Reads: Claude Code sessions (`~/.claude/projects`), and the note folders and git repositories in `config.json`.
+- Writes: the data directory (database, backups, logs), `~/.claude/settings.json` (hooks), and the login agent on macOS.
+- Sends: session text to Claude through the `claude` CLI after each session; passage text to the embedding server
+  (`127.0.0.1:11434`).
 
 ## Limits
 
-- Search compares vectors in memory: a few hundred thousand passages at most.
-- The quote check shows the quote exists, not that the title reads it fairly.
-- Hedged statements can be stored as decisions, and a decision's thread can be wrong.
-- Extraction accuracy is not measured.
+- Search holds vectors in memory: a few hundred thousand passages at most.
+- The quote check shows a quote exists, not that the title reads it fairly.
+- An item's project can be wrong, and extraction accuracy is not measured.

@@ -1,7 +1,8 @@
 # Architecture
 
-Describes the code as built. The overview and session-end diagrams are in the README; the data diagram is below.
-Commands are listed in `reference.md`.
+Describes the code as built. Commands are listed in `reference.md`.
+
+![Backend](architecture-backend.svg)
 
 ## Overview
 
@@ -14,6 +15,9 @@ JSON API. The binary writes the database; sources (session logs, notes, git hist
   machine, so a page on another site cannot read or write the store.
 - Facts (decisions, steps, questions, claims) are produced by Claude Code sessions or `skill/extract.sh`, and written
   back through the binary.
+- The knowledge graph is built from those records. Entities are named in a dictionary (`bt kg entity add`); each claim
+  is linked to the entities its text names, and relations between threads come from `skill/extract.sh` or `bt relate`.
+  `bt kg lint` lists probable duplicates.
 
 ## Modules
 
