@@ -27,7 +27,9 @@ pub fn print_open_steps(c: &Connection, before: &str) {
     if steps.is_empty() {
         return;
     }
-    println!("\nOPEN STEPS (id [thread] title). File a \"finished\" item only for a step these turns show finished:");
+    println!(
+        "\nOPEN STEPS (id [thread] title). File a \"finished\" item only for a step these turns show finished:"
+    );
     for (id, thread, title) in steps {
         println!("- {id} [{thread}] {title}");
     }
@@ -35,31 +37,66 @@ pub fn print_open_steps(c: &Connection, before: &str) {
 
 fn clip(t: &str, n: usize) -> String {
     let t = t.trim().replace('\n', " ");
-    if t.chars().count() <= n { t } else { t.chars().take(n - 1).collect::<String>() + "…" }
+    if t.chars().count() <= n {
+        t
+    } else {
+        format!("{}…", t.chars().take(n - 1).collect::<String>())
+    }
+}
+
+/// Whether a second model confirmed that the passage shows the step finished (`--verified`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Evidence {
+    Confirmed,
+    Unconfirmed,
+}
+
+/// Whether [`finish`] writes the result or only reports it (`--dry`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Run {
+    Apply,
+    Dry,
 }
 
 /// `bt finish <step> --source REF --quote Q [--verified] [--dry]`: what the evidence supports, then (unless dry) the
 /// change.
-pub fn finish(c: &Connection, id: &str, source: &str, quote: &str, verified: bool, dry: bool) -> Result<String, String> {
+pub fn finish(
+    c: &Connection,
+    id: &str,
+    source: &str,
+    quote: &str,
+    evidence: Evidence,
+    run: Run,
+) -> anyhow::Result<String> {
     let step = rows(
         c,
         "SELECT id, ifnull(thread,'') AS thread, title, created, state FROM claims WHERE id=?1 AND type='step'",
         &[&id],
     );
-    let Some(step) = step.first() else { return Err(format!("{id}: no such step")) };
+    let Some(step) = step.first() else {
+        anyhow::bail!("{id}: no such step");
+    };
     if !["open", "doing", "proposed"].contains(&s(step, "state")) {
-        return Err(format!("{id}: not open (state {})", s(step, "state")));
+        anyhow::bail!("{id}: not open (state {})", s(step, "state"));
     }
     if quote.trim().len() < 12 {
-        return Err(format!("{id}: quote too short to check"));
+        anyhow::bail!("{id}: quote too short to check");
     }
-    let Some(sid) = source_id(c, source) else { return Err(format!("{id}: no such source {source}")) };
-    let Some(Passage { speaker, .. }) = find_quote(c, sid, quote) else {
-        return Err(format!("{id}: quote not found in {source}"));
+    let Some(sid) = source_id(c, source) else {
+        anyhow::bail!("{id}: no such source {source}");
     };
-    let title: String = c.query_row("SELECT ifnull(title,'') FROM sources WHERE id=?1", params![sid], |r| r.get(0)).unwrap_or_default();
-    if !verified {
-        return Err(format!("{id}: not confirmed by a second model; left open"));
+    let Some(Passage { speaker, .. }) = find_quote(c, sid, quote) else {
+        anyhow::bail!("{id}: quote not found in {source}");
+    };
+    let title: String = c
+        .query_row(
+            "SELECT ifnull(title,'') FROM sources WHERE id=?1",
+            params![sid],
+            |r| r.get(0),
+        )
+        .unwrap_or_default();
+    if evidence == Evidence::Unconfirmed {
+        anyhow::bail!("{id}: not confirmed by a second model; left open");
     }
     let proof = format!(
         "\"{}\" ({}, {}){}",
@@ -69,11 +106,15 @@ pub fn finish(c: &Connection, id: &str, source: &str, quote: &str, verified: boo
         "; confirmed by a second model"
     );
     let verdict = "done";
-    if !dry {
+    if run == Run::Apply {
         items::done(c, id, "evidence", &clip(&proof, 300))?;
         logw(c, "check", "finish", id, &format!("done: {source}"));
     }
-    Ok(format!("{verdict}: [{}] {}  <-  {proof}", s(step, "thread"), s(step, "title")))
+    Ok(format!(
+        "{verdict}: [{}] {}  <-  {proof}",
+        s(step, "thread"),
+        s(step, "title")
+    ))
 }
 
 /// Steps the backlog sweep looks at: open, in progress or suggested, filed more than a day ago.
@@ -88,12 +129,22 @@ pub fn queue(c: &Connection) -> Vec<String> {
 
 /// `bt finish-input <step>`: the step and the passages written after it that are most like it, for a model to judge.
 pub fn input(c: &Connection, id: &str) {
-    let step = rows(c, "SELECT id, ifnull(thread,'') AS thread, title, ifnull(body,'') AS body, created FROM claims WHERE id=?1 AND type='step'", &[&id]);
+    let step = rows(
+        c,
+        "SELECT id, ifnull(thread,'') AS thread, title, ifnull(body,'') AS body, created FROM claims WHERE id=?1 AND type='step'",
+        &[&id],
+    );
     let Some(step) = step.first() else {
         eprintln!("no such step");
         std::process::exit(1)
     };
-    println!("BACKTRAIL-FINISH\nSTEP {} [{}] {}\nCREATED {}", s(step, "id"), s(step, "thread"), s(step, "title"), &s(step, "created")[..10.min(s(step, "created").len())]);
+    println!(
+        "BACKTRAIL-FINISH\nSTEP {} [{}] {}\nCREATED {}",
+        s(step, "id"),
+        s(step, "thread"),
+        s(step, "title"),
+        &s(step, "created")[..10.min(s(step, "created").len())]
+    );
     if !s(step, "body").is_empty() {
         println!("DETAIL {}", s(step, "body"));
     }
@@ -120,8 +171,18 @@ pub fn input(c: &Connection, id: &str) {
             &[&cid, &created],
         );
         let Some(r) = r.first() else { continue };
-        let who = match s(r, "role") { "user" => "owner", "assistant" => "assistant", _ => s(r, "kind") };
-        println!("\n[{} | {} | {}]\n{}", s(r, "ref"), s(r, "locator"), who, clip(s(r, "text"), 700));
+        let who = match s(r, "role") {
+            "user" => "owner",
+            "assistant" => "assistant",
+            _ => s(r, "kind"),
+        };
+        println!(
+            "\n[{} | {} | {}]\n{}",
+            s(r, "ref"),
+            s(r, "locator"),
+            who,
+            clip(s(r, "text"), 700)
+        );
         shown += 1;
         if shown == 10 {
             break;
@@ -143,17 +204,34 @@ fn fts_words(q: &str) -> String {
 /// `bt finish-evidence <step> --source REF --quote Q`: the step and the whole passage that holds the quote, for the
 /// second model that confirms an assistant's report.
 pub fn evidence(c: &Connection, id: &str, source: &str, quote: &str) {
-    let step = rows(c, "SELECT title, ifnull(body,'') AS body FROM claims WHERE id=?1 AND type='step'", &[&id]);
+    let step = rows(
+        c,
+        "SELECT title, ifnull(body,'') AS body FROM claims WHERE id=?1 AND type='step'",
+        &[&id],
+    );
     let Some(step) = step.first() else {
         eprintln!("no such step");
         std::process::exit(1)
     };
     let passage = source_id(c, source)
         .and_then(|sid| find_quote(c, sid, quote))
-        .and_then(|p| c.query_row("SELECT text FROM chunks WHERE id=?1", params![p.chunk_id], |r| r.get::<_, String>(0)).ok());
+        .and_then(|p| {
+            c.query_row(
+                "SELECT text FROM chunks WHERE id=?1",
+                params![p.chunk_id],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
+        });
     let Some(text) = passage else {
         eprintln!("quote not found");
         std::process::exit(1)
     };
-    println!("STEP {}\nDETAIL {}\n\nQUOTE {}\n\nPASSAGE\n{}", s(step, "title"), s(step, "body"), quote, clip(&text, 3000));
+    println!(
+        "STEP {}\nDETAIL {}\n\nQUOTE {}\n\nPASSAGE\n{}",
+        s(step, "title"),
+        s(step, "body"),
+        quote,
+        clip(&text, 3000)
+    );
 }

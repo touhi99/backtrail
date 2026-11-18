@@ -3,6 +3,7 @@
 use super::{clip, entities};
 use crate::clock::now;
 use crate::db::{find_quote, fxhash, id64, logw, norm, source_id, thread_exists};
+use anyhow::Context;
 use rusqlite::{Connection, params};
 
 /// Relations that can be filed between two threads; each reads "A <kind> B".
@@ -25,39 +26,39 @@ pub struct NewClaim<'a> {
 /// The write rule for a claim: the source exists, the quote is found word for word in one of its passages, and
 /// every entity exists. The speaker and the date come from that passage, never from the caller. Filing the same
 /// entities, type and text again changes nothing. Returns the claim's id.
-pub fn add(c: &Connection, claim: &NewClaim) -> Result<String, String> {
+pub fn add(c: &Connection, claim: &NewClaim<'_>) -> anyhow::Result<String> {
     let relation = claim.kind.starts_with("relation:");
     if !relation && !["state", "rationale"].contains(&claim.kind) {
-        return Err(format!(
+        anyhow::bail!(
             "type must be state, rationale or relation:<kind> (got {})",
             claim.kind
-        ));
+        );
     }
     if claim.text.trim().is_empty() || claim.text.chars().count() > 160 {
-        return Err("text must be 1..160 chars".into());
+        anyhow::bail!("text must be 1..160 chars");
     }
     if claim.body.chars().count() > 320 {
-        return Err("body over 320 chars".into());
+        anyhow::bail!("body over 320 chars");
     }
     if claim.quote.trim().chars().count() < 8 {
-        return Err("quote of at least 8 chars is required".into());
+        anyhow::bail!("quote of at least 8 chars is required");
     }
     if relation && !THREAD_RELATIONS.contains(&&claim.kind["relation:".len()..]) {
-        return Err(format!(
+        anyhow::bail!(
             "relation kind must be one of {} (got '{}')",
             THREAD_RELATIONS.join(", "),
             &claim.kind["relation:".len()..]
-        ));
+        );
     }
     if relation && claim.entities.len() != 2 {
-        return Err("a relation needs two entities".into());
+        anyhow::bail!("a relation needs two entities");
     }
     if claim.entities.is_empty() {
-        return Err("at least one entity is required".into());
+        anyhow::bail!("at least one entity is required");
     }
-    let source =
-        source_id(c, claim.source).ok_or_else(|| format!("source '{}' not found", claim.source))?;
-    let passage = find_quote(c, source, claim.quote).ok_or_else(|| {
+    let source = source_id(c, claim.source)
+        .with_context(|| format!("source '{}' not found", claim.source))?;
+    let passage = find_quote(c, source, claim.quote).with_context(|| {
         format!(
             "quote not found in {}: \"{}\"",
             claim.source,
@@ -68,12 +69,12 @@ pub fn add(c: &Connection, claim: &NewClaim) -> Result<String, String> {
     for name in claim.entities {
         about.push(
             entities::find(c, name)
-                .ok_or_else(|| format!("unknown entity '{name}'"))?
+                .with_context(|| format!("unknown entity '{name}'"))?
                 .0,
         );
     }
     if relation && about[0] == about[1] {
-        return Err("a relation needs two different entities".into());
+        anyhow::bail!("a relation needs two different entities");
     }
     if !relation {
         about.sort();
@@ -116,7 +117,7 @@ pub fn add(c: &Connection, claim: &NewClaim) -> Result<String, String> {
     let id = format!("c-{}", id64(&natural));
     match same_content(&id) {
         Some(true) => return Ok(id),
-        Some(false) => return Err(format!("id {id} is already used by another claim")),
+        Some(false) => anyhow::bail!("id {id} is already used by another claim"),
         None => {}
     }
 
@@ -133,7 +134,7 @@ pub fn add(c: &Connection, claim: &NewClaim) -> Result<String, String> {
             passage.chunk_id, claim.quote, claim.stated, now()
         ],
     )
-    .map_err(|e| e.to_string())?;
+    ?;
     for (i, entity) in about.iter().enumerate() {
         let role = if relation && i == 1 {
             "object"
@@ -151,7 +152,7 @@ fn link(c: &Connection, claim: &str, entity: &str, role: &str) {
         "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role) VALUES(?1,?2,?3)",
         params![claim, entity, role],
     )
-    .unwrap();
+    .expect("write to database");
 }
 
 /// A relation between two projects that the owner states without a quote (`bt link`). These are the only claims
@@ -165,7 +166,7 @@ pub fn owner_relation(c: &Connection, a: &str, b: &str, kind: &str, ts: &str) ->
          VALUES(?1,?2,?3,'settled','owner','owner',?4,?4,?4)",
         params![id, format!("relation:{kind}"), format!("{a} {kind} {b}"), ts],
     )
-    .unwrap();
+    .expect("write to database");
     link(c, &id, &subject, "subject");
     link(c, &id, &object, "object");
     id
@@ -180,25 +181,25 @@ pub fn relate(
     source: &str,
     quote: &str,
     state: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     if !THREAD_RELATIONS.contains(&kind) {
-        return Err(format!(
+        anyhow::bail!(
             "kind must be spun out of, forked from, built on or replaced by (got {kind})"
-        ));
+        );
     }
     if let Some(unknown) = [a, b].into_iter().find(|t| !thread_exists(c, t)) {
-        return Err(format!("unknown thread '{unknown}'"));
+        anyhow::bail!("unknown thread '{unknown}'");
     }
     if a == b {
-        return Err("a relation needs two different threads".into());
+        anyhow::bail!("a relation needs two different threads");
     }
     // Checked here as well as in `add`, so that a refused relation does not leave new entities behind.
-    let found = source_id(c, source).ok_or_else(|| format!("source '{source}' not found"))?;
+    let found = source_id(c, source).with_context(|| format!("source '{source}' not found"))?;
     if quote.trim().len() < 8 {
-        return Err("quote of at least 8 chars from the source is required".into());
+        anyhow::bail!("quote of at least 8 chars from the source is required");
     }
     if find_quote(c, found, quote).is_none() {
-        return Err(format!("quote not found in {source}: \"{quote}\""));
+        anyhow::bail!("quote not found in {source}: \"{quote}\"");
     }
     let ts = now();
     entities::ensure(c, a, "project", &ts);
@@ -226,8 +227,7 @@ pub fn relate(
         c.execute(
             "UPDATE claims SET state=?2, updated=?3 WHERE id=?1",
             params![id, state, now()],
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
     }
     let actor = if state == "proposed" {
         "claude-suggest"
@@ -239,23 +239,23 @@ pub fn relate(
 }
 
 /// Merge a duplicate claim into the one to keep: its entities move over and it is closed as superseded.
-pub fn merge(c: &Connection, keep: &str, duplicate: &str) -> Result<(), String> {
+pub fn merge(c: &Connection, keep: &str, duplicate: &str) -> anyhow::Result<()> {
     let exists =
         |id: &str| crate::db::count(c, "SELECT COUNT(*) FROM claims WHERE id=?1", &[&id]) > 0;
     if keep == duplicate || !exists(keep) || !exists(duplicate) {
-        return Err("both ids must be existing, different claims".into());
+        anyhow::bail!("both ids must be existing, different claims");
     }
     c.execute(
         "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role)
          SELECT ?1, entity_id, role FROM claim_about WHERE claim_id=?2",
         params![keep, duplicate],
     )
-    .unwrap();
+    .expect("write to database");
     c.execute(
         "UPDATE claims SET state='superseded', superseded_by=?1, valid_to=?3 WHERE id=?2",
         params![keep, duplicate, now()],
     )
-    .unwrap();
+    .expect("write to database");
     logw(
         c,
         "owner",

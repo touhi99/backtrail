@@ -1,6 +1,7 @@
 //! Backfill of `check_how` for steps the owner must confirm by hand. The binary lists the steps and records the
 //! text; `skill/howto.sh` pipes each packet to a headless model.
 use crate::db::{logw, rows, s, strings};
+use anyhow::Context;
 use rusqlite::{Connection, params};
 use serde_json::Value;
 
@@ -8,14 +9,21 @@ fn clip(text: &str, max: usize) -> String {
     text.chars().take(max).collect()
 }
 
+/// Whether [`queue`] lists steps that were already sent for a check text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Asked {
+    Skip,
+    Include,
+}
+
 /// Steps waiting on the owner (open, in progress or built) with no check text yet and none ruled out.
-pub fn queue(c: &Connection, limit: usize, again: bool) {
+pub fn queue(c: &Connection, limit: usize, asked: Asked) {
     for id in strings(
         c,
         "SELECT id FROM claims WHERE type='step' AND state IN ('open','doing','looks_done') AND check_how IS NULL
            AND (?2 OR NOT EXISTS (SELECT 1 FROM log l WHERE l.target=claims.id AND l.action='howto-checked'))
          ORDER BY updated DESC LIMIT ?1",
-        &[&(limit as i64), &again],
+        &[&crate::db::sql_int(limit), &(asked == Asked::Include)],
     ) {
         println!("{id}");
     }
@@ -44,26 +52,24 @@ pub fn packet(c: &Connection, id: &str) {
         s(me, "body"),
         s(me, "answer"),
         s(me, "quote"),
-        clip(&s(me, "passage"), 2500)
+        clip(s(me, "passage"), 2500)
     );
 }
 
 /// Apply `{"id", "check"}`. An empty check records that the step needs no hand check, so it is not asked again.
-pub fn apply(c: &Connection, v: &Value) -> Result<String, String> {
-    let id = v["id"].as_str().ok_or("no id")?;
+pub fn apply(c: &Connection, v: &Value) -> anyhow::Result<String> {
+    let id = v["id"].as_str().context("no id")?;
     let check = clip(v["check"].as_str().unwrap_or("").trim(), 300);
     if check.is_empty() {
         logw(c, "howto", "howto-checked", id, "no hand check");
         return Ok("no hand check needed".into());
     }
-    let n = c
-        .execute(
-            "UPDATE claims SET check_how=?2 WHERE id=?1 AND type='step' AND check_how IS NULL",
-            params![id, check],
-        )
-        .map_err(|e| e.to_string())?;
+    let n = c.execute(
+        "UPDATE claims SET check_how=?2 WHERE id=?1 AND type='step' AND check_how IS NULL",
+        params![id, check],
+    )?;
     if n == 0 {
-        return Err("not a step without a check".into());
+        anyhow::bail!("not a step without a check");
     }
     logw(c, "howto", "howto", id, &check);
     Ok(format!("check: {check}"))
@@ -72,7 +78,10 @@ pub fn apply(c: &Connection, v: &Value) -> Result<String, String> {
 pub fn apply_cli(c: &Connection) {
     let mut raw = String::new();
     std::io::Read::read_to_string(&mut std::io::stdin(), &mut raw).ok();
-    match serde_json::from_str::<Value>(&raw).map_err(|e| e.to_string()).and_then(|v| apply(c, &v)) {
+    match serde_json::from_str::<Value>(&raw)
+        .map_err(anyhow::Error::from)
+        .and_then(|v| apply(c, &v))
+    {
         Ok(m) => println!("{m}"),
         Err(e) => {
             eprintln!("rejected: {e}");

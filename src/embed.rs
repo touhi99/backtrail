@@ -3,6 +3,7 @@
 //! session that grows re-embeds only its new passages. Only plain `http://` URLs are supported.
 use crate::config::cfg;
 use crate::db::{id64, logw};
+use anyhow::Context;
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use std::sync::Mutex;
@@ -19,10 +20,10 @@ pub fn enabled() -> bool {
 fn fill_hashes(c: &Connection) {
     let todo: Vec<(i64, String)> = c
         .prepare("SELECT id, text FROM chunks WHERE hash IS NULL")
-        .unwrap()
+        .expect("prepare query")
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
         .collect();
     if todo.is_empty() {
         return;
@@ -38,7 +39,11 @@ fn fill_hashes(c: &Connection) {
     c.execute_batch("COMMIT").ok();
 }
 
-fn call(texts: &[String], prefix: &str, secs: u64) -> Result<Vec<Vec<f32>>, String> {
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "embeddings are stored as f32"
+)]
+fn call(texts: &[String], prefix: &str, secs: u64) -> anyhow::Result<Vec<Vec<f32>>> {
     let e = &cfg().embeddings;
     let input: Vec<String> = texts
         .iter()
@@ -50,12 +55,13 @@ fn call(texts: &[String], prefix: &str, secs: u64) -> Result<Vec<Vec<f32>>, Stri
         .into();
     let mut resp = agent
         .post(&format!("{}/api/embed", e.url))
-        .send_json(json!({"model": e.model, "input": input, "keep_alive": "30m"}))
-        .map_err(|x| format!("{x}"))?;
-    let v: Value = resp.body_mut().read_json().map_err(|x| format!("{x}"))?;
-    let arr = v["embeddings"].as_array().ok_or("no embeddings in reply")?;
+        .send_json(json!({"model": e.model, "input": input, "keep_alive": "30m"}))?;
+    let v: Value = resp.body_mut().read_json()?;
+    let arr = v["embeddings"]
+        .as_array()
+        .context("no embeddings in reply")?;
     if arr.len() != texts.len() {
-        return Err("embedding count mismatch".into());
+        anyhow::bail!("embedding count mismatch");
     }
     Ok(arr
         .iter()
@@ -66,7 +72,7 @@ fn call(texts: &[String], prefix: &str, secs: u64) -> Result<Vec<Vec<f32>>, Stri
                 .unwrap_or_default();
             let n = f.iter().map(|x| x * x).sum::<f32>().sqrt();
             if n > 0.0 {
-                for x in f.iter_mut() {
+                for x in &mut f {
                     *x /= n;
                 }
             }
@@ -79,7 +85,9 @@ fn blob(f: &[f32]) -> Vec<u8> {
     f.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 fn unblob(b: &[u8]) -> Vec<f32> {
-    b.chunks_exact(4)
+    b.as_chunks::<4>()
+        .0
+        .iter()
         .map(|x| f32::from_le_bytes([x[0], x[1], x[2], x[3]]))
         .collect()
 }
@@ -100,9 +108,9 @@ pub fn coverage(c: &Connection) -> (i64, i64) {
 }
 
 /// Embed up to `limit` passages that have no vector yet. Returns (embedded, still pending).
-pub fn run(c: &Connection, limit: usize) -> Result<(usize, i64), String> {
+pub fn run(c: &Connection, limit: usize) -> anyhow::Result<(usize, i64)> {
     if !enabled() {
-        return Err("embeddings are turned off in config.json (\"embeddings\": false)".into());
+        anyhow::bail!("embeddings are turned off in config.json (\"embeddings\": false)");
     }
     let e = &cfg().embeddings;
     fill_hashes(c);
@@ -115,10 +123,10 @@ pub fn run(c: &Connection, limit: usize) -> Result<(usize, i64), String> {
     .ok();
     let todo: Vec<(String, String)> = c
         .prepare("SELECT hash, MIN(text) FROM chunks WHERE hash IS NOT NULL AND hash NOT IN (SELECT hash FROM vec) GROUP BY hash LIMIT ?1")
-        .unwrap()
-        .query_map(params![limit as i64], |r| Ok((r.get(0)?, r.get(1)?)))
-        .unwrap()
-        .flatten()
+        .expect("prepare query")
+        .query_map(params![crate::db::sql_int(limit)], |r| Ok((r.get(0)?, r.get(1)?)))
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
         .collect();
     let mut done = 0;
     for group in todo.chunks(BATCH) {
@@ -175,34 +183,29 @@ static CACHE: Mutex<Cache> = Mutex::new(None);
 
 /// The one vector lookup: the `k` passages closest to `q` (cosine), best first. Brute force over an in-memory copy
 /// that is reloaded when the number of vectors or passages changes. Replace this function to change the index.
-pub fn nearest(c: &Connection, q: &str, k: usize) -> Result<Vec<(i64, f32)>, String> {
+pub fn nearest(c: &Connection, q: &str, k: usize) -> anyhow::Result<Vec<(i64, f32)>> {
     if !enabled() {
-        return Err("off".into());
+        anyhow::bail!("off");
     }
     let qv = call(&[q.to_string()], &cfg().embeddings.query_prefix, 4)?
         .pop()
-        .ok_or("empty reply")?;
-    let sig: String = c
-        .query_row(
-            "SELECT (SELECT COUNT(*) FROM vec)||'-'||(SELECT COUNT(*) FROM chunks)",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(|x| x.to_string())?;
-    let mut g = CACHE.lock().map_err(|_| "cache lock")?;
-    if g.as_ref().map(|x| x.0 != sig).unwrap_or(true) {
+        .context("empty reply")?;
+    let sig: String = c.query_row(
+        "SELECT (SELECT COUNT(*) FROM vec)||'-'||(SELECT COUNT(*) FROM chunks)",
+        [],
+        |r| r.get(0),
+    )?;
+    let mut g = CACHE.lock().map_err(|_| anyhow::anyhow!("cache lock"))?;
+    if g.as_ref().is_none_or(|x| x.0 != sig) {
         let all: Vec<(i64, Vec<f32>)> = c
-            .prepare("SELECT ch.id, v.v FROM chunks ch JOIN vec v ON v.hash=ch.hash")
-            .map_err(|x| x.to_string())?
-            .query_map([], |r| Ok((r.get(0)?, unblob(&r.get::<_, Vec<u8>>(1)?))))
-            .map_err(|x| x.to_string())?
-            .flatten()
-            .collect();
+            .prepare("SELECT ch.id, v.v FROM chunks ch JOIN vec v ON v.hash=ch.hash")?
+            .query_map([], |r| Ok((r.get(0)?, unblob(&r.get::<_, Vec<u8>>(1)?))))?
+            .collect::<rusqlite::Result<_>>()?;
         *g = Some((sig, all));
     }
     let mut scored: Vec<(i64, f32)> = g
         .as_ref()
-        .unwrap()
+        .expect("cache filled above")
         .1
         .iter()
         .filter(|(_, v)| v.len() == qv.len())

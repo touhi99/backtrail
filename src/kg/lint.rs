@@ -11,7 +11,7 @@ pub fn lint(c: &Connection) {
         n("SELECT COUNT(*) FROM entities"),
         n("SELECT COUNT(*) FROM claims")
     );
-    let empty: Vec<String> = c.prepare("SELECT name FROM entities e WHERE NOT EXISTS (SELECT 1 FROM claim_about a WHERE a.entity_id=e.id)").unwrap().query_map([], |r| r.get(0)).unwrap().flatten().collect();
+    let empty: Vec<String> = c.prepare("SELECT name FROM entities e WHERE NOT EXISTS (SELECT 1 FROM claim_about a WHERE a.entity_id=e.id)").expect("prepare query").query_map([], |r| r.get(0)).expect("run query").map(|row| row.expect("decode query row")).collect();
     println!(
         "entities with no claims: {}{}",
         empty.len(),
@@ -40,7 +40,7 @@ pub fn lint(c: &Connection) {
         )
     );
     let mut lost = 0;
-    let mut st = c.prepare("SELECT c.id, c.quote, k.text FROM claims c LEFT JOIN chunks k ON k.id=c.chunk_id WHERE c.quote IS NOT NULL").unwrap();
+    let mut st = c.prepare("SELECT c.id, c.quote, k.text FROM claims c LEFT JOIN chunks k ON k.id=c.chunk_id WHERE c.quote IS NOT NULL").expect("prepare query");
     for (id, q, t) in st
         .query_map([], |r| {
             Ok((
@@ -49,10 +49,10 @@ pub fn lint(c: &Connection) {
                 r.get::<_, Option<String>>(2)?,
             ))
         })
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
     {
-        if t.map_or(true, |t| !norm(&t).contains(&norm(&q))) {
+        if t.is_none_or(|t| !norm(&t).contains(&norm(&q))) {
             lost += 1;
             if lost <= 5 {
                 println!("  quote no longer found: {id}");
@@ -67,7 +67,7 @@ pub fn lint(c: &Connection) {
             .map(String::from)
             .collect()
     };
-    let mut st = c.prepare("SELECT c.id, c.title, ( SELECT group_concat(entity_id) FROM ( SELECT entity_id FROM claim_about WHERE claim_id=c.id ORDER BY entity_id ) ) FROM claims c WHERE c.state NOT IN ('rejected','superseded') AND (c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%')").unwrap();
+    let mut st = c.prepare("SELECT c.id, c.title, ( SELECT group_concat(entity_id) FROM ( SELECT entity_id FROM claim_about WHERE claim_id=c.id ORDER BY entity_id ) ) FROM claims c WHERE c.state NOT IN ('rejected','superseded') AND (c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%')").expect("prepare query");
     let all: Vec<(String, String, String)> = st
         .query_map([], |r| {
             Ok((
@@ -76,8 +76,8 @@ pub fn lint(c: &Connection) {
                 r.get::<_, Option<String>>(2)?.unwrap_or_default(),
             ))
         })
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
         .collect();
     let toks: Vec<_> = all.iter().map(|x| tok(&x.1)).collect();
     let mut dups = 0;
@@ -102,7 +102,7 @@ pub fn lint(c: &Connection) {
     }
     println!("probable duplicate claim pairs: {dups}");
     println!("sample for review (fixed order, judge each against its quote):");
-    let mut sample = all.clone();
+    let mut sample = all;
     sample.sort_by_key(|x| fxhash(&x.0));
     for (id, t, _) in sample.iter().take(5) {
         let q: String = c

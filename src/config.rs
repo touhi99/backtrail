@@ -97,10 +97,42 @@ fn pairs(v: &Value) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
+/// `pattern` when it compiles as a case-insensitive regex; otherwise a warning on stderr and an empty pattern, which
+/// matches nothing.
+fn checked_regex(owner: &str, pattern: String) -> String {
+    match regex::Regex::new(&format!("(?i){pattern}")) {
+        Ok(_) => pattern,
+        Err(e) => {
+            // The parser's message spans several lines; its last line names the problem.
+            let e = e.to_string();
+            let reason = e
+                .lines()
+                .last()
+                .unwrap_or_default()
+                .trim_start_matches("error: ");
+            eprintln!("config.json: ignoring the regex of {owner} ({pattern:?}): {reason}");
+            String::new()
+        }
+    }
+}
+
+/// [`pairs`] whose second element is a regex, checked with [`checked_regex`].
+fn regex_pairs(v: &Value, key: &str) -> Vec<(String, String)> {
+    pairs(&v[key])
+        .into_iter()
+        .map(|(thread, re)| {
+            let re = checked_regex(&format!("{key} entry for '{thread}'"), re);
+            (thread, re)
+        })
+        .collect()
+}
+
 fn thread_rule(v: &Value) -> ThreadRule {
+    let name = text(v, "name");
     let state = text(v, "state");
     ThreadRule {
-        name: text(v, "name"),
+        regex: checked_regex(&format!("thread '{name}'"), text(v, "regex")),
+        name,
         area: text(v, "area"),
         state: if state.is_empty() {
             "open".into()
@@ -109,7 +141,6 @@ fn thread_rule(v: &Value) -> ThreadRule {
         },
         summary: text(v, "summary"),
         kind: text(v, "kind"),
-        regex: text(v, "regex"),
     }
 }
 
@@ -127,7 +158,7 @@ fn embeddings(v: &Value) -> Embeddings {
             .to_string(),
         query_prefix: get("query_prefix").unwrap_or_else(|| query.into()),
         document_prefix: get("document_prefix").unwrap_or_else(|| document.into()),
-        batch_cap: v["batch_cap"].as_u64().unwrap_or(2000) as usize,
+        batch_cap: usize::try_from(v["batch_cap"].as_u64().unwrap_or(2000)).unwrap_or(usize::MAX),
         model,
     }
 }
@@ -155,8 +186,8 @@ fn load() -> Config {
             .as_array()
             .map(|a| a.iter().map(thread_rule).collect())
             .unwrap_or_default(),
-        note_rules: pairs(&v["note_rules"]),
-        artifact_rules: pairs(&v["artifact_rules"]),
+        note_rules: regex_pairs(&v, "note_rules"),
+        artifact_rules: regex_pairs(&v, "artifact_rules"),
         repos: pairs(&v["repos"]),
         aliases: v["aliases"]
             .as_object()
@@ -183,7 +214,10 @@ fn load() -> Config {
                     .collect()
             })
             .unwrap_or_default(),
-        port: v["port"].as_u64().unwrap_or(8799) as u16,
+        port: v["port"]
+            .as_u64()
+            .and_then(|p| u16::try_from(p).ok())
+            .unwrap_or(8799),
         embeddings: embeddings(&v["embeddings"]),
         daily_cap: v["compile"]["daily_cap"].as_i64().unwrap_or(8),
     }

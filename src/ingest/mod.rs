@@ -53,13 +53,13 @@ pub fn rescan(c: &Connection) {
 pub fn backup(c: &Connection) -> Option<String> {
     let dir = crate::db::home().join("backups");
     // Older versions wrote to a `BacktrailBackups` folder next to the data folder; move it once.
-    if std::env::var("BACKTRAIL_HOME").is_err() && !dir.exists() {
-        if let Some(old) = crate::db::home()
+    if std::env::var("BACKTRAIL_HOME").is_err()
+        && !dir.exists()
+        && let Some(old) = crate::db::home()
             .parent()
             .map(|p| p.join("BacktrailBackups"))
-        {
-            std::fs::rename(old, &dir).ok();
-        }
+    {
+        std::fs::rename(old, &dir).ok();
     }
     std::fs::create_dir_all(&dir).ok()?;
     let name = format!("backtrail-{}.db", &crate::clock::now()[..10]);
@@ -101,7 +101,7 @@ fn mtime(p: &Path) -> i64 {
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map_or(0, |d| d.as_secs() as i64)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 /// Every file with the extension under a folder, skipping hidden folders and dependency folders.
@@ -124,6 +124,10 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>, ext: &str) {
 }
 
 /// A source about to be read.
+#[expect(
+    clippy::struct_field_names,
+    reason = "`ref` is a keyword; `source_ref` matches the name used for source refs across the crate"
+)]
 struct Source<'a> {
     source_ref: &'a str,
     kind: &'a str,
@@ -137,7 +141,7 @@ struct Source<'a> {
 
 /// Start reading a source: create its row, or clear its passages when it changed. Returns None when the stored
 /// version is current and nothing needs reading.
-fn begin(c: &Connection, s: &Source) -> Option<i64> {
+fn begin(c: &Connection, s: &Source<'_>) -> Option<i64> {
     let stored: Option<(i64, i64)> = c
         .query_row(
             "SELECT id, mtime FROM sources WHERE ref=?1",
@@ -150,7 +154,7 @@ fn begin(c: &Connection, s: &Source) -> Option<i64> {
             "INSERT INTO sources(ref,kind,title,project,thread,path,mtime) VALUES(?1,?2,?3,?4,?5,?6,?7)",
             params![s.source_ref, s.kind, s.title, s.project, s.thread, s.path, s.version],
         )
-        .unwrap();
+        .expect("write to database");
         return Some(c.last_insert_rowid());
     };
     if version == s.version {
@@ -160,14 +164,14 @@ fn begin(c: &Connection, s: &Source) -> Option<i64> {
         "DELETE FROM fts WHERE rowid IN (SELECT id FROM chunks WHERE source_id=?1)",
         [id],
     )
-    .unwrap();
+    .expect("write to database");
     c.execute("DELETE FROM chunks WHERE source_id=?1", [id])
-        .unwrap();
+        .expect("write to database");
     c.execute(
         "UPDATE sources SET title=?2, project=?3, thread=?4, mtime=?5, path=?6 WHERE id=?1",
         params![id, s.title, s.project, s.thread, s.version, s.path],
     )
-    .unwrap();
+    .expect("write to database");
     Some(id)
 }
 
@@ -177,7 +181,7 @@ fn finish(c: &Connection, source_id: i64, first_ts: &str, last_ts: &str) {
         "UPDATE sources SET nchunks=(SELECT COUNT(*) FROM chunks WHERE source_id=?1), first_ts=?2, last_ts=?3 WHERE id=?1",
         params![source_id, first_ts, last_ts],
     )
-    .unwrap();
+    .expect("write to database");
 }
 
 /// Replace access tokens and private keys with a marker before text is stored. Pattern-based: it covers the common
@@ -195,7 +199,7 @@ fn redact(text: &str) -> std::borrow::Cow<'_, str> {
             r"|\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
             r"|-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
         ))
-        .unwrap()
+        .expect("regex literal is valid")
     })
     .replace_all(text, "[redacted secret]")
 }
@@ -215,13 +219,13 @@ pub fn add_chunk(
         "INSERT INTO chunks(source_id,seq,locator,role,ts,text) VALUES(?1,?2,?3,?4,?5,?6)",
         params![source_id, seq, locator, role, ts, text],
     )
-    .unwrap();
+    .expect("write to database");
     let id = c.last_insert_rowid();
     c.execute(
         "INSERT INTO fts(rowid,text) VALUES(?1,?2)",
         params![id, text],
     )
-    .unwrap();
+    .expect("write to database");
     id
 }
 
@@ -273,16 +277,16 @@ pub fn relink(c: &Connection) -> (usize, usize) {
         }
         let found = find_quote(c, f["source_id"].as_i64().unwrap_or(0), quote).map(|p| p.chunk_id);
         if found.is_some() {
-            traced += 1
+            traced += 1;
         } else {
-            lost += 1
+            lost += 1;
         }
         if found != f["chunk_id"].as_i64() {
             c.execute(
                 "UPDATE claims SET chunk_id=?2 WHERE id=?1",
                 params![f["id"].as_str(), found],
             )
-            .unwrap();
+            .expect("write to database");
         }
     }
     (traced, lost)

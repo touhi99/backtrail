@@ -13,32 +13,32 @@ fn has_table(c: &Connection, name: &str) -> bool {
     ) > 0
 }
 
-fn sql(c: &Connection, statement: &str) -> Result<(), String> {
-    c.execute_batch(statement).map_err(|e| e.to_string())
+fn sql(c: &Connection, statement: &str) -> anyhow::Result<()> {
+    Ok(c.execute_batch(statement)?)
 }
 
-fn add_column(c: &Connection, table: &str, column: &str) -> Result<(), String> {
+fn add_column(c: &Connection, table: &str, column: &str) -> anyhow::Result<()> {
     match c.execute(&format!("ALTER TABLE {table} ADD COLUMN {column}"), []) {
-        Err(e) if !e.to_string().contains("duplicate column") => Err(e.to_string()),
+        Err(e) if !e.to_string().contains("duplicate column") => Err(e.into()),
         _ => Ok(()),
     }
 }
 
-fn backup(c: &Connection, dir: &Path, name: &str) -> Result<(), String> {
+fn backup(c: &Connection, dir: &Path, name: &str) -> anyhow::Result<()> {
     let file = dir.join(name);
     if !file.exists() {
         c.execute("VACUUM INTO ?1", params![file.to_string_lossy()])
-            .map_err(|e| format!("backup: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("backup: {e}"))?;
         private(&file, 0o600);
     }
     Ok(())
 }
 
 /// Run `body` between BEGIN and COMMIT; roll back when it fails.
-fn transaction<T>(c: &Connection, body: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+fn transaction<T>(c: &Connection, body: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
     sql(c, "BEGIN")?;
     match body() {
-        Ok(v) => sql(c, "COMMIT").map(|_| v),
+        Ok(v) => sql(c, "COMMIT").map(|()| v),
         Err(e) => {
             c.execute_batch("ROLLBACK").ok();
             Err(e)
@@ -46,7 +46,7 @@ fn transaction<T>(c: &Connection, body: impl FnOnce() -> Result<T, String>) -> R
     }
 }
 
-pub fn run(c: &Connection, dir: &Path) -> Result<(), String> {
+pub fn run(c: &Connection, dir: &Path) -> anyhow::Result<()> {
     // A store from before items and claims were merged still has `nodes`. Its claims table is renamed so the
     // current schema can be created beside it; `unify` copies everything across.
     let old_layout = has_table(c, "nodes");
@@ -76,7 +76,7 @@ pub fn run(c: &Connection, dir: &Path) -> Result<(), String> {
 /// `links`) to one `claims` table plus `threads`. Item ids are kept, an item and the claim copied from it become
 /// one row, and thread relations without a quote become relation claims by the owner. The row count is checked
 /// before the change is committed.
-fn unify(c: &Connection) -> Result<(), String> {
+fn unify(c: &Connection) -> anyhow::Result<()> {
     let n = |q: &str| count(c, q, &[]);
     let items = n("SELECT COUNT(*) FROM nodes WHERE type!='thread'");
     let threads = n("SELECT COUNT(*) FROM nodes WHERE type='thread'");
@@ -107,13 +107,13 @@ fn unify(c: &Connection) -> Result<(), String> {
                 &ts,
             );
         }
-        let want = items + loose + bare.len() as i64;
+        let want = items + loose + crate::db::sql_int(bare.len());
         let have = n("SELECT COUNT(*) FROM claims");
         if have != want {
-            return Err(format!("expected {want} rows in claims, found {have}"));
+            anyhow::bail!("expected {want} rows in claims, found {have}");
         }
         if n("SELECT COUNT(*) FROM threads") != threads {
-            return Err("thread count differs".into());
+            anyhow::bail!("thread count differs");
         }
         sql(
             c,
@@ -134,7 +134,7 @@ fn unify(c: &Connection) -> Result<(), String> {
 /// - session refs carry the whole session id (`session:<uuid>`) instead of its first 8 characters, in `sources`,
 ///   `overrides` and the log;
 /// - the keep rule runs once over every proposed fact.
-fn version_1(c: &Connection, dir: &Path) -> Result<(), String> {
+fn version_1(c: &Connection, dir: &Path) -> anyhow::Result<()> {
     if count(c, "SELECT COUNT(*) FROM sources", &[]) > 0 {
         backup(c, dir, "backtrail.pre-v1.db")?;
     }
@@ -158,17 +158,15 @@ fn version_1(c: &Connection, dir: &Path) -> Result<(), String> {
                 continue;
             }
             c.execute("UPDATE sources SET ref=?2 WHERE id=?1", params![id, new])
-                .map_err(|e| format!("{old}: {e}"))?;
+                .map_err(|e| anyhow::anyhow!("{old}: {e}"))?;
             c.execute(
                 "UPDATE overrides SET ref=?2 WHERE ref=?1",
                 params![old, new],
-            )
-            .map_err(|e| e.to_string())?;
+            )?;
             c.execute(
                 "UPDATE log SET target=?2 WHERE target=?1",
                 params![old, new],
-            )
-            .map_err(|e| e.to_string())?;
+            )?;
         }
         // The views are not defined yet while a store is being opened; the keep rule reads tables only.
         let kept = crate::items::keep_all(c);

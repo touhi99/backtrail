@@ -53,38 +53,38 @@ pub fn demo(c: &Connection) {
     ];
     for (n, (r, t, th, body)) in docs.iter().enumerate() {
         c.execute("INSERT OR IGNORE INTO sources(ref,kind,title,thread,first_ts,last_ts,mtime) VALUES(?1,'note',?2,?3,'2026-11-02T12:00:00Z','2026-11-09T12:00:00Z',1)", params![r, t, th])
-            .unwrap();
+            .expect("write to database");
         c.execute(
             "UPDATE sources SET last_ts=?2 WHERE ref=?1",
             params![r, format!("2026-11-{:02}T12:00:00Z", 3 + n * 2)],
         )
-        .unwrap();
+        .expect("write to database");
         let sid: i64 = c
             .query_row("SELECT id FROM sources WHERE ref=?1", params![r], |x| {
                 x.get(0)
             })
-            .unwrap();
+            .expect("run query");
         for (i, part) in body.split("\n# ").enumerate() {
             let text = part.trim_start_matches("# ").to_string();
             c.execute(
                 "INSERT INTO chunks(source_id,seq,locator,role,text,ts) VALUES(?1,?2,?3,'note',?4,?5)",
                 params![
                     sid,
-                    i as i64,
+                    crate::db::sql_int(i),
                     format!("#part {}", i + 1),
                     text,
                     format!("2026-11-{:02}T12:00:00Z", 3 + n * 2)
                 ],
             )
-            .unwrap();
+            .expect("write to database");
             let cid = c.last_insert_rowid();
             c.execute(
                 "INSERT INTO fts(rowid,text) VALUES(?1,?2)",
                 params![cid, text],
             )
-            .unwrap();
+            .expect("write to database");
         }
-        c.execute("UPDATE sources SET nchunks=(SELECT COUNT(*) FROM chunks WHERE source_id=?1) WHERE id=?1", params![sid]).unwrap();
+        c.execute("UPDATE sources SET nchunks=(SELECT COUNT(*) FROM chunks WHERE source_id=?1) WHERE id=?1", params![sid]).expect("write to database");
     }
     let items = [
         (

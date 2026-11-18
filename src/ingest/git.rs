@@ -40,7 +40,7 @@ pub fn read_repos(c: &Connection) -> (usize, usize) {
             project: rel,
             thread: Some(th.as_str()),
             path: &dir.to_string_lossy(),
-            version: fxhash(&format!("{log}{st}")) as i64,
+            version: i64::from(fxhash(&format!("{log}{st}"))),
         };
         let Some(sid) = begin(c, &source) else {
             skipped += 1;
@@ -77,8 +77,8 @@ pub fn read_repos(c: &Connection) -> (usize, usize) {
             add_chunk(
                 c,
                 sid,
-                1 + i as i64,
-                &format!("commit {}", h),
+                1 + crate::db::sql_int(i),
+                &format!("commit {h}"),
                 "git",
                 d,
                 &format!("{} {} {}", h, &d[..10.min(d.len())], subj),

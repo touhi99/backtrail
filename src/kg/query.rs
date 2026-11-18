@@ -3,6 +3,7 @@
 use super::{clip, day, entities};
 use rusqlite::{Connection, params};
 use std::cell::RefCell;
+use std::fmt::Write;
 
 thread_local! {
     /// `--as-of DATE` (YYYY-MM-DD): answer from the claims in force on that day.
@@ -13,8 +14,13 @@ thread_local! {
 pub fn set_as_of(d: Option<&str>) -> bool {
     let Some(d) = d else { return true };
     let ok = d.len() == 10
-        && d.char_indices()
-            .all(|(i, ch)| if i == 4 || i == 7 { ch == '-' } else { ch.is_ascii_digit() });
+        && d.char_indices().all(|(i, ch)| {
+            if i == 4 || i == 7 {
+                ch == '-'
+            } else {
+                ch.is_ascii_digit()
+            }
+        });
     if ok {
         AS_OF.with(|a| *a.borrow_mut() = Some(d.to_string()));
     }
@@ -62,7 +68,7 @@ pub fn stats(c: &Connection) {
 /// Thread state suggested by session activity alone (no model). Prints suggestions; changes nothing.
 pub fn state(c: &Connection) {
     let days = |ts: &str| -> i64 { crate::clock::days_ago(ts) };
-    let mut st = c.prepare("SELECT t.name, t.state, ( SELECT MAX(last_ts) FROM sources s WHERE s.thread=t.name AND s.kind='session' ), ( SELECT COUNT(*) FROM sources s WHERE s.thread=t.name AND s.kind='session' AND s.last_ts >= date('now','-3 day') ) FROM threads t WHERE t.name!='Unsorted'").unwrap();
+    let mut st = c.prepare("SELECT t.name, t.state, ( SELECT MAX(last_ts) FROM sources s WHERE s.thread=t.name AND s.kind='session' ), ( SELECT COUNT(*) FROM sources s WHERE s.thread=t.name AND s.kind='session' AND s.last_ts >= date('now','-3 day') ) FROM threads t WHERE t.name!='Unsorted'").expect("prepare query");
     let mut n = 0;
     for (name, state, last, recent) in st
         .query_map([], |r| {
@@ -73,8 +79,8 @@ pub fn state(c: &Connection) {
                 r.get::<_, i64>(3)?,
             ))
         })
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
     {
         let Some(last) = last else { continue };
         let idle = days(&last);
@@ -106,7 +112,7 @@ struct Row {
     ents: String,
 }
 
-/// Evaluation only: BACKTRAIL_EXCLUDE_SESSION=session:xxxxxxxx hides claims and passages from that session, to ask a
+/// Evaluation only: `BACKTRAIL_EXCLUDE_SESSION=session:xxxxxxxx` hides claims and passages from that session, to ask a
 /// question as if it were put in a fresh session.
 fn excl() -> String {
     match std::env::var("BACKTRAIL_EXCLUDE_SESSION") {
@@ -139,7 +145,7 @@ fn claim_rows(
     let sql = "SELECT c.text, c.type, ifnull(c.speaker,''), ifnull(c.asserted_at,c.created), c.status, ifnull(c.quote,''), c.stated, ifnull((SELECT group_concat(o.name, ', ') FROM claim_about x JOIN entities o ON o.id=x.entity_id WHERE x.claim_id=c.id),'') FROM claims c WHERE (c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%') AND {where} ORDER BY c.asserted_at DESC LIMIT {limit}"
         .replace("{where}", where_)
         .replace("{limit}", &limit.to_string());
-    let mut st = c.prepare(&sql).unwrap();
+    let mut st = c.prepare(&sql).expect("prepare query");
     st.query_map(args, |r| {
         Ok(Row {
             text: r.get(0)?,
@@ -151,8 +157,8 @@ fn claim_rows(
             ents: r.get(7)?,
         })
     })
-    .unwrap()
-    .flatten()
+    .expect("run query")
+    .map(|row| row.expect("decode query row"))
     .map(|mut r: Row| {
         if as_of().is_some() && matches!(r.status.as_str(), "superseded" | "retracted") {
             r.status = "in force then".into();
@@ -173,7 +179,7 @@ fn who(s: &str) -> &str {
 fn line(r: &Row, qlen: usize) -> String {
     let head = format!(
         "{} {} [{}{}] {}",
-        day(&r.ts),
+        day(r.ts.as_deref()),
         who(&r.speaker),
         r.status,
         if r.stated == "inferred" {
@@ -202,10 +208,10 @@ pub fn page(c: &Connection, name: &str, budget: usize) {
     };
     let aliases: Vec<String> = c
         .prepare("SELECT alias FROM entity_aliases WHERE entity_id=?1")
-        .unwrap()
+        .expect("prepare query")
         .query_map(params![id], |r| r.get::<_, String>(0))
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
         .collect();
     let all = claim_rows(
         c,
@@ -319,14 +325,14 @@ pub fn why(c: &Connection, q: &str) -> bool {
         )
     };
     let score = (0..ws.len())
-        .map(|i| format!("{}", hit(i)))
+        .map(hit)
         .map(|h| format!("(CASE WHEN {h} THEN 1 ELSE 0 END)"))
         .collect::<Vec<_>>()
         .join("+");
     let need = if ws.len() < 3 {
         ws.len()
     } else {
-        ((ws.len() + 2) / 3).max(2)
+        ws.len().div_ceil(3).max(2)
     };
     let args: Vec<&dyn rusqlite::ToSql> = ws.iter().map(|w| w as &dyn rusqlite::ToSql).collect();
     let sql = format!(
@@ -336,10 +342,10 @@ pub fn why(c: &Connection, q: &str) -> bool {
     );
     let ids: Vec<String> = c
         .prepare(&sql)
-        .unwrap()
+        .expect("prepare query")
         .query_map(&args[..], |r| r.get::<_, String>(0))
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
         .collect();
     if ids.is_empty() {
         println!("no record in claims");
@@ -367,7 +373,7 @@ fn print_with_notes(c: &Connection, rows: &[Row]) {
         .flat_map(|r| r.ents.split(", "))
         .filter(|e| !e.is_empty())
         .collect();
-    names.sort();
+    names.sort_unstable();
     names.dedup();
     let mut said = 0;
     for name in names {
@@ -386,14 +392,15 @@ fn print_with_notes(c: &Connection, rows: &[Row]) {
             )
             .ok()
             .flatten();
-        if let Some(l) = latest {
-            if said < 3 && l.get(..10) > shown.get(..10) {
-                println!(
-                    "[newer claims about {name} exist, latest {}: `kg trace \"{name}\"`]",
-                    day(&Some(l))
-                );
-                said += 1;
-            }
+        if let Some(l) = latest
+            && said < 3
+            && l.get(..10) > shown.get(..10)
+        {
+            println!(
+                "[newer claims about {name} exist, latest {}: `kg trace \"{name}\"`]",
+                day(Some(&l))
+            );
+            said += 1;
         }
     }
 }
@@ -409,12 +416,12 @@ fn links(c: &Connection, fid: &str) -> Vec<(String, String, i64, i64)> {
              JOIN entities o ON o.id=b.entity_id WHERE a.entity_id=?1 GROUP BY o.id"
                 .replace("{}", &in_force()),
         )
-        .unwrap();
+        .expect("prepare query");
     st.query_map(params![fid], |r| {
         Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
     })
-    .unwrap()
-    .flatten()
+    .expect("run query")
+    .map(|row| row.expect("decode query row"))
     .collect()
 }
 
@@ -437,19 +444,20 @@ pub fn neighbors(c: &Connection, name: &str, depth: usize) {
     let depth = depth.clamp(1, 3);
     let mut seen: std::collections::HashSet<String> = [id.clone()].into();
     let mut frontier: Vec<(String, String)> = vec![(id, ename.clone())];
-    let mut out = format!("{ename}, links up to {depth} hop(s) away (linked = a claim names both):\n");
+    let mut out =
+        format!("{ename}, links up to {depth} hop(s) away (linked = a claim names both):\n");
     let mut cut_total = 0;
     let mut budget_hit = false;
     let mut found = 0;
-    for hop in 0..depth {
+    for (hop, &fanout) in FANOUT.iter().enumerate().take(depth) {
         let mut next: Vec<(String, String)> = vec![];
         let mut hop_out = String::new();
         for (fid, fname) in &frontier {
             let mut nb = links(c, fid);
             nb.retain(|n| !seen.contains(&n.0));
-            nb.sort_by(|x, y| strength(y).partial_cmp(&strength(x)).unwrap());
-            cut_total += nb.len().saturating_sub(FANOUT[hop]);
-            for (oid, oname, k, _) in nb.into_iter().take(FANOUT[hop]) {
+            nb.sort_by(|x, y| strength(y).total_cmp(&strength(x)));
+            cut_total += nb.len().saturating_sub(fanout);
+            for (oid, oname, k, _) in nb.into_iter().take(fanout) {
                 if !seen.insert(oid.clone()) {
                     continue;
                 }
@@ -462,11 +470,12 @@ pub fn neighbors(c: &Connection, name: &str, depth: usize) {
                 );
                 let mut l = format!("{}{} ({k} shared, via {fname})\n", "  ".repeat(hop), oname);
                 if let Some(r) = ev.first() {
-                    l.push_str(&format!(
-                        "{}  {}\n",
+                    let _ = writeln!(
+                        l,
+                        "{}  {}",
                         "  ".repeat(hop),
                         line(r, 90).replace("\n    ", &format!("\n{}    ", "  ".repeat(hop)))
-                    ));
+                    );
                 }
                 if tokens(&out) + tokens(&hop_out) + tokens(&l) > NEIGHBOR_BUDGET {
                     budget_hit = true;
@@ -499,7 +508,12 @@ pub fn neighbors(c: &Connection, name: &str, depth: usize) {
 /// merged). Claims that cite the best passages are printed first, with date, speaker and quote. When no claim
 /// cites them, the passages themselves are printed. Returns false when nothing matched.
 pub fn ask(c: &Connection, q: &str) -> bool {
-    let r = crate::search::search(c, q, &crate::search::Filters::default(), true);
+    let r = crate::search::search(
+        c,
+        q,
+        &crate::search::Filters::default(),
+        crate::search::Mode::Semantic,
+    );
     let skip = match std::env::var("BACKTRAIL_EXCLUDE_SESSION") {
         Ok(r) if !r.is_empty() => r,
         _ => String::new(),
@@ -524,9 +538,11 @@ pub fn ask(c: &Connection, q: &str) -> bool {
         Some(d) => hits
             .into_iter()
             .filter(|(cid, _, _)| {
-                c.query_row("SELECT ifnull(substr(ts,1,10),'') FROM chunks WHERE id=?1", params![cid], |x| {
-                    x.get::<_, String>(0)
-                })
+                c.query_row(
+                    "SELECT ifnull(substr(ts,1,10),'') FROM chunks WHERE id=?1",
+                    params![cid],
+                    |x| x.get::<_, String>(0),
+                )
                 .map_or(true, |t| t.as_str() <= d.as_str())
             })
             .collect(),
@@ -567,7 +583,7 @@ pub fn ask(c: &Connection, q: &str) -> bool {
             .replace("&gt;", ">");
         println!(
             "{} {rf} {} | {}",
-            day(&ts),
+            day(ts.as_deref()),
             if role == "user" { "owner" } else { "assistant" },
             clip(&snip, 170)
         );
@@ -661,8 +677,12 @@ const PATH_MAX_HOPS: usize = 5;
 /// Shortest chain of claims between two entities: breadth-first over "a claim names both", the strongest link first
 /// when several chains are equally short. Each link is printed with its newest claim (date, speaker, quote).
 pub fn path(c: &Connection, a: &str, b: &str) {
-    let (Some((aid, aname)), Some((bid, bname))) = (entities::find(c, a), entities::find(c, b)) else {
-        println!("no record: no entity named '{}'", if entities::find(c, a).is_none() { a } else { b });
+    let (Some((aid, aname)), Some((bid, bname))) = (entities::find(c, a), entities::find(c, b))
+    else {
+        println!(
+            "no record: no entity named '{}'",
+            if entities::find(c, a).is_none() { a } else { b }
+        );
         return;
     };
     if aid == bid {
@@ -670,12 +690,14 @@ pub fn path(c: &Connection, a: &str, b: &str) {
         return;
     }
     // id -> (parent id, shared claims on the link, name, path strength so far)
-    let mut seen: std::collections::HashMap<String, (String, i64, String, f64)> = Default::default();
+    let mut seen: std::collections::HashMap<String, (String, i64, String, f64)> =
+        std::collections::HashMap::default();
     seen.insert(aid.clone(), (String::new(), 0, aname.clone(), 0.0));
-    let mut frontier = vec![aid.clone()];
+    let mut frontier = vec![aid];
     let mut expanded = 0;
     for _ in 0..PATH_MAX_HOPS {
-        let mut next: std::collections::HashMap<String, (String, i64, String, f64)> = Default::default();
+        let mut next: std::collections::HashMap<String, (String, i64, String, f64)> =
+            std::collections::HashMap::default();
         for fid in &frontier {
             expanded += 1;
             let base = seen[fid].3;
@@ -684,7 +706,7 @@ pub fn path(c: &Connection, a: &str, b: &str) {
                     continue;
                 }
                 let sc = base + strength(&n);
-                if next.get(&n.0).map_or(true, |x| sc > x.3) {
+                if next.get(&n.0).is_none_or(|x| sc > x.3) {
                     next.insert(n.0.clone(), (fid.clone(), n.2, n.1.clone(), sc));
                 }
             }
@@ -696,8 +718,11 @@ pub fn path(c: &Connection, a: &str, b: &str) {
         frontier = next.keys().cloned().collect();
         seen.extend(next);
         if found {
-            let mut chain = vec![bid.clone()];
-            while let Some(p) = seen.get(chain.last().unwrap()).map(|x| x.0.clone()) {
+            let mut chain = vec![bid];
+            while let Some(p) = seen
+                .get(chain.last().expect("chain starts with one entry"))
+                .map(|x| x.0.clone())
+            {
                 if p.is_empty() {
                     break;
                 }

@@ -3,6 +3,7 @@
 //! Items are rows of `claims`; the `item` view (sql/views.sql) is how they are read.
 use crate::clock::now;
 use crate::db::{count, find_quote, id64, logw, rows, source_id, thread_exists};
+use anyhow::Context;
 use rusqlite::{Connection, params};
 use std::collections::HashSet;
 
@@ -57,37 +58,37 @@ pub struct NewItem {
 
 /// The write rule: an item names a known thread, cites an indexed source, quotes text found in that source and
 /// respects the length limits. Filing the same thread, type and title again updates the item. Returns its id.
-pub fn add(c: &Connection, it: &NewItem) -> Result<String, String> {
+pub fn add(c: &Connection, it: &NewItem) -> anyhow::Result<String> {
     if !TYPES.contains(&it.kind.as_str()) {
-        return Err(format!(
+        anyhow::bail!(
             "type must be one of decision, step, question, turn (got {})",
             it.kind
-        ));
+        );
     }
     if it.title.trim().is_empty() || it.title.chars().count() > MAX_TITLE {
-        return Err(format!("title must be 1..{MAX_TITLE} chars"));
+        anyhow::bail!("title must be 1..{MAX_TITLE} chars");
     }
     if it.body.chars().count() > MAX_BODY {
-        return Err(format!("body over {MAX_BODY} chars"));
+        anyhow::bail!("body over {MAX_BODY} chars");
     }
     if !thread_exists(c, &it.thread) {
-        return Err(format!("unknown thread '{}'", it.thread));
+        anyhow::bail!("unknown thread '{}'", it.thread);
     }
-    let source = source_id(c, &it.source).ok_or_else(|| {
+    let source = source_id(c, &it.source).with_context(|| {
         format!(
             "source '{}' not found: every item must cite an indexed source",
             it.source
         )
     })?;
     if it.quote.trim().len() < 8 {
-        return Err("quote of at least 8 chars from the source is required".into());
+        anyhow::bail!("quote of at least 8 chars from the source is required");
     }
     let passage = find_quote(c, source, &it.quote)
-        .ok_or_else(|| format!("quote not found in {}: \"{}\"", it.source, it.quote))?;
+        .with_context(|| format!("quote not found in {}: \"{}\"", it.source, it.quote))?;
     let (subjects, thread) = subjects(c, it);
     if subjects.is_empty() {
-        return Err(
-            "name at least one entity the item is about (--entities \"A,B\"); `bt kg entity` lists them".into(),
+        anyhow::bail!(
+            "name at least one entity the item is about (--entities \"A,B\"); `bt kg entity` lists them"
         );
     }
     let it = &NewItem {
@@ -111,7 +112,7 @@ pub fn add(c: &Connection, it: &NewItem) -> Result<String, String> {
         )
     });
     if is_new && count(c, "SELECT COUNT(*) FROM claims WHERE id=?1", &[&id]) > 0 {
-        return Err(format!("id {id} is already used by another item"));
+        anyhow::bail!("id {id} is already used by another item");
     }
     let state = it
         .state
@@ -127,7 +128,7 @@ pub fn add(c: &Connection, it: &NewItem) -> Result<String, String> {
             passage.speaker, passage.ts, it.valid_to, it.check_how
         ],
     )
-    .map_err(|e| e.to_string())?;
+    ?;
     for (eid, _) in &subjects {
         c.execute(
             "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role) VALUES(?1,?2,'subject')",
@@ -178,14 +179,14 @@ fn subjects(c: &Connection, it: &NewItem) -> (Vec<(String, String)>, String) {
     let mut thread = it.thread.clone();
     if !all.iter().any(|a| a.1 == thread) {
         if let Some(n) = named.iter().find(|n| has_thread(&n.1) && is_project(&n.1)) {
-            thread = n.1.clone();
+            thread.clone_from(&n.1);
         } else if !is_project(&thread) {
             let cands: Vec<_> = all
                 .iter()
                 .filter(|a| has_thread(&a.1) && is_project(&a.1))
                 .collect();
             if cands.len() == 1 {
-                thread = cands[0].1.clone();
+                thread.clone_from(&cands[0].1);
             }
         }
     }
@@ -209,14 +210,12 @@ pub fn capture(
     tag: &str,
     title: &str,
     body: &str,
-) -> Result<String, String> {
+) -> anyhow::Result<String> {
     if !TYPES.contains(&kind) || !thread_exists(c, thread) {
-        return Err("unknown thread or type".into());
+        anyhow::bail!("unknown thread or type");
     }
     if title.is_empty() || title.chars().count() > MAX_TITLE || body.chars().count() > MAX_BODY {
-        return Err(format!(
-            "title 1..{MAX_TITLE} and detail up to {MAX_BODY} characters"
-        ));
+        anyhow::bail!("title 1..{MAX_TITLE} and detail up to {MAX_BODY} characters");
     }
     let ts = now();
     let text = if body.is_empty() {
@@ -231,16 +230,16 @@ pub fn capture(
          VALUES(?1,?2,?3,?4,?5,?6,'owner',?7,?8,?9,?4,?10,?10,'owner',?10)",
         params![id, kind, thread, title, body, default_state(kind), tag, source, chunk, ts],
     )
-    .map_err(|e| e.to_string())?;
+    ?;
     logw(c, "owner", "add", &id, title);
     Ok(id)
 }
 
 /// An idea typed in the app becomes an open thread of its own, with the typed line as its source. Returns the
 /// thread's name, which gets the date added when the name is taken.
-pub fn idea(c: &Connection, text: &str) -> Result<String, String> {
+pub fn idea(c: &Connection, text: &str) -> anyhow::Result<String> {
     if text.is_empty() || text.chars().count() > MAX_TITLE {
-        return Err(format!("idea must be 1..{MAX_TITLE} chars"));
+        anyhow::bail!("idea must be 1..{MAX_TITLE} chars");
     }
     let ts = now();
     let name = if thread_exists(c, text) {
@@ -253,8 +252,7 @@ pub fn idea(c: &Connection, text: &str) -> Result<String, String> {
         "INSERT INTO threads(name,state,area,body,origin,kind,created,updated)
          VALUES(?1,'open','Ideas, no repo','Idea typed in the app.','owner','idea',?2,?2)",
         params![name, ts],
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
     logw(c, "owner", "idea", &name, "");
     Ok(name)
 }
@@ -267,8 +265,8 @@ fn typed_source(c: &Connection, thread: &str, text: &str, ts: &str) -> (i64, i64
          VALUES(?1,'owner','Typed in the app',?2,?3,?3,0,1)",
         params![source_ref, thread, ts],
     )
-    .unwrap();
-    let source = source_id(c, &source_ref).unwrap();
+    .expect("write to database");
+    let source = source_id(c, &source_ref).expect("source row was just inserted");
     let chunk = crate::ingest::add_chunk(c, source, 0, "typed", "owner", ts, text);
     (source, chunk)
 }
@@ -426,9 +424,9 @@ pub fn not_yet(c: &Connection, id: &str) -> bool {
     ok
 }
 
-pub fn answer(c: &Connection, id: &str, text: &str) -> Result<bool, String> {
+pub fn answer(c: &Connection, id: &str, text: &str) -> anyhow::Result<bool> {
     if text.is_empty() || text.chars().count() > MAX_BODY {
-        return Err("answer must be 1..320 chars".into());
+        anyhow::bail!("answer must be 1..320 chars");
     }
     let ok = update(
         c,
@@ -439,6 +437,7 @@ pub fn answer(c: &Connection, id: &str, text: &str) -> Result<bool, String> {
     Ok(ok)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verdict {
     Accept,
     Reject,
@@ -481,8 +480,22 @@ pub fn review(c: &Connection, id: &str, verdict: Verdict, reason: &str) -> bool 
     ok
 }
 
+/// The owner's answer to a proposed relation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelationVerdict {
+    Accept,
+    Reject,
+}
+
 /// Accept or reject a proposed relation between two threads.
-pub fn review_relation(c: &Connection, a: &str, b: &str, kind: &str, accept: bool) -> bool {
+pub fn review_relation(
+    c: &Connection,
+    a: &str,
+    b: &str,
+    kind: &str,
+    verdict: RelationVerdict,
+) -> bool {
+    let accept = verdict == RelationVerdict::Accept;
     let name = |t: &str| t.trim_start_matches("T:").to_string();
     let ok = update(
         c,
@@ -555,9 +568,9 @@ pub fn supersede(c: &Connection, id: &str, reason: &str) -> bool {
 // ---- changes by Claude (the command line)
 
 /// Close a step. `by` is owner, claude or evidence; the last two need proof.
-pub fn done(c: &Connection, id: &str, by: &str, proof: &str) -> Result<bool, String> {
+pub fn done(c: &Connection, id: &str, by: &str, proof: &str) -> anyhow::Result<bool> {
     if by != "owner" && proof.trim().is_empty() {
-        return Err("a step closed by Claude or evidence needs --proof".into());
+        anyhow::bail!("a step closed by Claude or evidence needs --proof");
     }
     let ok = update(
         c,
@@ -569,10 +582,15 @@ pub fn done(c: &Connection, id: &str, by: &str, proof: &str) -> Result<bool, Str
 }
 
 /// Claude says a step is built; it shows as "looks done?" until the owner confirms.
-pub fn built(c: &Connection, id: &str, evidence: &str, check: Option<String>) -> Result<bool, String> {
+pub fn built(
+    c: &Connection,
+    id: &str,
+    evidence: &str,
+    check: Option<String>,
+) -> anyhow::Result<bool> {
     let evidence = clip(evidence, 300);
     if evidence.trim().is_empty() {
-        return Err("--evidence is required".into());
+        anyhow::bail!("--evidence is required");
     }
     let ok = update(
         c,
@@ -586,14 +604,14 @@ pub fn built(c: &Connection, id: &str, evidence: &str, check: Option<String>) ->
     Ok(ok)
 }
 
-/// Label a proposed item after checking it against later items and the code: live, in_effect, superseded or done.
-pub fn flag(c: &Connection, id: &str, label: &str, reason: &str) -> Result<bool, String> {
+/// Label a proposed item after checking it against later items and the code: live, `in_effect`, superseded or done.
+pub fn flag(c: &Connection, id: &str, label: &str, reason: &str) -> anyhow::Result<bool> {
     if !["live", "in_effect", "superseded", "done"].contains(&label) {
-        return Err("--as must be live, in_effect, superseded or done".into());
+        anyhow::bail!("--as must be live, in_effect, superseded or done");
     }
     let reason = clip(reason, 200);
     if label != "live" && reason.trim().is_empty() {
-        return Err("a flag other than live needs --reason".into());
+        anyhow::bail!("a flag other than live needs --reason");
     }
     let ok = update(
         c,
@@ -607,10 +625,10 @@ pub fn flag(c: &Connection, id: &str, label: &str, reason: &str) -> Result<bool,
 }
 
 /// Claude answers a question the owner typed in the app.
-pub fn reply(c: &Connection, id: &str, text: &str) -> Result<bool, String> {
+pub fn reply(c: &Connection, id: &str, text: &str) -> anyhow::Result<bool> {
     let text = clip(text, 600);
     if text.trim().is_empty() {
-        return Err("--text is required".into());
+        anyhow::bail!("--text is required");
     }
     let ok = update(
         c,
@@ -638,7 +656,7 @@ pub fn retire(c: &Connection, id: &str, replaced_by: Option<&str>, reason: &str)
                 "UPDATE claims SET superseded_by=?2 WHERE id=?1",
                 params![id, new],
             )
-            .unwrap();
+            .expect("write to database");
         }
         let note = replaced_by
             .map(|new| format!(" (replaced by {new})"))

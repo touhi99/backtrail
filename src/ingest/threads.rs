@@ -18,7 +18,7 @@ fn case_insensitive(pattern: &str) -> Regex {
         "(?i){}",
         if pattern.is_empty() { "$^" } else { pattern }
     ))
-    .unwrap()
+    .expect("config regexes are checked when the config loads")
 }
 
 /// Create the configured threads, a project entity for each build or plan thread, and `Unsorted`. An existing
@@ -30,7 +30,7 @@ pub fn seed(c: &Connection) {
             UPSERT_THREAD,
             params![t.name, t.state, t.area, t.summary, ts],
         )
-        .unwrap();
+        .expect("write to database");
         if !t.kind.is_empty() {
             c.execute(
                 "UPDATE threads SET kind=?2 WHERE name=?1 AND (kind IS NULL OR kind='')",
@@ -54,7 +54,7 @@ pub fn seed(c: &Connection) {
             ts
         ],
     )
-    .unwrap();
+    .expect("write to database");
 }
 
 /// The configured thread rules, compiled once per scan.
@@ -86,10 +86,8 @@ impl SessionRules {
         if untitled && passages <= 3 {
             return UNSORTED.into();
         }
-        if !untitled {
-            if let Some(name) = self.matching(title) {
-                return name;
-            }
+        if !untitled && let Some(name) = self.matching(title) {
+            return name;
         }
         if cfg().generic_projects.iter().any(|g| g == project) {
             return UNSORTED.into();
@@ -116,7 +114,7 @@ pub fn assign_sessions(c: &Connection) {
         &[],
     );
     let ts = now();
-    c.execute_batch("BEGIN").unwrap();
+    c.execute_batch("BEGIN").expect("write to database");
     for s in sessions {
         let project = s["project"].as_str().unwrap_or("");
         let thread = match s["pinned"].as_str() {
@@ -138,15 +136,15 @@ pub fn assign_sessions(c: &Connection) {
                     ts
                 ],
             )
-            .unwrap();
+            .expect("write to database");
         }
         c.execute(
             "UPDATE sources SET thread=?2 WHERE id=?1",
             params![s["id"].as_i64(), thread],
         )
-        .unwrap();
+        .expect("write to database");
     }
-    c.execute_batch("COMMIT").unwrap();
+    c.execute_batch("COMMIT").expect("write to database");
 }
 
 /// Thread for a note (by its path) or an artifact (by its title): the note or artifact rules when there are any,
@@ -175,9 +173,9 @@ pub fn thread_for_document(kind: &str, key: &str) -> String {
 }
 
 /// Pin a session to a thread (`bt assign`). `assign_sessions` honours the pin, so a rescan does not undo it.
-pub fn pin(c: &Connection, session_ref: &str, thread: &str) -> Result<bool, String> {
+pub fn pin(c: &Connection, session_ref: &str, thread: &str) -> anyhow::Result<bool> {
     if !thread_exists(c, thread) {
-        return Err("no such thread".into());
+        anyhow::bail!("no such thread");
     }
     let session_ref = resolve_ref(c, session_ref);
     let found = c
@@ -192,7 +190,7 @@ pub fn pin(c: &Connection, session_ref: &str, thread: &str) -> Result<bool, Stri
             "INSERT OR REPLACE INTO overrides(ref,thread) VALUES(?1,?2)",
             params![session_ref, thread],
         )
-        .unwrap();
+        .expect("write to database");
         logw(c, "claude", "assign", &session_ref, thread);
     }
     Ok(found)
@@ -207,11 +205,17 @@ pub fn suggest(c: &Connection) {
         "SELECT project, COUNT(*) AS n FROM sources WHERE kind='session' AND thread=?1 AND project!='' GROUP BY project ORDER BY n DESC",
         &[&UNSORTED],
     );
-    let threads: Vec<String> = crate::db::rows(c, "SELECT name FROM threads WHERE name!=?1", &[&UNSORTED])
-        .iter()
-        .filter_map(|r| r["name"].as_str().map(String::from))
-        .collect();
-    let flat = |s: &str| -> String { s.to_lowercase().chars().filter(|ch| ch.is_alphanumeric()).collect() };
+    let threads: Vec<String> =
+        crate::db::rows(c, "SELECT name FROM threads WHERE name!=?1", &[&UNSORTED])
+            .iter()
+            .filter_map(|r| r["name"].as_str().map(String::from))
+            .collect();
+    let flat = |s: &str| -> String {
+        s.to_lowercase()
+            .chars()
+            .filter(|ch| ch.is_alphanumeric())
+            .collect()
+    };
     let mut shown = 0;
     for p in projects {
         let project = p["project"].as_str().unwrap_or("");
@@ -224,14 +228,20 @@ pub fn suggest(c: &Connection) {
         let total: i64 = by_vote.iter().filter_map(|r| r["n"].as_i64()).sum();
         let vote = by_vote.first().and_then(|r| {
             let (t, k) = (r["thread"].as_str()?, r["n"].as_i64()?);
-            (total >= 3 && k * 10 >= total * 6).then(|| format!("{k} of {total} sorted sessions of this folder"))
+            (total >= 3 && k * 10 >= total * 6)
+                .then(|| format!("{k} of {total} sorted sessions of this folder"))
                 .map(|why| (t.to_string(), why))
         });
         let named = || {
             threads
                 .iter()
                 .find(|t| flat(t).len() >= 4 && flat(project).contains(&flat(t)))
-                .map(|t| (t.clone(), "the folder name contains the thread name".to_string()))
+                .map(|t| {
+                    (
+                        t.clone(),
+                        "the folder name contains the thread name".to_string(),
+                    )
+                })
         };
         match vote.or_else(named) {
             Some((t, why)) => {

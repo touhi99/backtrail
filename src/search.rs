@@ -81,7 +81,7 @@ fn refresh_item_index(c: &Connection) {
         "SELECT COUNT(*) FROM sqlite_temp_master WHERE name='item_fts'",
         &[],
     ) > 0;
-    let mut built_for = BUILT_FOR.lock().unwrap();
+    let mut built_for = BUILT_FOR.lock().expect("lock poisoned");
     if exists && *built_for == version {
         return;
     }
@@ -125,7 +125,7 @@ struct Citing<'a> {
 }
 
 /// How much the store trusts a passage, as a factor on its rank, with the reasons.
-fn weigh(passage: &Value, thread_state: &str, citing: &[Citing]) -> (f64, Vec<&'static str>) {
+fn weigh(passage: &Value, thread_state: &str, citing: &[Citing<'_>]) -> (f64, Vec<&'static str>) {
     let mut factor = 1.0;
     let mut why = vec![];
     let mut apply = |f: f64, reason: &'static str| {
@@ -137,7 +137,7 @@ fn weigh(passage: &Value, thread_state: &str, citing: &[Citing]) -> (f64, Vec<&'
         "parked" => apply(0.85, "thread parked"),
         _ => {}
     }
-    let direct: Vec<&Citing> = citing.iter().filter(|x| x.direct).collect();
+    let direct: Vec<&Citing<'_>> = citing.iter().filter(|x| x.direct).collect();
     if direct.iter().any(|x| x.kept) {
         apply(1.3, "cited by a kept item");
     } else if !direct.is_empty() && direct.iter().all(|x| x.dead) {
@@ -153,15 +153,22 @@ fn weigh(passage: &Value, thread_state: &str, citing: &[Citing]) -> (f64, Vec<&'
     (factor, why)
 }
 
-pub fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
+/// Whether a search may use embeddings or only the keyword index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    Semantic,
+    Text,
+}
+
+pub fn search(c: &Connection, q: &str, f: &Filters, mode: Mode) -> Value {
+    fn filters<'a>(text: &'a dyn ToSql, f: &'a Filters) -> [&'a dyn ToSql; 6] {
+        [text, &f.thread, &f.kind, &f.from, &f.to, &f.state]
+    }
     let fts = fts_query(q);
     let (embedded, passages) = crate::embed::coverage(c);
     let mut res = json!({"results": [], "items": [], "mode": "text", "note": "", "embedded": embedded, "passages": passages});
     if fts.is_empty() {
         return res;
-    }
-    fn filters<'a>(text: &'a dyn ToSql, f: &'a Filters) -> [&'a dyn ToSql; 6] {
-        [text, &f.thread, &f.kind, &f.from, &f.to, &f.state]
     }
 
     // 1. Candidates by keyword. Each passage's fused score starts with its keyword rank.
@@ -186,13 +193,15 @@ pub fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
     let mut candidates: HashMap<i64, Value> = HashMap::new();
     let mut fused: HashMap<i64, f64> = HashMap::new();
     for (rank, row) in by_keyword.into_iter().enumerate() {
-        let id = row["chunk_id"].as_i64().unwrap();
+        let id = row["chunk_id"]
+            .as_i64()
+            .expect("keyword rows carry chunk_id");
         *fused.entry(id).or_insert(0.0) += 1.0 / (RRF_K + rank as f64 + 1.0);
         candidates.insert(id, row);
     }
 
     // 2. Candidates by meaning, when the embedding server answers.
-    if !semantic {
+    if mode == Mode::Text {
         res["note"] = json!("keyword search only (requested)");
     } else if !crate::embed::enabled() {
         res["note"] = json!("keyword search only: embeddings are turned off in config.json");
@@ -201,7 +210,7 @@ pub fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
             Err(e) => {
                 res["note"] = json!(format!(
                     "keyword search only: the embedding server did not answer ({e}). Start Ollama and run `ollama pull embeddinggemma-2:270m` once."
-                ))
+                ));
             }
             Ok(nearest) => {
                 res["mode"] = json!("hybrid");
@@ -220,7 +229,12 @@ pub fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
                 );
                 let mut by_id: HashMap<i64, Value> = found
                     .into_iter()
-                    .map(|r| (r["chunk_id"].as_i64().unwrap(), r))
+                    .map(|r| {
+                        (
+                            r["chunk_id"].as_i64().expect("chunk rows carry chunk_id"),
+                            r,
+                        )
+                    })
                     .collect();
                 let mut rank = 0.0;
                 for (id, _) in nearest {
@@ -243,7 +257,7 @@ pub fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
         .values()
         .filter_map(|r| r["source_id"].as_i64())
         .collect();
-    source_ids.sort();
+    source_ids.sort_unstable();
     source_ids.dedup();
     let citing_items = rows(
         c,
@@ -254,7 +268,7 @@ pub fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
     let mut ranked: Vec<(f64, i64, Value)> = vec![];
     for (id, mut row) in candidates {
         let source = row["source_id"].as_i64();
-        let mut citing: Vec<Citing> = citing_items
+        let mut citing: Vec<Citing<'_>> = citing_items
             .iter()
             .filter(|item| item["source_id"].as_i64() == source)
             .map(|item| {
@@ -288,7 +302,9 @@ pub fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
             .take(3)
             .map(|x| json!({"id": x.item["id"], "type": x.item["type"], "title": x.item["title"], "state": x.item["state"], "dead": x.dead}))
             .collect();
-        row.as_object_mut().unwrap().remove("body");
+        row.as_object_mut()
+            .expect("result row is a JSON object")
+            .remove("body");
         ranked.push((fused[&id] * factor, id, row));
     }
     // Best score first; equal scores in passage order, so the same query always gives the same list.
@@ -314,14 +330,14 @@ pub fn search(c: &Connection, q: &str, f: &Filters, semantic: bool) -> Value {
 }
 
 /// `bt search`: the mode, matching items, and the ten best passages with the reasons for their rank.
-pub fn print(c: &Connection, q: &str, f: &Filters, semantic: bool) {
-    let r = search(c, q, f, semantic);
+pub fn print(c: &Connection, q: &str, f: &Filters, mode: Mode) {
+    let r = search(c, q, f, mode);
     let note = Some(s(&r, "note"))
         .filter(|n| !n.is_empty())
         .map(|n| format!(" ({n})"))
         .unwrap_or_default();
     println!("mode: {}{note}", s(&r, "mode"));
-    for i in r["items"].as_array().unwrap() {
+    for i in r["items"].as_array().expect("search result has items") {
         println!(
             "ITEM [{}] {} {}: {}",
             s(i, "thread"),
@@ -330,7 +346,12 @@ pub fn print(c: &Connection, q: &str, f: &Filters, semantic: bool) {
             s(i, "title")
         );
     }
-    for x in r["results"].as_array().unwrap().iter().take(10) {
+    for x in r["results"]
+        .as_array()
+        .expect("search result has results")
+        .iter()
+        .take(10)
+    {
         let why: Vec<&str> = x["why"]
             .as_array()
             .into_iter()

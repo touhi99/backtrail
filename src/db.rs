@@ -4,6 +4,11 @@ use rusqlite::{Connection, ToSql, params};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+/// A count or limit as an SQLite integer, saturating at `i64::MAX` (an unlimited `usize::MAX` stays unlimited).
+pub fn sql_int(n: usize) -> i64 {
+    i64::try_from(n).unwrap_or(i64::MAX)
+}
+
 /// The data directory: `BACKTRAIL_HOME`, or the platform's application data folder.
 pub fn home() -> PathBuf {
     if let Ok(p) = std::env::var("BACKTRAIL_HOME") {
@@ -59,7 +64,10 @@ pub fn private(path: &Path, mode: u32) {
 pub fn rows(c: &Connection, sql: &str, args: &[&dyn ToSql]) -> Vec<Value> {
     use rusqlite::types::Value as Sql;
     let mut st = c.prepare(sql).unwrap_or_else(|e| panic!("{e}: {sql}"));
-    let names: Vec<String> = st.column_names().map(|n| n.to_string()).collect();
+    let names: Vec<String> = st
+        .column_names()
+        .map(std::string::ToString::to_string)
+        .collect();
     st.query_map(args, |r| {
         let mut o = serde_json::Map::new();
         for (i, name) in names.iter().enumerate() {
@@ -73,8 +81,8 @@ pub fn rows(c: &Connection, sql: &str, args: &[&dyn ToSql]) -> Vec<Value> {
         }
         Ok(Value::Object(o))
     })
-    .unwrap()
-    .flatten()
+    .expect("run query")
+    .map(|row| row.expect("decode query row"))
     .collect()
 }
 
@@ -87,8 +95,8 @@ pub fn count(c: &Connection, sql: &str, args: &[&dyn ToSql]) -> i64 {
 pub fn strings(c: &Connection, sql: &str, args: &[&dyn ToSql]) -> Vec<String> {
     let mut st = c.prepare(sql).unwrap_or_else(|e| panic!("{e}: {sql}"));
     st.query_map(args, |r| r.get::<_, String>(0))
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
         .collect()
 }
 
@@ -111,20 +119,20 @@ pub fn norm(s: &str) -> String {
 
 /// 32-bit FNV-1a. Entity ids and fact ids from before store version 1 use it.
 pub fn fxhash(s: &str) -> u32 {
-    let mut h: u32 = 2166136261;
+    let mut h: u32 = 2_166_136_261;
     for b in s.bytes() {
-        h ^= b as u32;
-        h = h.wrapping_mul(16777619);
+        h ^= u32::from(b);
+        h = h.wrapping_mul(16_777_619);
     }
     h
 }
 
 /// 64-bit FNV-1a as 16 hex digits: new fact ids and passage hashes.
 pub fn id64(s: &str) -> String {
-    let mut h: u64 = 0xcbf29ce484222325;
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
     }
     format!("{h:016x}")
 }
@@ -180,7 +188,7 @@ pub fn find_quote(c: &Connection, source_id: i64, quote: &str) -> Option<Passage
     let want = norm(quote);
     let mut st = c
         .prepare("SELECT id, ifnull(role,''), ts, text FROM chunks WHERE source_id=?1 ORDER BY seq")
-        .unwrap();
+        .expect("prepare query");
     st.query_map([source_id], |r| {
         Ok((
             r.get::<_, i64>(0)?,
@@ -189,8 +197,8 @@ pub fn find_quote(c: &Connection, source_id: i64, quote: &str) -> Option<Passage
             r.get::<_, String>(3)?,
         ))
     })
-    .unwrap()
-    .flatten()
+    .expect("run query")
+    .map(|row| row.expect("decode query row"))
     .find(|(_, _, _, text)| norm(text).contains(&want))
     .map(|(chunk_id, role, ts, _)| Passage {
         chunk_id,
