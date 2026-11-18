@@ -6,6 +6,7 @@ mod config;
 mod db;
 mod demo;
 mod embed;
+mod finish;
 mod hooks;
 mod howto;
 mod ingest;
@@ -26,7 +27,7 @@ relate A B kind --source REF --quote Q [--state S] | pending [--days N] | skip <
 add <type> --thread --title --source --quote [--body --check --state --origin --date] | import <facts.json|-> | \
 set-thread NAME [--state S] [--summary X] | done <step> [--by B] [--proof P] | built <step> --evidence TEXT [--check TEXT] | \
 flag <id> --as live|in_effect|superseded|done --reason R | reply <q> --text TEXT | retire <id> [--by ID] --reason R | \
-assign <ref> <thread> | suggest-threads | extract-input <ref> | extract-queue [--limit N] [--session ID] [--entity NAME] | \
+assign <ref> <thread> | suggest-threads | extract-input <ref> | finish <step> --source REF --quote Q [--verified] [--dry] | finish-input <step> | finish-evidence <step> --source REF --quote Q | finish-queue | extract-queue [--limit N] [--session ID] [--entity NAME] | \
 extract-log <ref> [--failed 1] [--detail D] | kg [state|export|restore|lint|suggest|merge|entity|page|trace|why|neighbors|path|passage|find] | \
 brief [--thread T | --all] | backup | serve [--port N] | hooks";
 
@@ -465,6 +466,13 @@ fn main() {
             println!("ok");
         }
         "extract-input" => kg::extract::input(&c, &a.at(1, "session ref")),
+        "finish" => match finish::finish(&c, &a.at(1, "step id"), &a.text("--source"), &a.text("--quote"), a.has("--verified"), a.has("--dry")) {
+            Ok(line) => println!("{line}"),
+            Err(e) => fail(&e),
+        },
+        "finish-input" => finish::input(&c, &a.at(1, "step id")),
+        "finish-evidence" => finish::evidence(&c, &a.at(1, "step id"), &a.text("--source"), &a.text("--quote")),
+        "finish-queue" => finish::queue(&c).iter().for_each(|id| println!("{id}")),
         "extract-queue" => {
             let queue = kg::extract::queue(
                 &c,

@@ -177,6 +177,7 @@ pub fn input(c: &Connection, r: &str) {
     {
         println!("- {t}: {}", clip(&title, 110));
     }
+    crate::finish::print_open_steps(c, &ts);
     println!("\nENTITIES (use these names exactly):");
     for (n, k) in c
         .prepare("SELECT name, ifnull(kind,'') FROM entities ORDER BY name")

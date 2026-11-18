@@ -33,7 +33,11 @@ Commands run as `bt <command>`.
 | `match` | Mark open steps that a later commit seems to complete as `looks done?` (word-overlap heuristic, unproven) |
 | `pending [--days N]` | List recent sessions that no item cites |
 | `artifacts [--manifest list.json]` | Record publish dates and report missing or stale snapshots |
-| `extract-input <ref>` | Print one session for a model: the thread's existing items, the entity names, and the turns |
+| `extract-input <ref>` | Print one session for a model: the thread's existing items, the open steps of every thread with their ids, the entity names, and the turns |
+| `finish <step> --source REF --quote Q [--verified] [--dry]` | Close an open step from a quote found in the source. An owner quote closes it; an assistant quote closes it with `--verified` (a second model agreed) and otherwise marks it "Built, check it". `--dry` prints the verdict only |
+| `finish-input <step>` | Print a step and the ten passages written after it that are most like it, for `skill/finish.sh` |
+| `finish-evidence <step> --source REF --quote Q` | Print a step and the passage holding the quote, for the confirming model |
+| `finish-queue` | List steps open for more than a day |
 | `extract-queue [--session ID] [--limit N] [--entity E] [--no-cap]` | List sessions worth extracting (at most `daily_cap` a day unless `--no-cap`) |
 | `extract-log <ref> [--failed 1] --detail "..."` | Record one extraction run and its cost |
 | `log [--n N]` | Print the append-only change log |
@@ -124,6 +128,7 @@ Titles were written by a model from the cited passage, so the queries are not ty
 - `SessionStart`: `bt brief` prints one line per thread in motion. Claude runs `bt brief --thread <name>` for the project at hand.
 - `SessionEnd`: `<path>/skill/session-end.sh` runs `ingest` and `embed` in the background when a session closes, then
   `skill/extract.sh` on the session and `skill/resolve.sh` on the unjudged proposed items. Both make model calls.
+  Extraction also names open steps the session finished; `skill/close-step.sh` closes each one (see `finish`).
   `BACKTRAIL_COMPILE_ON_END=0` in the hook's environment skips them. `BACKTRAIL_REVERSE_ON_END=1` also runs
   `skill/resolve.sh --reverses --limit 5` on the newest settled decisions not yet checked.
 
