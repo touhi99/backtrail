@@ -35,7 +35,7 @@ bt build
 ```
 
 `install.sh` builds the binary and links it as `bt`. On macOS it also installs the login agent `dev.backtrail.serve`,
-which runs the server at `http://127.0.0.1:8799` from login, and builds `mac/Backtrail.app`. `BT_NO_AGENT=1` and
+which runs the server at `http://127.0.0.1:8799` from login, and builds the optional Mac app `mac/Backtrail.app`. `BT_NO_AGENT=1` and
 `BT_NO_MAC_APP=1` skip those; elsewhere, run `bt serve`. `bt build` indexes the existing sessions and notes (first run:
 `docs/reference.md`). `BACKTRAIL_HOME` sets the data directory (default `~/Library/Application Support/Backtrail` on
 macOS, `~/.local/share/backtrail` elsewhere).
@@ -63,7 +63,8 @@ Claude runs the other commands (`brief`, `answer`, `retire`, `kg`) from the hook
   server listens on `127.0.0.1:8799` only. The Mac app talks only to that server; links it cannot show open the same
   server in the browser. The `skill/` scripts send session text to Claude through the `claude` CLI, on the logged-in
   account: the SessionEnd hook runs them unless `BACKTRAIL_COMPILE_ON_END=0`.
-- The database is not encrypted; common token formats are redacted.
+- Storage: the database is readable by its owner only (file `0600`, folder `0700`) and not encrypted, the same as the
+  session files it reads. Common token formats are redacted before storing.
 
 ## Limits
 
