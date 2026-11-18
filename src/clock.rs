@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub fn now() -> String {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64);
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
     iso(secs)
 }
 
@@ -37,18 +37,18 @@ fn day_number(ts: &str) -> i64 {
     let era = y.div_euclid(400);
     let yoe = y.rem_euclid(400);
     let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
-    era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468
+    era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468
 }
 
-/// Year, month and day for a count of days since 1970-01-01 (Howard Hinnant's civil_from_days).
+/// Year, month and day for a count of days since 1970-01-01 (Howard Hinnant's `civil_from_days`).
 fn civil(days: i64) -> (i64, i64, i64) {
-    let z = days + 719468;
-    let era = z.div_euclid(146097);
-    let doe = z.rem_euclid(146097);
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    (yoe + era * 400 + if m <= 2 { 1 } else { 0 }, m, d)
+    (yoe + era * 400 + i64::from(m <= 2), m, d)
 }

@@ -34,27 +34,32 @@ fn asset(path: &str) -> Option<Reply> {
     };
     Some(
         Response::from_data(file.data.to_vec())
-            .with_header(Header::from_bytes("Content-Type", mime).unwrap()),
+            .with_header(Header::from_bytes("Content-Type", mime).expect("static header is valid")),
     )
 }
 
-fn json_reply(v: Value) -> Reply {
-    Response::from_string(v.to_string())
-        .with_header(Header::from_bytes("Content-Type", "application/json").unwrap())
+fn json_reply(v: &Value) -> Reply {
+    Response::from_string(v.to_string()).with_header(
+        Header::from_bytes("Content-Type", "application/json").expect("static header is valid"),
+    )
 }
 
 fn error_reply(status: u16, message: &str) -> Reply {
-    json_reply(json!({"error": message})).with_status_code(status)
+    json_reply(&json!({"error": message})).with_status_code(status)
 }
 
 /// The reply to a change: `{"ok": true|false}`.
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "private helper; every call passes another function's result"
+)]
 fn done(ok: bool) -> Value {
     json!({"ok": ok})
 }
 
 /// The reply to a change that can be refused with a reason.
-fn done_or_error(result: Result<Value, String>) -> Value {
-    result.unwrap_or_else(|error| json!({"ok": false, "error": error}))
+fn done_or_error(result: anyhow::Result<Value>) -> Value {
+    result.unwrap_or_else(|error| json!({"ok": false, "error": error.to_string()}))
 }
 
 fn url_decode(text: &str) -> String {
@@ -154,7 +159,16 @@ fn get(c: &Connection, path: &str, q: &Query) -> Option<Value> {
                 from: q.get("from"),
                 to: q.get("to"),
             };
-            search::search(c, &q.get("q"), &filters, q.get("mode") != "text")
+            search::search(
+                c,
+                &q.get("q"),
+                &filters,
+                if q.get("mode") == "text" {
+                    search::Mode::Text
+                } else {
+                    search::Mode::Semantic
+                },
+            )
         }
         "/api/kg" => kg::screen::entities(c),
         "/api/kg/graph" => kg::screen::graph(c),
@@ -213,7 +227,11 @@ fn post(c: &Connection, path: &str, body: &Value) -> Option<Value> {
             text("a"),
             text("b"),
             text("kind"),
-            flag("accept"),
+            if flag("accept") {
+                items::RelationVerdict::Accept
+            } else {
+                items::RelationVerdict::Reject
+            },
         )),
         "/api/move" => done(items::move_to(c, id, text("thread"))),
         "/api/supersede" => done(items::supersede(c, id, text("reason"))),
@@ -226,7 +244,9 @@ fn post(c: &Connection, path: &str, body: &Value) -> Option<Value> {
                     kg::entities::ignore_suggestion(c, name);
                     return Some(done(true));
                 }
-                (_, "unignore", _) => return Some(done(kg::entities::unignore_suggestion(c, name))),
+                (_, "unignore", _) => {
+                    return Some(done(kg::entities::unignore_suggestion(c, name)));
+                }
                 (_, _, "") => {
                     kg::entities::add(c, name, kind, &[name.to_lowercase()]);
                     Some(name)
@@ -273,7 +293,7 @@ fn handle(c: &Connection, rq: &mut Request) -> Reply {
         }
         _ => None,
     };
-    reply.map_or_else(|| error_reply(404, "not found"), json_reply)
+    reply.map_or_else(|| error_reply(404, "not found"), |v| json_reply(&v))
 }
 
 /// Every five minutes: read new sources, write the daily backup and embed new passages.
@@ -297,7 +317,7 @@ fn background_scan() {
     }
 }
 
-pub fn serve(c: Connection, port: u16) {
+pub fn serve(c: &Connection, port: u16) {
     let server = Server::http(format!("127.0.0.1:{port}")).unwrap_or_else(|e| {
         eprintln!("cannot listen on 127.0.0.1:{port}: {e}. Another `bt serve` (or the login agent) probably holds the port; stop it first.");
         std::process::exit(1);
@@ -308,7 +328,7 @@ pub fn serve(c: Connection, port: u16) {
     }
     for mut rq in server.incoming_requests() {
         // A failed request answers 500 and the server keeps running.
-        let reply = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle(&c, &mut rq)))
+        let reply = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle(c, &mut rq)))
             .unwrap_or_else(|_| error_reply(500, "internal error"));
         rq.respond(reply).ok();
     }

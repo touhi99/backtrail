@@ -59,7 +59,7 @@ impl Args {
         self.0
             .get(n)
             .cloned()
-            .unwrap_or_else(|| fail(&format!("missing {what}")))
+            .unwrap_or_else(|| fail(format!("missing {what}")))
     }
     /// Every argument from position `n` on, joined by spaces.
     fn rest(&self, n: usize) -> String {
@@ -67,18 +67,22 @@ impl Args {
     }
 }
 
-fn fail(message: &str) -> ! {
+fn fail(message: impl std::fmt::Display) -> ! {
     eprintln!("rejected: {message}");
     std::process::exit(1)
 }
 
 /// Print `ok`, or `missing` when the change matched nothing.
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "private helper; every call passes another function's result"
+)]
 fn report(changed: bool, missing: &str) {
     println!("{}", if changed { "ok" } else { missing });
 }
 
 /// Print the result of a change that can be refused; a refusal exits with status 1.
-fn report_or_fail(result: Result<bool, String>, missing: &str) {
+fn report_or_fail(result: anyhow::Result<bool>, missing: &str) {
     match result {
         Ok(changed) => report(changed, missing),
         Err(e) => fail(&e),
@@ -115,14 +119,13 @@ fn ingest(c: &Connection) {
 fn import(c: &Connection, file: &str) {
     let raw = if file == "-" {
         let mut s = String::new();
-        std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)
-            .unwrap_or_else(|e| fail(&e.to_string()));
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut s).unwrap_or_else(|e| fail(e));
         s
     } else {
-        std::fs::read_to_string(file).unwrap_or_else(|e| fail(&format!("{file}: {e}")))
+        std::fs::read_to_string(file).unwrap_or_else(|e| fail(format!("{file}: {e}")))
     };
     let facts: Value =
-        serde_json::from_str(&raw).unwrap_or_else(|e| fail(&format!("not JSON: {e}")));
+        serde_json::from_str(&raw).unwrap_or_else(|e| fail(format!("not JSON: {e}")));
     let (mut ok, mut bad) = (0, 0);
     for x in facts
         .as_array()
@@ -166,8 +169,14 @@ fn import(c: &Connection, file: &str) {
                         .flatten()
                         .filter_map(|e| e.as_str().map(String::from))
                         .collect(),
-                    valid_to: x["valid_to"].as_str().filter(|v| !v.is_empty()).map(String::from),
-                    check_how: x["check"].as_str().filter(|v| !v.is_empty()).map(String::from),
+                    valid_to: x["valid_to"]
+                        .as_str()
+                        .filter(|v| !v.is_empty())
+                        .map(String::from),
+                    check_how: x["check"]
+                        .as_str()
+                        .filter(|v| !v.is_empty())
+                        .map(String::from),
                 },
             )
         } else {
@@ -213,7 +222,7 @@ fn import(c: &Connection, file: &str) {
 
 /// Log one history query (`kg-query`, target = its kind) so use can be counted after a few weeks.
 fn kg_query_log(c: &Connection, a: &Args, detail: &str) {
-    let kind = a.0.get(1).map(String::as_str).unwrap_or("");
+    let kind = a.0.get(1).map_or("", String::as_str);
     let detail = match a.opt("--as-of") {
         Some(d) => format!("{detail} as-of {d}").trim().to_string(),
         None => detail.to_string(),
@@ -243,19 +252,19 @@ fn kg_command(c: &Connection, a: &Args) {
         Some("state") => kg::query::state(c),
         Some("export") if a.has("--graph") => {
             let file = a.opt("--graph").unwrap_or_else(|| fail("missing file"));
-            let (n, e) = kg::export::graph(c, &file).unwrap_or_else(|e| fail(&e.to_string()));
+            let (n, e) = kg::export::graph(c, &file).unwrap_or_else(|e| fail(e));
             println!("wrote {n} entities and {e} links to {file}");
             kg_query_log(c, a, "graph");
         }
         Some("export") => {
-            kg::export::export(c, &a.at(2, "file")).unwrap_or_else(|e| fail(&e.to_string()));
-            println!("ok")
+            kg::export::export(c, &a.at(2, "file")).unwrap_or_else(|e| fail(e));
+            println!("ok");
         }
         Some("restore") => {
             let (n, orphans) = kg::export::restore(c, &a.at(2, "file"));
             println!(
                 "restored {n} rows, {orphans} claims kept without a quote (source or quote not found)"
-            )
+            );
         }
         Some("lint") => kg::lint::lint(c),
         Some("suggest") => kg::entities::suggest(c),
@@ -267,7 +276,7 @@ fn kg_command(c: &Connection, a: &Args) {
         }
         Some("entity") if a.0.get(2).map(String::as_str) == Some("ignore") => {
             kg::entities::ignore_suggestion(c, &a.at(3, "term"));
-            println!("ok")
+            println!("ok");
         }
         Some("entity") => {
             let aliases: Vec<String> =
@@ -311,9 +320,28 @@ fn kg_command(c: &Connection, a: &Args) {
     }
 }
 
+/// Exits quietly when stdout is closed early (`| head`) instead of printing a panic. Other panics, and broken
+/// sockets, keep the default behavior.
+fn exit_quietly_on_closed_stdout() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info.payload();
+        let msg = payload
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| payload.downcast_ref::<&str>().copied())
+            .unwrap_or("");
+        if msg.starts_with("failed printing to stdout") && msg.contains("Broken pipe") {
+            std::process::exit(0);
+        }
+        default(info);
+    }));
+}
+
 fn main() {
+    exit_quietly_on_closed_stdout();
     let a = Args(std::env::args().skip(1).collect());
-    let cmd = a.0.first().map(String::as_str).unwrap_or("help");
+    let cmd = a.0.first().map_or("help", String::as_str);
     if cmd == "hooks" {
         return hooks::run(&a.0);
     }
@@ -331,11 +359,11 @@ fn main() {
                     "UPDATE sources SET mtime=0, bytes=0 WHERE kind='session'",
                     [],
                 )
-                .unwrap();
+                .expect("write to database");
                 c.execute("DELETE FROM scanned WHERE path LIKE '%.jsonl'", [])
-                    .unwrap();
+                    .expect("write to database");
             }
-            ingest(&c)
+            ingest(&c);
         }
         "build" => {
             // a fresh machine: index every source, create the configured entities, then embed
@@ -350,7 +378,8 @@ fn main() {
                 ),
             }
             // the hook reads one session per session end, so earlier history stays unread until asked for
-            let unread = kg::extract::queue(&c, usize::MAX, None, None, true).len();
+            let unread =
+                kg::extract::queue(&c, usize::MAX, None, None, kg::extract::Cap::Ignore).len();
             if unread > 0 {
                 println!(
                     "{unread} sessions have not been read for decisions yet (about ${:.2} on a small model). \
@@ -392,14 +421,14 @@ fn main() {
             let name = a.at(1, "thread name");
             if let Some(state) = a.opt("--state") {
                 c.execute("UPDATE threads SET state=?2 WHERE name=?1", [&name, &state])
-                    .unwrap();
+                    .expect("write to database");
             }
             if let Some(summary) = a.opt("--summary") {
                 c.execute(
                     "UPDATE threads SET body=?2 WHERE name=?1",
                     [&name, &summary],
                 )
-                .unwrap();
+                .expect("write to database");
             }
             println!("ok");
         }
@@ -466,12 +495,32 @@ fn main() {
             println!("ok");
         }
         "extract-input" => kg::extract::input(&c, &a.at(1, "session ref")),
-        "finish" => match finish::finish(&c, &a.at(1, "step id"), &a.text("--source"), &a.text("--quote"), a.has("--verified"), a.has("--dry")) {
+        "finish" => match finish::finish(
+            &c,
+            &a.at(1, "step id"),
+            &a.text("--source"),
+            &a.text("--quote"),
+            if a.has("--verified") {
+                finish::Evidence::Confirmed
+            } else {
+                finish::Evidence::Unconfirmed
+            },
+            if a.has("--dry") {
+                finish::Run::Dry
+            } else {
+                finish::Run::Apply
+            },
+        ) {
             Ok(line) => println!("{line}"),
             Err(e) => fail(&e),
         },
         "finish-input" => finish::input(&c, &a.at(1, "step id")),
-        "finish-evidence" => finish::evidence(&c, &a.at(1, "step id"), &a.text("--source"), &a.text("--quote")),
+        "finish-evidence" => finish::evidence(
+            &c,
+            &a.at(1, "step id"),
+            &a.text("--source"),
+            &a.text("--quote"),
+        ),
         "finish-queue" => finish::queue(&c).iter().for_each(|id| println!("{id}")),
         "extract-queue" => {
             let queue = kg::extract::queue(
@@ -479,10 +528,14 @@ fn main() {
                 a.num("--limit", 3),
                 a.opt("--entity").as_deref(),
                 a.opt("--session").as_deref(),
-                a.has("--no-cap"),
+                if a.has("--no-cap") {
+                    kg::extract::Cap::Ignore
+                } else {
+                    kg::extract::Cap::Daily
+                },
             );
             for r in queue {
-                println!("{r}")
+                println!("{r}");
             }
         }
         "extract-log" => {
@@ -501,7 +554,15 @@ fn main() {
             if !db::is_demo() {
                 ingest::rescan(&c);
             }
-            views::brief(&c, a.opt("--thread").as_deref(), a.has("--all"))
+            views::brief(
+                &c,
+                a.opt("--thread").as_deref(),
+                if a.has("--all") {
+                    views::Detail::Full
+                } else {
+                    views::Detail::Short
+                },
+            );
         }
         "backup" => println!(
             "{}",
@@ -510,22 +571,38 @@ fn main() {
         "keep" => println!("kept {}", items::keep_all(&c)),
         "check" if a.has("--pairs") => check::pairs(&c),
         "check" => check::check(&c),
-        "match" => check::match_commits(&c, true),
+        "match" => check::match_commits(&c),
         "resolve" => {
             if a.has("--expired") {
                 println!("expired {}", resolve::expire(&c));
             } else {
                 report_or_fail(
-                    resolve::resolve(&c, &a.at(1, "item id"), &a.text("--by"), &a.text("--reason")),
+                    resolve::resolve(
+                        &c,
+                        &a.at(1, "item id"),
+                        &a.text("--by"),
+                        &a.text("--reason"),
+                    ),
                     "no such open item",
                 );
             }
         }
-        "unresolve" => report(resolve::unresolve(&c, &a.at(1, "item id")), "not a resolved item"),
+        "unresolve" => report(
+            resolve::unresolve(&c, &a.at(1, "item id")),
+            "not a resolved item",
+        ),
         "resolve-packet" if a.has("--reverses") => resolve::reverse_packet(&c, &a.at(1, "item id")),
         "resolve-packet" => resolve::packet(&c, &a.at(1, "item id")),
         "resolve-apply" => resolve::apply_cli(&c, &a.at(1, "file")),
-        "howto-queue" => howto::queue(&c, a.num("--limit", 30), a.has("--again")),
+        "howto-queue" => howto::queue(
+            &c,
+            a.num("--limit", 30),
+            if a.has("--again") {
+                howto::Asked::Include
+            } else {
+                howto::Asked::Skip
+            },
+        ),
         "howto-packet" => howto::packet(&c, &a.at(1, "step id")),
         "howto-apply" => howto::apply_cli(&c),
         "resolve-queue" if a.has("--reverses") => resolve::reverse_queue(&c, a.num("--limit", 20)),
@@ -535,7 +612,7 @@ fn main() {
         "skip" => {
             let r = db::resolve_ref(&c, &a.at(1, "session ref"));
             let id = db::source_id(&c, &r).unwrap_or(0);
-            report(items::skip_session(&c, id, "claude"), "no such session")
+            report(items::skip_session(&c, id, "claude"), "no such session");
         }
         "show" => check::show(&c, &a.at(1, "source ref")),
         "log" => check::log(&c, a.num("--n", 25)),
@@ -550,7 +627,7 @@ fn main() {
                     "--text" => i += 1,
                     word => {
                         words.push(word);
-                        i += 1
+                        i += 1;
                     }
                 }
             }
@@ -561,13 +638,22 @@ fn main() {
                 from: a.text("--from"),
                 to: a.text("--to"),
             };
-            search::print(&c, &words.join(" "), &filters, !a.has("--text"))
+            search::print(
+                &c,
+                &words.join(" "),
+                &filters,
+                if a.has("--text") {
+                    search::Mode::Text
+                } else {
+                    search::Mode::Semantic
+                },
+            );
         }
         "kg" => kg_command(&c, &a),
         "demo" => demo::demo(&c),
         "serve" => {
             let port = a.num("--port", config::cfg().port);
-            server::serve(c, port)
+            server::serve(&c, port);
         }
         _ => println!("{USAGE}"),
     }

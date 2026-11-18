@@ -2,17 +2,21 @@
 //! source ref and a quote, not as row ids, so another machine can find the passage again.
 use crate::db::{find_quote, source_id};
 use rusqlite::{Connection, params};
+use std::fmt::Write;
 
 /// One JSON object per line. A claim's evidence is stored by source ref and quote, not by row id, so another machine can re-locate it.
 pub fn export(c: &Connection, path: &str) -> std::io::Result<()> {
     use std::io::Write;
     let mut f = std::fs::File::create(path)?;
     let q = |sql: &str, cols: &[&str]| -> Vec<serde_json::Value> {
-        let mut st = c.prepare(sql).unwrap();
+        let mut st = c.prepare(sql).expect("prepare query");
         st.query_map([], |r| {
             let mut o = serde_json::Map::new();
             for (i, k) in cols.iter().enumerate() {
-                let v = match r.get::<_, rusqlite::types::Value>(i).unwrap() {
+                let v = match r
+                    .get::<_, rusqlite::types::Value>(i)
+                    .expect("column index within the SELECT")
+                {
                     rusqlite::types::Value::Text(t) => serde_json::Value::from(t),
                     rusqlite::types::Value::Integer(n) => serde_json::Value::from(n.to_string()),
                     _ => serde_json::Value::Null,
@@ -21,8 +25,8 @@ pub fn export(c: &Connection, path: &str) -> std::io::Result<()> {
             }
             Ok(serde_json::Value::Object(o))
         })
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
         .collect()
     };
     let sets: [(&str, &str, &[&str]); 5] = [
@@ -98,16 +102,16 @@ pub fn restore(c: &Connection, path: &str) -> (usize, usize) {
                     "INSERT OR REPLACE INTO entities(id,name,kind,created) VALUES(?1,?2,?3,?4)",
                     params![g("id"), g("name"), g("kind"), g("created")],
                 )
-                .unwrap();
-                n += 1
+                .expect("write to database");
+                n += 1;
             }
             "alias" => {
                 c.execute(
                     "INSERT OR REPLACE INTO entity_aliases(alias,entity_id) VALUES(?1,?2)",
                     params![g("alias"), g("entity_id")],
                 )
-                .unwrap();
-                n += 1
+                .expect("write to database");
+                n += 1;
             }
             "claim" => {
                 let hit = locate(c, g("source"), &g("quote").unwrap_or_default());
@@ -153,20 +157,20 @@ pub fn restore(c: &Connection, path: &str) -> (usize, usize) {
                         g("updated")
                     ],
                 )
-                .unwrap();
-                n += 1
+                .expect("write to database");
+                n += 1;
             }
             "about" => {
                 c.execute(
                     "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role) VALUES(?1,?2,?3)",
                     params![g("claim_id"), g("entity_id"), g("role")],
                 )
-                .unwrap();
-                n += 1
+                .expect("write to database");
+                n += 1;
             }
             "override" => {
-                c.execute("INSERT OR REPLACE INTO kg_overrides(target,field,value,by,ts) VALUES(?1,?2,?3,?4,?5)", params![g("target"), g("field"), g("value"), g("by"), g("ts")]).unwrap();
-                n += 1
+                c.execute("INSERT OR REPLACE INTO kg_overrides(target,field,value,by,ts) VALUES(?1,?2,?3,?4,?5)", params![g("target"), g("field"), g("value"), g("by"), g("ts")]).expect("write to database");
+                n += 1;
             }
             "evidence" => {
                 // Old exports kept evidence in its own rows; the claim now carries its quote.
@@ -176,8 +180,8 @@ pub fn restore(c: &Connection, path: &str) -> (usize, usize) {
                             "UPDATE claims SET source_id=?2, chunk_id=?3, quote=?4, stated=?5 WHERE id=?1 AND quote IS NULL",
                             params![g("claim_id"), sid, cid, g("quote"), g("stated").unwrap_or("stated".into())],
                         )
-                        .unwrap();
-                        n += 1
+                        .expect("write to database");
+                        n += 1;
                     }
                     None => orphan += 1,
                 }
@@ -201,9 +205,9 @@ fn xml(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-/// The entity graph for Gephi or NetworkX, not a backup: nodes are entities (name, kind, claims in force), an edge joins
+/// The entity graph for Gephi or `NetworkX`, not a backup: nodes are entities (name, kind, claims in force), an edge joins
 /// two entities when a claim in force names both (weight = shared claims, first and last day, newest claim's text).
-/// `.graphml` writes GraphML; any other name writes JSON in NetworkX node-link form (`links`). Honours `--as-of`.
+/// `.graphml` writes `GraphML`; any other name writes JSON in `NetworkX` node-link form (`links`). Honours `--as-of`.
 /// Returns (nodes, edges).
 pub fn graph(c: &Connection, path: &str) -> std::io::Result<(usize, usize)> {
     let live = super::query::in_force();
@@ -211,10 +215,10 @@ pub fn graph(c: &Connection, path: &str) -> std::io::Result<(usize, usize)> {
         .prepare(&format!(
             "SELECT e.name, ifnull(e.kind,''), (SELECT COUNT(DISTINCT a.claim_id) FROM claim_about a JOIN claims c ON c.id=a.claim_id AND {live} AND (c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%') WHERE a.entity_id=e.id) FROM entities e ORDER BY e.name"
         ))
-        .unwrap()
+        .expect("prepare query")
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
         .collect();
     let edges: Vec<(String, String, i64, String, String, String)> = c
         .prepare(&format!(
@@ -226,7 +230,7 @@ pub fn graph(c: &Connection, path: &str) -> std::io::Result<(usize, usize)> {
              GROUP BY a.entity_id, b.entity_id ORDER BY 3 DESC",
             live.replace("c.", "c2.")
         ))
-        .unwrap()
+        .expect("prepare query")
         .query_map([], |r| {
             Ok((
                 r.get(0)?,
@@ -237,18 +241,29 @@ pub fn graph(c: &Connection, path: &str) -> std::io::Result<(usize, usize)> {
                 r.get::<_, Option<String>>(5)?.unwrap_or_default(),
             ))
         })
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
         .collect();
     let out = if path.ends_with(".graphml") {
         let mut o = String::from(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<graphml xmlns=\"http://graphml.graphdrawing.org/xmlns\">\n<key id=\"kind\" for=\"node\" attr.name=\"kind\" attr.type=\"string\"/>\n<key id=\"claims\" for=\"node\" attr.name=\"claims\" attr.type=\"int\"/>\n<key id=\"weight\" for=\"edge\" attr.name=\"weight\" attr.type=\"int\"/>\n<key id=\"first\" for=\"edge\" attr.name=\"first\" attr.type=\"string\"/>\n<key id=\"last\" for=\"edge\" attr.name=\"last\" attr.type=\"string\"/>\n<key id=\"latest_claim\" for=\"edge\" attr.name=\"latest_claim\" attr.type=\"string\"/>\n<graph id=\"backtrail\" edgedefault=\"undirected\">\n",
         );
         for (n, k, cl) in &nodes {
-            o.push_str(&format!("<node id=\"{}\"><data key=\"kind\">{}</data><data key=\"claims\">{cl}</data></node>\n", xml(n), xml(k)));
+            let _ = writeln!(
+                o,
+                "<node id=\"{}\"><data key=\"kind\">{}</data><data key=\"claims\">{cl}</data></node>",
+                xml(n),
+                xml(k)
+            );
         }
         for (a, b, w, f, l, t) in &edges {
-            o.push_str(&format!("<edge source=\"{}\" target=\"{}\"><data key=\"weight\">{w}</data><data key=\"first\">{f}</data><data key=\"last\">{l}</data><data key=\"latest_claim\">{}</data></edge>\n", xml(a), xml(b), xml(t)));
+            let _ = writeln!(
+                o,
+                "<edge source=\"{}\" target=\"{}\"><data key=\"weight\">{w}</data><data key=\"first\">{f}</data><data key=\"last\">{l}</data><data key=\"latest_claim\">{}</data></edge>",
+                xml(a),
+                xml(b),
+                xml(t)
+            );
         }
         o.push_str("</graph>\n</graphml>\n");
         o

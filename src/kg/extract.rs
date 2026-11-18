@@ -3,7 +3,15 @@
 use super::{clip, entities, has_word};
 use crate::clock::now;
 use crate::db::norm;
+use anyhow::Context;
 use rusqlite::{Connection, params};
+
+/// Whether [`queue`] stops at the daily extraction cap from the config.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cap {
+    Daily,
+    Ignore,
+}
 
 /// Sessions to extract claims from: at least one owner turn, not automated probes, not yet extracted, newest first,
 /// within the daily cap. `entity` restricts to sessions whose owner turns mention that entity (tier 2, lazy).
@@ -12,7 +20,7 @@ pub fn queue(
     limit: usize,
     entity: Option<&str>,
     session_id: Option<&str>,
-    ignore_cap: bool,
+    cap: Cap,
 ) -> Vec<String> {
     let today = now()[..10].to_string();
     let used: i64 = c
@@ -22,34 +30,40 @@ pub fn queue(
             |x| x.get(0),
         )
         .unwrap_or(0);
-    let cap = crate::config::cfg().daily_cap;
-    let room = if ignore_cap { usize::MAX } else { (cap - used).max(0) as usize };
+    let room = match cap {
+        Cap::Ignore => usize::MAX,
+        Cap::Daily => usize::try_from(crate::config::cfg().daily_cap - used).unwrap_or(0),
+    };
     // a full session id or any unique prefix of it
     let only = session_id.map(|s| {
         crate::db::resolve_ref(c, &format!("session:{}", s.trim_start_matches("session:")))
     });
     // Unsorted sessions are left out of the general queue, but not when the hook names the session that just ended:
     // work run from a parent folder lands in Unsorted, and it can still finish a step or settle a decision.
-    let sorted = if only.is_some() { "1" } else { "ifnull(s.thread,'Unsorted')!='Unsorted'" };
-    let mut st = c.prepare(&format!("SELECT s.ref, s.id FROM sources s WHERE s.kind='session' AND (SELECT COUNT(*) FROM chunks WHERE source_id=s.id AND role='user')>=1 AND {sorted} AND NOT (s.ref NOT LIKE 'session:%-%' AND EXISTS (SELECT 1 FROM sources t WHERE t.kind='session' AND t.path=s.path AND t.id!=s.id)) AND NOT EXISTS (SELECT 1 FROM log l WHERE l.target=s.ref AND l.action IN ('extract','kg-extract')) AND ( SELECT COUNT(*) FROM log l WHERE l.target=s.ref AND l.action IN ('extract-failed','kg-extract-failed','compile-failed') )<2 AND NOT EXISTS ( SELECT 1 FROM chunks k WHERE k.source_id=s.id AND k.seq=0 AND (k.text LIKE 'BACKTRAIL-%' OR k.text LIKE 'Reply with%' OR k.text LIKE 'Read the file%' OR k.text LIKE 'Write a %') ) ORDER BY s.last_ts DESC")).unwrap();
+    let sorted = if only.is_some() {
+        "1"
+    } else {
+        "ifnull(s.thread,'Unsorted')!='Unsorted'"
+    };
+    let mut st = c.prepare(&format!("SELECT s.ref, s.id FROM sources s WHERE s.kind='session' AND (SELECT COUNT(*) FROM chunks WHERE source_id=s.id AND role='user')>=1 AND {sorted} AND NOT (s.ref NOT LIKE 'session:%-%' AND EXISTS (SELECT 1 FROM sources t WHERE t.kind='session' AND t.path=s.path AND t.id!=s.id)) AND NOT EXISTS (SELECT 1 FROM log l WHERE l.target=s.ref AND l.action IN ('extract','kg-extract')) AND ( SELECT COUNT(*) FROM log l WHERE l.target=s.ref AND l.action IN ('extract-failed','kg-extract-failed','compile-failed') )<2 AND NOT EXISTS ( SELECT 1 FROM chunks k WHERE k.source_id=s.id AND k.seq=0 AND (k.text LIKE 'BACKTRAIL-%' OR k.text LIKE 'Reply with%' OR k.text LIKE 'Read the file%' OR k.text LIKE 'Write a %') ) ORDER BY s.last_ts DESC")).expect("prepare query");
     let want: Option<Vec<String>> = entity.and_then(|e| entities::find(c, e)).map(|(id, _)| {
         c.prepare("SELECT alias FROM entity_aliases WHERE entity_id=?1")
-            .unwrap()
+            .expect("prepare query")
             .query_map(params![id], |r| r.get::<_, String>(0))
-            .unwrap()
-            .flatten()
+            .expect("run query")
+            .map(|row| row.expect("decode query row"))
             .collect()
     });
     let mut out = vec![];
     for (r, sid) in st
         .query_map([], |x| Ok((x.get::<_, String>(0)?, x.get::<_, i64>(1)?)))
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
     {
         if out.len() >= limit.min(room) {
             break;
         }
-        if only.as_ref().map_or(false, |o| *o != r) {
+        if only.as_ref().is_some_and(|o| *o != r) {
             continue;
         }
         if let Some(al) = &want {
@@ -57,7 +71,7 @@ pub fn queue(
                 .prepare(
                     "SELECT group_concat(text, ' ') FROM chunks WHERE source_id=?1 AND role='user'",
                 )
-                .unwrap()
+                .expect("prepare query")
                 .query_row(params![sid], |x| x.get::<_, Option<String>>(0))
                 .unwrap_or_default()
                 .unwrap_or_default();
@@ -78,22 +92,22 @@ fn unextracted_mentioning(c: &Connection, entity: &str) -> Vec<String> {
     };
     let al: Vec<String> = c
         .prepare("SELECT alias FROM entity_aliases WHERE entity_id=?1")
-        .unwrap()
+        .expect("prepare query")
         .query_map(params![id], |r| r.get::<_, String>(0))
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
         .collect();
     let mut st = c
         .prepare("SELECT s.ref, ( SELECT group_concat(text,' ') FROM chunks WHERE source_id=s.id AND role='user' ) FROM sources s WHERE s.kind='session' AND NOT EXISTS (SELECT 1 FROM log l WHERE l.target=s.ref AND l.action IN ('extract','kg-extract'))")
-        .unwrap();
+        .expect("prepare query");
     st.query_map([], |r| {
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, Option<String>>(1)?.unwrap_or_default(),
         ))
     })
-    .unwrap()
-    .flatten()
+    .expect("run query")
+    .map(|row| row.expect("decode query row"))
     .filter(|(_, t)| {
         let t = norm(t);
         al.iter().any(|a| has_word(&t, a))
@@ -106,51 +120,63 @@ fn unextracted_mentioning(c: &Connection, entity: &str) -> Vec<String> {
 pub fn usd_each(c: &Connection) -> f64 {
     let v: Vec<f64> = c
         .prepare("SELECT detail FROM log WHERE action='extract' AND detail LIKE 'usd=%'")
-        .unwrap()
+        .expect("prepare query")
         .query_map([], |r| r.get::<_, String>(0))
-        .unwrap()
-        .flatten()
-        .filter_map(|d| d.strip_prefix("usd=")?.split_whitespace().next()?.parse().ok())
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
+        .filter_map(|d| {
+            d.strip_prefix("usd=")?
+                .split_whitespace()
+                .next()?
+                .parse()
+                .ok()
+        })
         .collect();
-    if v.is_empty() { 0.01 } else { v.iter().sum::<f64>() / v.len() as f64 }
+    if v.is_empty() {
+        0.01
+    } else {
+        v.iter().sum::<f64>() / v.len() as f64
+    }
 }
 
 /// Sessions that mention the entity and would be extracted next: the same rules as `queue`, no daily cap.
 pub fn unread(c: &Connection, entity: &str) -> usize {
-    queue(c, usize::MAX, Some(entity), None, true).len()
+    queue(c, usize::MAX, Some(entity), None, Cap::Ignore).len()
 }
 
 /// Start `skill/extract.sh --entity E --limit N --no-cap` detached and return at once. The binary still calls no
-/// model itself; the script does. Output goes to the same log file as the SessionEnd run.
+/// model itself; the script does. Output goes to the same log file as the `SessionEnd` run.
 pub fn start_in_background(
     c: &Connection,
     entity: &str,
     limit: usize,
-) -> Result<serde_json::Value, String> {
-    let (_, name) = entities::find(c, entity).ok_or("no such entity")?;
-    let exe = std::env::current_exe()
-        .and_then(|p| p.canonicalize())
-        .map_err(|e| e.to_string())?;
+) -> anyhow::Result<serde_json::Value> {
+    let (_, name) = entities::find(c, entity).context("no such entity")?;
+    let exe = std::env::current_exe().and_then(|p| p.canonicalize())?;
     let script = exe
         .ancestors()
         .map(|a| a.join("skill/extract.sh"))
         .find(|p| p.exists())
-        .ok_or("skill/extract.sh not found next to the build")?;
+        .context("skill/extract.sh not found next to the build")?;
     let log = std::env::temp_dir().join("backtrail-extract.log");
     let out = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&log)
-        .map_err(|e| e.to_string())?;
+        .open(&log)?;
     let n = unread(c, &name).min(limit);
     std::process::Command::new(script)
         .args(["--entity", &name, "--limit", &limit.to_string(), "--no-cap"])
         .stdin(std::process::Stdio::null())
-        .stdout(out.try_clone().map_err(|e| e.to_string())?)
+        .stdout(out.try_clone()?)
         .stderr(out)
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    crate::db::logw(c, "owner", "kg-extract-start", &name, &format!("{n} sessions"));
+        .spawn()?;
+    crate::db::logw(
+        c,
+        "owner",
+        "kg-extract-start",
+        &name,
+        &format!("{n} sessions"),
+    );
     Ok(serde_json::json!({"ok": true, "started": n}))
 }
 
@@ -171,12 +197,12 @@ pub fn input(c: &Connection, r: &str) {
     println!("EXISTING ITEMS ON THIS THREAD (do not repeat these):");
     for (t, title) in c
         .prepare("SELECT type, title FROM claims WHERE thread=?1 AND type IN ('decision','step','question','turn') AND state!='rejected' ORDER BY created DESC LIMIT 40")
-        .unwrap()
+        .expect("prepare query")
         .query_map(params![thread], |x| {
             Ok((x.get::<_, String>(0)?, x.get::<_, String>(1)?))
         })
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
     {
         println!("- {t}: {}", clip(&title, 110));
     }
@@ -184,10 +210,10 @@ pub fn input(c: &Connection, r: &str) {
     println!("\nENTITIES (use these names exactly):");
     for (n, k) in c
         .prepare("SELECT name, ifnull(kind,'') FROM entities ORDER BY name")
-        .unwrap()
+        .expect("prepare query")
         .query_map([], |x| Ok((x.get::<_, String>(0)?, x.get::<_, String>(1)?)))
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
     {
         println!("- {n} ({k})");
     }
@@ -195,7 +221,7 @@ pub fn input(c: &Connection, r: &str) {
     let mut used = 0usize;
     let mut q = c
         .prepare("SELECT locator, role, text FROM chunks WHERE source_id=?1 ORDER BY seq")
-        .unwrap();
+        .expect("prepare query");
     for (l, role, t) in q
         .query_map(params![sid], |x| {
             Ok((
@@ -204,8 +230,8 @@ pub fn input(c: &Connection, r: &str) {
                 x.get::<_, String>(2)?,
             ))
         })
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
     {
         let user = role == "user";
         let s = clip(&t, if user { 900 } else { 220 });

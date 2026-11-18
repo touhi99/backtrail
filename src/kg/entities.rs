@@ -12,12 +12,12 @@ pub fn ensure(c: &Connection, name: &str, kind: &str, now: &str) -> String {
         "INSERT OR IGNORE INTO entities(id,name,kind,created) VALUES(?1,?2,?3,?4)",
         params![id, name, kind, now],
     )
-    .unwrap();
+    .expect("write to database");
     c.execute(
         "INSERT OR IGNORE INTO entity_aliases(alias,entity_id) VALUES(?1,?2)",
         params![norm(name), id],
     )
-    .unwrap();
+    .expect("write to database");
     id
 }
 
@@ -44,7 +44,7 @@ pub fn find(c: &Connection, name: &str) -> Option<(String, String)> {
 /// Entities whose name or alias appears as a whole word in `text`.
 pub fn mentions(c: &Connection, text: &str) -> Vec<(String, String)> {
     let hay = norm(text);
-    let mut st = c.prepare("SELECT e.id, e.name, a.alias FROM entities e JOIN entity_aliases a ON a.entity_id=e.id").unwrap();
+    let mut st = c.prepare("SELECT e.id, e.name, a.alias FROM entities e JOIN entity_aliases a ON a.entity_id=e.id").expect("prepare query");
     let mut out: Vec<(String, String)> = vec![];
     for (id, name, alias) in st
         .query_map([], |r| {
@@ -54,8 +54,8 @@ pub fn mentions(c: &Connection, text: &str) -> Vec<(String, String)> {
                 r.get::<_, String>(2)?,
             ))
         })
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
     {
         if !alias.is_empty() && has_word(&hay, &alias) && !out.iter().any(|o| o.0 == id) {
             out.push((id, name));
@@ -177,7 +177,7 @@ fn seed_topics(c: &Connection) {
                 "INSERT OR IGNORE INTO entity_aliases(alias,entity_id) VALUES(?1,?2)",
                 params![a, id],
             )
-            .unwrap();
+            .expect("write to database");
         }
     }
 }
@@ -195,13 +195,13 @@ pub fn sync_configured(c: &Connection) -> usize {
     {
         let id = ensure(c, name, kind, &now);
         c.execute("UPDATE entities SET kind=?2 WHERE id=?1", params![id, kind])
-            .unwrap();
+            .expect("write to database");
         for a in aliases {
             c.execute(
                 "INSERT OR IGNORE INTO entity_aliases(alias,entity_id) VALUES(?1,?2)",
                 params![a, id],
             )
-            .unwrap();
+            .expect("write to database");
         }
     }
     list.len()
@@ -213,7 +213,7 @@ pub fn link_claim(c: &Connection, id: &str, thread: &str, hay: &str) -> usize {
     let ents: Vec<(String, String, Vec<String>)> = {
         let mut st = c
             .prepare("SELECT e.id, e.name, ( SELECT group_concat(alias, char(31)) FROM entity_aliases a WHERE a.entity_id=e.id ) FROM entities e")
-            .unwrap();
+            .expect("prepare query");
         st.query_map([], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -221,8 +221,8 @@ pub fn link_claim(c: &Connection, id: &str, thread: &str, hay: &str) -> usize {
                 r.get::<_, Option<String>>(2)?.unwrap_or_default(),
             ))
         })
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
         .map(|(i, n, a)| (i, n, a.split('\u{1f}').map(String::from).collect()))
         .collect()
     };
@@ -231,11 +231,15 @@ pub fn link_claim(c: &Connection, id: &str, thread: &str, hay: &str) -> usize {
     // still matches where the text says "Marvel" on its own.
     let mut pairs: Vec<(&str, &str)> = ents
         .iter()
-        .flat_map(|(eid, _, al)| al.iter().filter(|a| !a.is_empty()).map(move |a| (a.as_str(), eid.as_str())))
+        .flat_map(|(eid, _, al)| {
+            al.iter()
+                .filter(|a| !a.is_empty())
+                .map(move |a| (a.as_str(), eid.as_str()))
+        })
         .collect();
     pairs.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then(a.0.cmp(b.0)));
-    let mut masked = hay.clone();
-    let mut by_alias: std::collections::HashSet<&str> = Default::default();
+    let mut masked = hay;
+    let mut by_alias: std::collections::HashSet<&str> = std::collections::HashSet::default();
     let mut i = 0;
     while i < pairs.len() {
         let alias = pairs[i].0;
@@ -257,7 +261,7 @@ pub fn link_claim(c: &Connection, id: &str, thread: &str, hay: &str) -> usize {
                 "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role) VALUES(?1,?2,'subject')",
                 params![id, eid],
             )
-            .unwrap();
+            .expect("write to database");
             n += 1;
         }
     }
@@ -270,8 +274,14 @@ fn mask_word(text: &str, word: &str) -> String {
     let mut from = 0;
     while let Some(i) = text[from..].find(word) {
         let (start, end) = (from + i, from + i + word.len());
-        let before = text[..start].chars().next_back().is_none_or(|ch| !ch.is_alphanumeric());
-        let after = text[end..].chars().next().is_none_or(|ch| !ch.is_alphanumeric());
+        let before = text[..start]
+            .chars()
+            .next_back()
+            .is_none_or(|ch| !ch.is_alphanumeric());
+        let after = text[end..]
+            .chars()
+            .next()
+            .is_none_or(|ch| !ch.is_alphanumeric());
         out.push_str(&text[from..start]);
         if before && after {
             out.push_str(&" ".repeat(word.len()));
@@ -288,10 +298,10 @@ fn mask_word(text: &str, word: &str) -> String {
 pub fn relink_all(c: &Connection) -> usize {
     let rows: Vec<(String, String, String)> = c
         .prepare("SELECT id, ifnull(thread,''), title||' '||ifnull(body,'')||' '||ifnull(quote,'') FROM claims WHERE type IN ('decision','state','rationale')")
-        .unwrap()
+        .expect("prepare query")
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
         .collect();
     rows.iter()
         .map(|(id, th, hay)| link_claim(c, id, th, hay))
@@ -302,13 +312,13 @@ pub fn relink_all(c: &Connection) -> usize {
 pub fn add(c: &Connection, name: &str, kind: &str, aliases: &[String]) -> String {
     let id = ensure(c, name, kind, &now());
     c.execute("UPDATE entities SET kind=?2 WHERE id=?1", params![id, kind])
-        .unwrap();
+        .expect("write to database");
     for a in aliases {
         c.execute(
             "INSERT OR REPLACE INTO entity_aliases(alias,entity_id) VALUES(?1,?2)",
             params![norm(a), id],
         )
-        .unwrap();
+        .expect("write to database");
     }
     relink_all(c);
     logw(c, "owner", "kg-entity", name, &aliases.join(", "));
@@ -325,7 +335,7 @@ pub fn add_alias(c: &Connection, entity: &str, alias: &str) -> bool {
         "INSERT OR REPLACE INTO entity_aliases(alias,entity_id) VALUES(?1,?2)",
         params![norm(alias), id],
     )
-    .unwrap();
+    .expect("write to database");
     relink_all(c);
     logw(c, "owner", "kg-alias", &name, alias);
     true
@@ -336,20 +346,24 @@ pub fn examples(c: &Connection, term: &str, n: usize) -> Vec<(String, String, i6
     let like = format!("%{}%", term.replace(['%', '_'], ""));
     let mut st = c
         .prepare("SELECT ifnull(c.ts,''), c.text, c.source_id FROM chunks c JOIN sources s ON s.id=c.source_id WHERE s.kind='session' AND c.role='user' AND length(c.text)<3000 AND c.text NOT LIKE '%task-notification%' AND c.text NOT LIKE 'This session is being continued%' AND c.text LIKE ?1 ORDER BY c.ts DESC LIMIT ?2")
-        .unwrap();
+        .expect("prepare query");
     // the same message can sit in several sessions; fetch extra rows and drop repeats below
     let n_rows = n * 4;
-    st.query_map(params![like, n_rows as i64], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+    st.query_map(params![like, crate::db::sql_int(n_rows)], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
     })
-    .unwrap()
-    .flatten()
+    .expect("run query")
+    .map(|row| row.expect("decode query row"))
     .map(|(ts, text, sid)| {
         let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
         let chars: Vec<char> = flat.chars().collect();
         let low: Vec<char> = flat.to_lowercase().chars().collect();
         let t: Vec<char> = term.to_lowercase().chars().collect();
-        let at = (0..low.len().saturating_sub(t.len()) + 1)
+        let at = (0..=low.len().saturating_sub(t.len()))
             .find(|&i| low.get(i..i + t.len()) == Some(&t[..]))
             .unwrap_or(0);
         let from = at.saturating_sub(70);
@@ -377,7 +391,7 @@ pub fn ignore_suggestion(c: &Connection, term: &str) {
         "INSERT OR REPLACE INTO kg_overrides(target,field,value,by,ts) VALUES(?1,'entity_ignore','1','owner',?2)",
         params![term.to_lowercase(), now()],
     )
-    .unwrap();
+    .expect("write to database");
 }
 
 /// Bring a hidden term back into the suggestions. Returns false when it was not hidden.
@@ -397,16 +411,21 @@ pub fn unignore_suggestion(c: &Connection, term: &str) -> bool {
 /// Terms the owner hid from the suggestions, newest first.
 pub fn ignored_terms(c: &Connection) -> Vec<String> {
     c.prepare("SELECT target FROM kg_overrides WHERE field='entity_ignore' ORDER BY ts DESC")
-        .unwrap()
+        .expect("prepare query")
         .query_map([], |r| r.get::<_, String>(0))
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
         .collect()
 }
 
+/// A term that matches a known alias once squashed: (term, known alias, mentions).
+type AliasHit = (String, String, usize);
+/// A term that looks like a name but is no entity yet: (term, mentions, sessions).
+type NameCandidate = (String, usize, usize);
+
 /// Terms that look like names but are not entities or aliases yet, with counts; and likely alias spellings of known names.
 /// Nothing is written: the owner adds an entity with `kg entity add`.
-pub fn suggest_data(c: &Connection) -> (Vec<(String, String, usize)>, Vec<(String, usize, usize)>) {
+pub fn suggest_data(c: &Connection) -> (Vec<AliasHit>, Vec<NameCandidate>) {
     let words: std::collections::HashSet<String> = std::fs::read_to_string("/usr/share/dict/words")
         .unwrap_or_default()
         .lines()
@@ -414,18 +433,18 @@ pub fn suggest_data(c: &Connection) -> (Vec<(String, String, usize)>, Vec<(Strin
         .collect();
     let known: std::collections::HashSet<String> = c
         .prepare("SELECT alias FROM entity_aliases")
-        .unwrap()
+        .expect("prepare query")
         .query_map([], |r| r.get::<_, String>(0))
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
         .collect();
-    let mut st = c.prepare("SELECT c.text, c.source_id FROM chunks c JOIN sources s ON s.id=c.source_id WHERE s.kind='session' AND c.role='user' AND length(c.text)<3000 AND c.text NOT LIKE '%task-notification%' AND c.text NOT LIKE 'This session is being continued%' AND c.text NOT LIKE '<bash-%'").unwrap();
+    let mut st = c.prepare("SELECT c.text, c.source_id FROM chunks c JOIN sources s ON s.id=c.source_id WHERE s.kind='session' AND c.role='user' AND length(c.text)<3000 AND c.text NOT LIKE '%task-notification%' AND c.text NOT LIKE 'This session is being continued%' AND c.text NOT LIKE '<bash-%'").expect("prepare query");
     let mut df: std::collections::HashMap<String, (usize, std::collections::HashSet<i64>, usize)> =
-        Default::default();
+        std::collections::HashMap::default();
     for (t, sid) in st
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
     {
         let mut seen = std::collections::HashSet::new();
         let mut prev_end = true; // the previous word ended a sentence
@@ -435,7 +454,7 @@ pub fn suggest_data(c: &Connection) -> (Vec<(String, String, usize)>, Vec<(Strin
             let lead_end = prev_end;
             prev_end = ends;
             if core.chars().count() < 4
-                || !core.chars().next().map_or(false, |ch| ch.is_alphabetic())
+                || !core.chars().next().is_some_and(char::is_alphabetic)
                 || core.contains("http")
                 || w.contains(['\'', '’', '/'])
             {
@@ -448,7 +467,13 @@ pub fn suggest_data(c: &Connection) -> (Vec<(String, String, usize)>, Vec<(Strin
             let e = df.entry(l).or_default();
             e.0 += 1;
             e.1.insert(sid);
-            if core.chars().next().unwrap().is_uppercase() && !lead_end {
+            if core
+                .chars()
+                .next()
+                .expect("core has at least 4 chars")
+                .is_uppercase()
+                && !lead_end
+            {
                 e.2 += 1;
             }
         }
@@ -459,10 +484,10 @@ pub fn suggest_data(c: &Connection) -> (Vec<(String, String, usize)>, Vec<(Strin
     // Terms the owner dismissed from the suggestions (kept in kg_overrides, so nothing is hard-coded).
     let ignored: std::collections::HashSet<String> = c
         .prepare("SELECT target FROM kg_overrides WHERE field='entity_ignore'")
-        .unwrap()
+        .expect("prepare query")
         .query_map([], |r| r.get::<_, String>(0))
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
         .collect();
     let in_dict = |w: &str| -> bool {
         let stems = [
@@ -485,10 +510,13 @@ pub fn suggest_data(c: &Connection) -> (Vec<(String, String, usize)>, Vec<(Strin
             continue;
         }
         // a file name counts as its stem: "readme.md" is the entity "readme"
-        let base = [".md", ".json", ".toml", ".yaml", ".yml", ".lock", ".rs", ".ts", ".tsx", ".js", ".py", ".sh", ".html", ".css", ".svg", ".txt", ".db"]
-            .iter()
-            .find_map(|e| w.strip_suffix(e))
-            .unwrap_or(w);
+        let base = [
+            ".md", ".json", ".toml", ".yaml", ".yml", ".lock", ".rs", ".ts", ".tsx", ".js", ".py",
+            ".sh", ".html", ".css", ".svg", ".txt", ".db",
+        ]
+        .iter()
+        .find_map(|e| w.strip_suffix(e))
+        .unwrap_or(w);
         let sq = squash(base);
         let trimmed = sq.trim_end_matches('s').to_string();
         if let Some(k) = known_sq.get(&sq).or_else(|| known_sq.get(&trimmed)) {
@@ -507,14 +535,15 @@ pub fn suggest_data(c: &Connection) -> (Vec<(String, String, usize)>, Vec<(Strin
     // The assistant's turns are the reference, since the owner rarely capitalises.
     cands.truncate(150);
     let want: std::collections::HashSet<&str> = cands.iter().map(|x| x.0.as_str()).collect();
-    let mut seen: std::collections::HashMap<String, (usize, usize)> = Default::default();
+    let mut seen: std::collections::HashMap<String, (usize, usize)> =
+        std::collections::HashMap::default();
     let mut st = c
         .prepare("SELECT c.text FROM chunks c JOIN sources s ON s.id=c.source_id WHERE s.kind='session' AND c.role!='user'")
-        .unwrap();
+        .expect("prepare query");
     for t in st
         .query_map([], |r| r.get::<_, String>(0))
-        .unwrap()
-        .flatten()
+        .expect("run query")
+        .map(|row| row.expect("decode query row"))
     {
         let mut prev_end = true;
         for w in t.split_whitespace() {
@@ -528,7 +557,7 @@ pub fn suggest_data(c: &Connection) -> (Vec<(String, String, usize)>, Vec<(Strin
             }
             let e = seen.entry(l).or_default();
             e.0 += 1;
-            if core.chars().next().is_some_and(|ch| ch.is_uppercase()) {
+            if core.chars().next().is_some_and(char::is_uppercase) {
                 e.1 += 1;
             }
         }

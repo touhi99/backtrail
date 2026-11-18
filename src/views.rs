@@ -6,6 +6,7 @@ use crate::db::{rows, s};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt::Write;
 
 const OPEN_QUESTIONS: &str = "SELECT * FROM item WHERE type='question' AND state='open'";
 
@@ -185,7 +186,7 @@ fn brief_short(c: &Connection) {
             (count(&stale, name), "stale"),
         ] {
             if n > 0 {
-                line += &format!(", {n} {what}");
+                let _ = write!(line, ", {n} {what}");
             }
         }
         let next = rows(
@@ -194,7 +195,7 @@ fn brief_short(c: &Connection) {
             &[&name],
         );
         if let Some(step) = next.first() {
-            line += &format!(" · next: {}", s(step, "title"));
+            let _ = write!(line, " · next: {}", s(step, "title"));
         }
         println!("{line}");
     }
@@ -233,10 +234,17 @@ fn brief_short(c: &Connection) {
     }
 }
 
-/// The session-start brief (`bt brief`): the short form, or with `full` (or a project) open questions, threads in
+/// How much `bt brief` prints when no project is named.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Detail {
+    Short,
+    Full,
+}
+
+/// The session-start brief (`bt brief`): the short form, or with `Detail::Full` (or a project) open questions, threads in
 /// motion and stale work, as text.
-pub fn brief(c: &Connection, only: Option<&str>, full: bool) {
-    if only.is_none() && !full {
+pub fn brief(c: &Connection, only: Option<&str>, detail: Detail) {
+    if only.is_none() && detail == Detail::Short {
         return brief_short(c);
     }
     let wanted = |row: &Value, key: &str| only.is_none_or(|thread| s(row, key) == thread);
@@ -447,18 +455,19 @@ pub fn trail(c: &Connection) -> Value {
 /// so the result is kept until the store changes.
 fn thread_edges(c: &Connection) -> Vec<Value> {
     static CACHE: std::sync::Mutex<Option<(String, Vec<Value>)>> = std::sync::Mutex::new(None);
+    /// Mentions of another thread needed before it counts as an edge.
+    const MIN_MENTIONS: i64 = 12;
     let version = format!(
         "{}-{}",
         crate::db::count(c, "PRAGMA data_version", &[]),
         c.total_changes()
     );
-    let mut cache = CACHE.lock().unwrap();
-    if let Some((cached, edges)) = cache.as_ref() {
-        if *cached == version {
-            return edges.clone();
-        }
+    let mut cache = CACHE.lock().expect("lock poisoned");
+    if let Some((cached, edges)) = cache.as_ref()
+        && *cached == version
+    {
+        return edges.clone();
     }
-    const MIN_MENTIONS: i64 = 12;
     let mut mentions: BTreeMap<(String, String), i64> = BTreeMap::new();
     for name in crate::db::strings(c, "SELECT name FROM threads WHERE name!='Unsorted'", &[]) {
         let mut names = vec![name.to_lowercase()];
@@ -620,7 +629,7 @@ fn wikilinks(c: &Connection) -> HashMap<i64, HashSet<i64>> {
     .iter()
     .map(|r| (s(r, "title").to_lowercase(), r["id"].as_i64().unwrap_or(0)))
     .collect();
-    let link = regex::Regex::new(r"\[\[([^\]|#]+)").unwrap();
+    let link = regex::Regex::new(r"\[\[([^\]|#]+)").expect("regex literal is valid");
     let mut links: HashMap<i64, HashSet<i64>> = HashMap::new();
     let passages = rows(
         c,
@@ -632,10 +641,10 @@ fn wikilinks(c: &Connection) -> HashMap<i64, HashSet<i64>> {
         let from = p["source_id"].as_i64().unwrap_or(0);
         for m in link.captures_iter(s(&p, "text")) {
             let title = m[1].trim().rsplit('/').next().unwrap_or("").to_lowercase();
-            if let Some(&to) = by_title.get(&title) {
-                if to != from {
-                    links.entry(from).or_default().insert(to);
-                }
+            if let Some(&to) = by_title.get(&title)
+                && to != from
+            {
+                links.entry(from).or_default().insert(to);
             }
         }
     }
@@ -684,7 +693,7 @@ pub fn focus(c: &Connection, name: &str) -> Value {
              WHERE source_id=?1 AND locator NOT IN ('#top','§top') GROUP BY locator ORDER BY MIN(seq) LIMIT 9",
             &[&id],
         );
-        let links_out = links.get(&id).map_or(0, |to| to.len());
+        let links_out = links.get(&id).map_or(0, std::collections::HashSet::len);
         let links_in = links
             .iter()
             .filter(|(from, to)| **from != id && to.contains(&id))
@@ -722,7 +731,7 @@ pub fn focus(c: &Connection, name: &str) -> Value {
         "items": items,
         "notes": notes,
         "note_edges": note_edges,
-        "wikilinks_resolved": links.values().map(|to| to.len()).sum::<usize>(),
+        "wikilinks_resolved": links.values().map(std::collections::HashSet::len).sum::<usize>(),
         "counts": rows(c, "SELECT kind, COUNT(*) AS n FROM sources WHERE thread=?1 GROUP BY kind", &[&name]),
         "sessions": rows(
             c,

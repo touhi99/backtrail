@@ -5,6 +5,7 @@ use super::{Source, add_chunk, begin, finish, home_dir, mtime, redact, slug};
 use crate::db::id64;
 use rusqlite::{Connection, params};
 use serde_json::Value;
+use std::fmt::Write;
 use std::path::Path;
 
 const TURN_CHUNK: usize = 2400;
@@ -63,7 +64,7 @@ fn tail_of(p: &Path, at: u64) -> Option<String> {
     let start = at.saturating_sub(256);
     let mut f = std::fs::File::open(p).ok()?;
     f.seek(SeekFrom::Start(start)).ok()?;
-    let mut buf = vec![0; (at - start) as usize];
+    let mut buf = vec![0; usize::try_from(at - start).expect("a tail window fits in memory")];
     f.read_exact(&mut buf).ok()?;
     Some(id64(&String::from_utf8_lossy(&buf)))
 }
@@ -86,7 +87,7 @@ fn parse_session(raw: &str) -> (String, Vec<(String, String, String)>) {
             }
             let mut text = String::new();
             match &v["message"]["content"] {
-                Value::String(s) => text = s.clone(),
+                Value::String(s) => text.clone_from(s),
                 Value::Array(a) => {
                     for b in a {
                         if b["type"] == "text" {
@@ -121,11 +122,11 @@ fn add_turns(c: &Connection, sid: i64, seq0: i64, turn0: i64, turns: &[(String, 
         for (k, part) in split_turn(text, TURN_CHUNK).iter().enumerate() {
             let mut loc = format!(
                 "turn {} · {}",
-                turn0 + i as i64 + 1,
-                &ts.get(..16).unwrap_or("")
+                turn0 + crate::db::sql_int(i) + 1,
+                ts.get(..16).unwrap_or("")
             );
             if k > 0 {
-                loc.push_str(&format!(" · part {}", k + 1));
+                let _ = write!(loc, " · part {}", k + 1);
             }
             add_chunk(c, sid, seq, &loc, role, ts, part);
             seq += 1;
@@ -155,29 +156,33 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
     // The same session id can exist in two project folders (a folder was renamed or copied). Read only the larger
     // copy; otherwise each run swaps the stored text between the two and claim evidence loses its passage.
     let mut largest: std::collections::HashMap<String, (u64, std::path::PathBuf)> =
-        Default::default();
+        std::collections::HashMap::default();
     for d in std::fs::read_dir(&root).into_iter().flatten().flatten() {
         for f in std::fs::read_dir(d.path()).into_iter().flatten().flatten() {
             let p = f.path();
             if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
                 continue;
             }
-            let stem = p.file_stem().unwrap().to_string_lossy().to_string();
-            let size = f.metadata().map(|m| m.len()).unwrap_or(0);
+            let stem = p
+                .file_stem()
+                .expect("listed file has a name")
+                .to_string_lossy()
+                .to_string();
+            let size = f.metadata().map_or(0, |m| m.len());
             let e = largest.entry(stem).or_insert((size, p.clone()));
             if size > e.0 {
                 *e = (size, p.clone());
             }
         }
     }
-    c.execute_batch("BEGIN").unwrap();
+    c.execute_batch("BEGIN").expect("write to database");
     for d in dirs.flatten() {
         let dn = d.file_name().to_string_lossy().to_string();
         if dn.contains("private-tmp") || dn.contains("private-var") {
             continue;
         }
         let hs = slug(&home_dir());
-        let rest = dn.strip_prefix(&format!("{}-", hs)).unwrap_or(&dn);
+        let rest = dn.strip_prefix(&format!("{hs}-")).unwrap_or(&dn);
         let proj = if dn == hs {
             "home".to_string()
         } else {
@@ -195,7 +200,11 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
             if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
                 continue;
             }
-            let stem = p.file_stem().unwrap().to_string_lossy().to_string();
+            let stem = p
+                .file_stem()
+                .expect("listed file has a name")
+                .to_string_lossy()
+                .to_string();
             if largest.get(&stem).is_some_and(|(_, best)| *best != p) {
                 continue;
             }
@@ -220,7 +229,9 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
             });
             // mtime has whole-second resolution, so a line written in the same second as the last scan leaves it
             // unchanged; a file longer than the bytes read so far is read again from there.
-            let size = f.metadata().map(|m| m.len() as i64).unwrap_or(0);
+            let size = f
+                .metadata()
+                .map_or(0, |m| i64::try_from(m.len()).unwrap_or(i64::MAX));
             let grown = prev.as_ref().is_some_and(|x| x.2 > 0 && size > x.2);
             if known == Some(mt) && !grown {
                 skipped += 1;
@@ -230,9 +241,9 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
             // are read and their passages added, so stored passages keep their ids. A file that shrank, moved or
             // changed before that point is read again in full.
             let append = prev.as_ref().filter(|x| {
-                x.2 > 0 && x.4 == path_s && x.3.is_some() && tail_of(&p, x.2 as u64) == x.3
+                x.2 > 0 && x.4 == path_s && x.3.is_some() && tail_of(&p, x.2.unsigned_abs()) == x.3
             });
-            let from = append.map_or(0, |x| x.2 as u64);
+            let from = append.map_or(0, |x| x.2.unsigned_abs());
             let Some((raw, upto)) = read_lines(&p, from) else {
                 continue;
             };
@@ -244,9 +255,11 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
                         "UPDATE sources SET title=?2 WHERE id=?1",
                         params![sid, title],
                     )
-                    .unwrap();
+                    .expect("write to database");
                 }
-                if !turns.is_empty() {
+                if turns.is_empty() {
+                    skipped += 1;
+                } else {
                     let seq0: i64 = c
                         .query_row(
                             "SELECT ifnull(max(seq)+1,0) FROM chunks WHERE source_id=?1",
@@ -262,19 +275,28 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
                             |x| x.get(0),
                         )
                         .unwrap_or_default();
-                    finish(c, sid, &first, &turns.last().unwrap().1);
+                    finish(
+                        c,
+                        sid,
+                        &first,
+                        &turns.last().expect("turns checked non-empty above").1,
+                    );
                     if title.is_empty() {
                         untitled_count(c, sid, &proj);
                     }
                     n += 1;
-                } else {
-                    skipped += 1;
                 }
                 c.execute(
                     "UPDATE sources SET mtime=?2, bytes=?3, tail=?4, nturns=nturns+?5 WHERE id=?1",
-                    params![sid, mt, upto as i64, tail, turns.len() as i64],
+                    params![
+                        sid,
+                        mt,
+                        i64::try_from(upto).unwrap_or(i64::MAX),
+                        tail,
+                        crate::db::sql_int(turns.len())
+                    ],
                 )
-                .unwrap();
+                .expect("write to database");
                 continue;
             }
             if turns.is_empty() {
@@ -282,13 +304,13 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
                     "INSERT OR REPLACE INTO scanned(path,mtime) VALUES(?1,?2)",
                     params![path_s, mt],
                 )
-                .unwrap();
+                .expect("write to database");
                 continue;
             }
             let users = turns.iter().filter(|t| t.0 == "user").count();
-            let thread = rules.thread_for(&proj, &title, turns.len() as i64);
+            let thread = rules.thread_for(&proj, &title, crate::db::sql_int(turns.len()));
             let disp = if title.is_empty() {
-                format!("Untitled session ({} · {} turns)", proj, users)
+                format!("Untitled session ({proj} · {users} turns)")
             } else {
                 title.clone()
             };
@@ -306,16 +328,26 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
                 continue;
             };
             add_turns(c, sid, 0, 0, &turns);
-            finish(c, sid, &turns[0].1, &turns.last().unwrap().1);
+            finish(
+                c,
+                sid,
+                &turns[0].1,
+                &turns.last().expect("turns checked non-empty above").1,
+            );
             c.execute(
                 "UPDATE sources SET bytes=?2, tail=?3, nturns=?4 WHERE id=?1",
-                params![sid, upto as i64, tail, turns.len() as i64],
+                params![
+                    sid,
+                    i64::try_from(upto).unwrap_or(i64::MAX),
+                    tail,
+                    crate::db::sql_int(turns.len())
+                ],
             )
-            .unwrap();
+            .expect("write to database");
             n += 1;
         }
     }
-    c.execute_batch("COMMIT").unwrap();
+    c.execute_batch("COMMIT").expect("write to database");
     (n, skipped)
 }
 
@@ -334,7 +366,11 @@ pub fn unindexed(c: &Connection) -> Vec<(String, u64)> {
             if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
                 continue;
             }
-            let id: String = p.file_stem().unwrap().to_string_lossy().to_string();
+            let id: String = p
+                .file_stem()
+                .expect("listed file has a name")
+                .to_string_lossy()
+                .to_string();
             let known: i64 = c
                 .query_row(
                     "SELECT (SELECT COUNT(*) FROM sources WHERE ref=?1) + (SELECT COUNT(*) FROM scanned WHERE path=?2)",
@@ -353,6 +389,6 @@ pub fn unindexed(c: &Connection) -> Vec<(String, u64)> {
             }
         }
     }
-    out.sort_by(|a, b| b.1.cmp(&a.1));
+    out.sort_by_key(|e| std::cmp::Reverse(e.1));
     out
 }

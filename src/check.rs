@@ -217,8 +217,8 @@ pub fn log(c: &Connection, n: i64) {
 
 /// Mark open steps that a later commit of the thread's repository seems to finish as "looks done?": an ordered
 /// two-word phrase from the step's title must appear in the commit subject. A word-overlap heuristic; the owner
-/// confirms each one. Steps the owner already answered "not yet" are skipped. Prints what it did when `report`.
-pub fn match_commits(c: &Connection, report: bool) {
+/// confirms each one. Steps the owner already answered "not yet" are skipped. Prints what it did.
+pub fn match_commits(c: &Connection) {
     let steps = rows(
         c,
         "SELECT id, title, thread, created FROM item i WHERE type='step' AND state='open'
@@ -258,23 +258,19 @@ pub fn match_commits(c: &Connection, report: bool) {
                 "UPDATE claims SET state='looks_done', done_by='evidence?', answer=?2, updated=?3 WHERE id=?1",
                 params![id, commit, now()],
             )
-            .unwrap();
+            .expect("write to database");
             logw(c, "check", "looks-done", id, commit);
-            if report {
-                println!(
-                    "looks done? [{}] {}  <-  {commit}",
-                    s(step, "thread"),
-                    s(step, "title")
-                );
-            }
+            println!(
+                "looks done? [{}] {}  <-  {commit}",
+                s(step, "thread"),
+                s(step, "title")
+            );
             marked += 1;
         }
     }
-    if report {
-        println!(
-            "{compared} open steps compared with commits; {marked} marked 'looks done?' (an ordered two-word phrase from the step title must appear in a later commit; the owner confirms)"
-        );
-    }
+    println!(
+        "{compared} open steps compared with commits; {marked} marked 'looks done?' (an ordered two-word phrase from the step title must appear in a later commit; the owner confirms)"
+    );
 }
 
 /// `bt artifacts`: Claude artifact links found in sessions and notes that have no saved snapshot yet. With a
@@ -283,7 +279,8 @@ pub fn artifacts(c: &Connection, manifest: Option<&str>) {
     if let Some(file) = manifest {
         read_manifest(c, file);
     }
-    let link = regex::Regex::new(r"claude\.ai/artifact/([A-Za-z0-9]{20,24})").unwrap();
+    let link = regex::Regex::new(r"claude\.ai/artifact/([A-Za-z0-9]{20,24})")
+        .expect("regex literal is valid");
     let mut mentions: BTreeMap<String, i64> = BTreeMap::new();
     for text in crate::db::strings(
         c,
@@ -334,7 +331,7 @@ fn read_manifest(c: &Connection, file: &str) {
              ON CONFLICT(id) DO UPDATE SET title=?2, updated=?3",
             params![id, title, published],
         )
-        .unwrap();
+        .expect("write to database");
         let source_ref = format!("artifact:{id}");
         let snapshot = rows(
             c,

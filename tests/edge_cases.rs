@@ -20,7 +20,7 @@ impl Sandbox {
             N.fetch_add(1, Ordering::SeqCst)
         ));
         let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(root.join("home")).unwrap();
+        fs::create_dir_all(root.join("home")).expect("create test home");
         Sandbox { root }
     }
     fn home(&self) -> PathBuf {
@@ -30,13 +30,14 @@ impl Sandbox {
         self.home().join(".claude/settings.json")
     }
     fn write_settings(&self, text: &str) {
-        fs::create_dir_all(self.home().join(".claude")).unwrap();
-        fs::write(self.settings(), text).unwrap();
+        fs::create_dir_all(self.home().join(".claude")).expect("create .claude dir");
+        fs::write(self.settings(), text).expect("write settings.json");
     }
     fn settings_json(&self) -> serde_json::Value {
-        serde_json::from_str(&fs::read_to_string(self.settings()).unwrap()).unwrap()
+        serde_json::from_str(&fs::read_to_string(self.settings()).expect("read settings.json"))
+            .expect("settings.json is JSON")
     }
-    /// Run with HOME set to the sandbox; BACKTRAIL_HOME is set only when given.
+    /// Run with HOME set to the sandbox; `BACKTRAIL_HOME` is set only when given.
     fn run(&self, data_dir: Option<&Path>, args: &[&str]) -> Output {
         let mut c = Command::new(env!("CARGO_BIN_EXE_backtrail"));
         c.args(args)
@@ -46,15 +47,15 @@ impl Sandbox {
         if let Some(d) = data_dir {
             c.env("BACKTRAIL_HOME", d);
         }
-        c.output().unwrap()
+        c.output().expect("run the backtrail binary")
     }
     /// A Claude Code session file with enough turns to be filed under its folder's thread.
     fn session(&self, folder: &str, id: &str, title: &str) {
         let dir = self.home().join(".claude/projects").join(folder);
-        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(&dir).expect("create session dir");
         let mut lines = vec![format!(
             r#"{{"type":"ai-title","aiTitle":{}}}"#,
-            serde_json::to_string(title).unwrap()
+            serde_json::to_string(title).expect("a string serializes")
         )];
         for i in 0..5 {
             let role = if i % 2 == 0 { "user" } else { "assistant" };
@@ -62,7 +63,7 @@ impl Sandbox {
                 r#"{{"type":"{role}","timestamp":"2026-11-13T01:2{i}:00Z","message":{{"content":"turn number {i} of the edge case session {id}"}}}}"#
             ));
         }
-        fs::write(dir.join(format!("{id}.jsonl")), lines.join("\n")).unwrap();
+        fs::write(dir.join(format!("{id}.jsonl")), lines.join("\n")).expect("write session file");
     }
 }
 
@@ -82,7 +83,7 @@ fn out(o: &Output) -> String {
 
 /// The thread recorded for a session, read from the store's `sources` table.
 fn session_thread(_s: &Sandbox, data: &Path, id8: &str) -> String {
-    let c = rusqlite::Connection::open(data.join("backtrail.db")).unwrap();
+    let c = rusqlite::Connection::open(data.join("backtrail.db")).expect("open test store");
     c.query_row(
         "SELECT thread FROM sources WHERE ref=?1",
         [format!("session:{id8}")],
@@ -270,7 +271,11 @@ fn desktop_prefix_is_stripped_from_the_folder_name() {
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
-    s.session(&format!("{slug}-Desktop-myproject"), "dddd4444", "Some work");
+    s.session(
+        &format!("{slug}-Desktop-myproject"),
+        "dddd4444",
+        "Some work",
+    );
     s.run(Some(&data), &["ingest"]);
     let shown = session_thread(&s, &data, "dddd4444");
     assert!(shown.contains("myproject"), "{shown}");
@@ -349,7 +354,11 @@ fn second_ingest_leaves_unchanged_sessions_alone() {
     s.session("-p-alpha", "aaaa1111", "Alpha work");
     s.run(Some(&data), &["ingest"]);
     let o = s.run(Some(&data), &["ingest"]);
-    assert!(out(&o).contains("sessions 0 new/changed (1 unchanged)"), "{}", out(&o));
+    assert!(
+        out(&o).contains("sessions 0 new/changed (1 unchanged)"),
+        "{}",
+        out(&o)
+    );
 }
 
 // ---- hooks install / remove -------------------------------------------------------------------
@@ -374,7 +383,11 @@ fn hooks_install_creates_settings_when_missing() {
     assert!(commands_of(&v, "SessionStart")[0].ends_with(" brief"));
     assert!(commands_of(&v, "SessionEnd")[0].ends_with("session-end.sh"));
     // no previous file, so no backup
-    assert!(!s.home().join(".claude/settings.json.bak-backtrail").exists());
+    assert!(
+        !s.home()
+            .join(".claude/settings.json.bak-backtrail")
+            .exists()
+    );
 }
 
 #[test]
@@ -420,7 +433,11 @@ fn hooks_install_refuses_invalid_json_and_changes_nothing() {
     assert!(!o.status.success());
     assert!(out(&o).contains("not valid JSON"), "{}", out(&o));
     assert_eq!(fs::read_to_string(s.settings()).unwrap(), "{ broken");
-    assert!(!s.home().join(".claude/settings.json.bak-backtrail").exists());
+    assert!(
+        !s.home()
+            .join(".claude/settings.json.bak-backtrail")
+            .exists()
+    );
 }
 
 #[test]
@@ -430,8 +447,15 @@ fn hooks_recognise_a_hand_written_bt_brief() {
         r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"bt brief"}]}]}}"#,
     );
     let o = s.run(None, &["hooks", "install"]);
-    assert!(out(&o).contains("SessionStart: already installed"), "{}", out(&o));
-    assert_eq!(commands_of(&s.settings_json(), "SessionStart"), vec!["bt brief"]);
+    assert!(
+        out(&o).contains("SessionStart: already installed"),
+        "{}",
+        out(&o)
+    );
+    assert_eq!(
+        commands_of(&s.settings_json(), "SessionStart"),
+        vec!["bt brief"]
+    );
 }
 
 #[test]
@@ -445,7 +469,10 @@ fn hooks_remove_deletes_only_our_hooks() {
     assert!(o.status.success(), "{}", out(&o));
     let v = s.settings_json();
     assert_eq!(commands_of(&v, "SessionStart"), vec!["echo hi"]);
-    assert!(commands_of(&v, "SessionEnd").is_empty());
+    assert_eq!(
+        commands_of(&v, "SessionEnd"),
+        [] as [std::string::String; 0]
+    );
 }
 
 #[test]
@@ -454,8 +481,16 @@ fn hooks_remove_drops_groups_left_empty() {
     s.run(None, &["hooks", "install"]);
     s.run(None, &["hooks", "remove"]);
     let v = s.settings_json();
-    assert_eq!(v["hooks"]["SessionStart"].as_array().map(|a| a.len()), Some(0));
-    assert_eq!(v["hooks"]["SessionEnd"].as_array().map(|a| a.len()), Some(0));
+    assert_eq!(
+        v["hooks"]["SessionStart"]
+            .as_array()
+            .map(std::vec::Vec::len),
+        Some(0)
+    );
+    assert_eq!(
+        v["hooks"]["SessionEnd"].as_array().map(std::vec::Vec::len),
+        Some(0)
+    );
 }
 
 #[test]
@@ -472,14 +507,21 @@ fn hooks_remove_also_removes_a_hand_written_bt_brief() {
         r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"bt brief"}]}]}}"#,
     );
     s.run(None, &["hooks", "remove"]);
-    assert!(commands_of(&s.settings_json(), "SessionStart").is_empty());
+    assert_eq!(
+        commands_of(&s.settings_json(), "SessionStart"),
+        [] as [std::string::String; 0]
+    );
 }
 
 #[test]
 fn hooks_status_reports_without_writing() {
     let s = Sandbox::new();
     let o = s.run(None, &["hooks"]);
-    assert!(out(&o).contains("SessionStart: not installed"), "{}", out(&o));
+    assert!(
+        out(&o).contains("SessionStart: not installed"),
+        "{}",
+        out(&o)
+    );
     assert!(!s.settings().exists());
     s.run(None, &["hooks", "install"]);
     let o = s.run(None, &["hooks", "status"]);
@@ -493,5 +535,8 @@ fn hooks_unknown_action_is_rejected_and_changes_nothing() {
     let o = s.run(None, &["hooks", "frobnicate"]);
     assert!(!o.status.success());
     assert!(out(&o).contains("usage"), "{}", out(&o));
-    assert_eq!(fs::read_to_string(s.settings()).unwrap(), r#"{"theme":"dark"}"#);
+    assert_eq!(
+        fs::read_to_string(s.settings()).unwrap(),
+        r#"{"theme":"dark"}"#
+    );
 }

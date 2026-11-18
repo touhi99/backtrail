@@ -42,6 +42,8 @@ struct HomeView: View {
                     NowCard(t: first, detail: details[first["name"].str])
                 }
 
+                TrailCard()
+
                 if asks > 0 {
                     Text("\(asks) \(asks == 1 ? "question" : "questions") typed in the app, waiting for Claude's next session.")
                         .font(.system(size: 13.5)).foregroundStyle(Color.soft)

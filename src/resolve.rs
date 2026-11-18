@@ -5,6 +5,7 @@
 use crate::clock::now;
 use crate::db::{count, logw, rows, s, strings};
 use crate::items::COMMON_WORDS;
+use anyhow::Context;
 use rusqlite::{Connection, params};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -44,6 +45,11 @@ pub struct Candidate {
 
 /// Existing items that may already settle `id`: those sharing an entity, a word stem or a nearby passage with it.
 /// Best first. An item that only shares a broad entity with it, and nothing else, is not listed.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the overlap score is a fraction in 0..=1, scaled to whole points"
+)]
 pub fn candidates(c: &Connection, id: &str, limit: usize) -> Vec<Candidate> {
     let me = rows(
         c,
@@ -94,7 +100,7 @@ pub fn candidates(c: &Connection, id: &str, limit: usize) -> Vec<Candidate> {
                 .get(&o["chunk"].as_i64().unwrap_or(0))
                 .copied()
                 .unwrap_or(0);
-            let shared = o["shared"].as_i64().unwrap_or(0) as usize;
+            let shared = usize::try_from(o["shared"].as_i64().unwrap_or(0)).unwrap_or(0);
             if overlap < 2.0 && vec == 0 {
                 return None;
             }
@@ -136,13 +142,13 @@ pub fn print_candidates(c: &Connection, id: &str) {
 
 /// Settle `id` with `by`: a question is answered; a step or decision is superseded. Entity links of the settled item
 /// are copied to `by`, so the graph keeps one node for the matter.
-pub fn resolve(c: &Connection, id: &str, by: &str, reason: &str) -> Result<bool, String> {
+pub fn resolve(c: &Connection, id: &str, by: &str, reason: &str) -> anyhow::Result<bool> {
     let reason = clip(reason.trim(), 320);
     if reason.is_empty() || by.is_empty() {
-        return Err("--by <id> and --reason are required".into());
+        anyhow::bail!("--by <id> and --reason are required");
     }
     if id == by || count(c, "SELECT COUNT(*) FROM claims WHERE id=?1", &[&by]) == 0 {
-        return Err("--by must name another existing item".into());
+        anyhow::bail!("--by must name another existing item");
     }
     let kind: Option<String> = c
         .query_row(
@@ -159,13 +165,13 @@ pub fn resolve(c: &Connection, id: &str, by: &str, reason: &str) -> Result<bool,
             "UPDATE claims SET state='answered', answer=?2, superseded_by=?3, updated=?4 WHERE id=?1",
             params![id, reason, by, ts],
         )
-        .map_err(|e| e.to_string())?;
+        ?;
     } else {
         c.execute(
             "UPDATE claims SET state='superseded', answer=?2, superseded_by=?3, valid_to=?4, updated=?4 WHERE id=?1",
             params![id, reason, by, ts],
         )
-        .map_err(|e| e.to_string())?;
+        ?;
     }
     c.execute(
         "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role)
@@ -301,8 +307,8 @@ pub fn reverse_queue(c: &Connection, limit: usize) {
 
 /// Apply a reversal verdict `{"id", "replaces": [..], "reason"}`: every older settled decision named is marked
 /// `superseded` by the new one. Each must be a settled decision that was said no later than the new one.
-fn apply_reverse(c: &Connection, v: &Value) -> Result<String, String> {
-    let id = v["id"].as_str().ok_or("no id")?;
+fn apply_reverse(c: &Connection, v: &Value) -> anyhow::Result<String> {
+    let id = v["id"].as_str().context("no id")?;
     let reason = clip(v["reason"].as_str().unwrap_or("").trim(), 320);
     let settled = count(
         c,
@@ -310,7 +316,7 @@ fn apply_reverse(c: &Connection, v: &Value) -> Result<String, String> {
         &[&id],
     );
     if settled == 0 {
-        return Err("the item is not a settled decision".into());
+        anyhow::bail!("the item is not a settled decision");
     }
     let said = when(c, id);
     let mut done = vec![];
@@ -321,7 +327,7 @@ fn apply_reverse(c: &Connection, v: &Value) -> Result<String, String> {
         .filter_map(Value::as_str)
     {
         if reason.is_empty() {
-            return Err("a reversal needs a reason".into());
+            anyhow::bail!("a reversal needs a reason");
         }
         let ok = old != id
             && count(
@@ -339,7 +345,7 @@ fn apply_reverse(c: &Connection, v: &Value) -> Result<String, String> {
             "UPDATE claims SET state='superseded', answer=?2, superseded_by=?3, valid_to=?4, updated=?4 WHERE id=?1",
             params![old, reason, id, ts],
         )
-        .map_err(|e| e.to_string())?;
+        ?;
         logw(c, "resolver", "reverse", old, &format!("by {id}: {reason}"));
         done.push(format!("replaces {old}"));
     }
@@ -424,7 +430,11 @@ fn park_closed_threads(c: &Connection) -> usize {
     for r in &rows {
         let (id, st) = (crate::db::s(r, "id"), crate::db::s(r, "state"));
         let why = format!("parked: project {st}");
-        c.execute("UPDATE claims SET state='superseded', answer=?2, updated=?3 WHERE id=?1", params![id, why, now()]).ok();
+        c.execute(
+            "UPDATE claims SET state='superseded', answer=?2, updated=?3 WHERE id=?1",
+            params![id, why, now()],
+        )
+        .ok();
         logw(c, "resolver", "expire", id, &why);
     }
     rows.len()
@@ -448,7 +458,11 @@ fn park_stale(c: &Connection) -> usize {
     for id in &ids {
         c.execute(
             "UPDATE claims SET state='superseded', answer=?2, updated=?3 WHERE id=?1",
-            params![id, format!("parked: no activity for {PARK_DAYS} days"), now()],
+            params![
+                id,
+                format!("parked: no activity for {PARK_DAYS} days"),
+                now()
+            ],
         )
         .ok();
         logw(c, "resolver", "expire", id, "parked: no activity");
@@ -464,7 +478,7 @@ pub fn queue(c: &Connection, limit: usize) {
         "SELECT id FROM claims WHERE state='proposed' AND type IN ('decision','step','question')
            AND NOT EXISTS (SELECT 1 FROM log l WHERE l.target=claims.id AND l.action='resolve-checked')
          ORDER BY created LIMIT ?1",
-        &[&(limit as i64)],
+        &[&crate::db::sql_int(limit)],
     ) {
         println!("{id}");
     }
@@ -526,14 +540,14 @@ pub fn packet(c: &Connection, id: &str) {
 
 /// Apply a model's verdict: `{"id", "entities", "thread", "valid_to", "resolves_by", "reason"}`. Entities and thread
 /// are checked against the store; a resolution needs an existing item and a reason.
-pub fn apply(c: &Connection, v: &Value) -> Result<String, String> {
+pub fn apply(c: &Connection, v: &Value) -> anyhow::Result<String> {
     if v.get("replaces").is_some() {
         return apply_reverse(c, v);
     }
-    let id = v["id"].as_str().ok_or("no id")?;
+    let id = v["id"].as_str().context("no id")?;
     let kind: String = c
         .query_row("SELECT type FROM claims WHERE id=?1", [id], |r| r.get(0))
-        .map_err(|_| "no such item".to_string())?;
+        .context("no such item")?;
     let mut done = vec![];
     for name in v["entities"]
         .as_array()
@@ -584,10 +598,8 @@ pub fn apply(c: &Connection, v: &Value) -> Result<String, String> {
         expire(c);
     }
     let by = v["resolves_by"].as_str().unwrap_or("");
-    if !by.is_empty() {
-        if resolve(c, id, by, v["reason"].as_str().unwrap_or(""))? {
-            done.push(format!("resolved by {by}"));
-        }
+    if !by.is_empty() && resolve(c, id, by, v["reason"].as_str().unwrap_or(""))? {
+        done.push(format!("resolved by {by}"));
     }
     logw(
         c,

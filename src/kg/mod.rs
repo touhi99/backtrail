@@ -20,11 +20,8 @@ fn clip(text: &str, max: usize) -> String {
 }
 
 /// The `YYYY-MM-DD` of a timestamp; `?` when there is none.
-fn day(ts: &Option<String>) -> String {
-    ts.as_deref()
-        .and_then(|t| t.get(..10))
-        .unwrap_or("?")
-        .to_string()
+fn day(ts: Option<&str>) -> String {
+    ts.and_then(|t| t.get(..10)).unwrap_or("?").to_string()
 }
 
 /// True when `word` appears in `text` with no letter or digit directly before or after it.

@@ -22,13 +22,12 @@ pub fn read_notes(c: &Connection) -> (usize, usize) {
 fn sections(text: &str, heading_of: impl Fn(&str) -> Option<String>) -> Vec<(String, String)> {
     let mut out = vec![("top".to_string(), String::new())];
     for line in text.lines() {
-        match heading_of(line) {
-            Some(heading) => out.push((heading, String::new())),
-            None => {
-                let body = &mut out.last_mut().unwrap().1;
-                body.push_str(line);
-                body.push('\n');
-            }
+        if let Some(heading) = heading_of(line) {
+            out.push((heading, String::new()));
+        } else {
+            let body = &mut out.last_mut().expect("sections start with a top entry").1;
+            body.push_str(line);
+            body.push('\n');
         }
     }
     out
@@ -61,17 +60,31 @@ fn read_markdown(c: &Connection) -> (usize, usize) {
         walk(dir, &mut files, "md");
     }
     let (mut read, mut unchanged) = (0, 0);
-    c.execute_batch("BEGIN").unwrap();
+    c.execute_batch("BEGIN").expect("write to database");
     for p in files {
         let rel = match memory_dirs.iter().find(|(dir, _)| p.starts_with(dir)) {
-            Some((dir, label)) => format!("{}/{}", label, p.strip_prefix(dir).unwrap().display()),
-            None => p.strip_prefix(&workspace).unwrap().display().to_string(),
+            Some((dir, label)) => format!(
+                "{}/{}",
+                label,
+                p.strip_prefix(dir)
+                    .expect("file was listed under this memory dir")
+                    .display()
+            ),
+            None => p
+                .strip_prefix(&workspace)
+                .expect("file was listed under the workspace")
+                .display()
+                .to_string(),
         };
         let Ok(raw) = std::fs::read_to_string(&p) else {
             continue;
         };
         let rel_path = Path::new(&rel);
-        let mut title = rel_path.file_stem().unwrap().to_string_lossy().to_string();
+        let mut title = rel_path
+            .file_stem()
+            .expect("listed file has a name")
+            .to_string_lossy()
+            .to_string();
         if title == "README" {
             let folder = rel_path
                 .parent()
@@ -108,7 +121,7 @@ fn read_markdown(c: &Connection) -> (usize, usize) {
         finish(c, id, &ts, &ts);
         read += 1;
     }
-    c.execute_batch("COMMIT").unwrap();
+    c.execute_batch("COMMIT").expect("write to database");
     (read, unchanged)
 }
 
@@ -119,7 +132,7 @@ pub fn read_artifacts(c: &Connection) -> (usize, usize) {
         return (0, 0);
     };
     let (mut read, mut unchanged) = (0, 0);
-    c.execute_batch("BEGIN").unwrap();
+    c.execute_batch("BEGIN").expect("write to database");
     for e in entries.flatten() {
         let artifact_id = e.file_name().to_string_lossy().to_string();
         let p = e.path().join("index.html");
@@ -168,7 +181,7 @@ pub fn read_artifacts(c: &Connection) -> (usize, usize) {
         finish(c, id, &ts, &ts);
         read += 1;
     }
-    c.execute_batch("COMMIT").unwrap();
+    c.execute_batch("COMMIT").expect("write to database");
     (read, unchanged)
 }
 
@@ -181,12 +194,16 @@ fn read_screens(c: &Connection) -> (usize, usize) {
     let mut files = vec![];
     walk(&workspace.join(&cfg().screens_dir), &mut files, "html");
     let (mut read, mut unchanged) = (0, 0);
-    c.execute_batch("BEGIN").unwrap();
+    c.execute_batch("BEGIN").expect("write to database");
     for p in files {
         let Ok(raw) = std::fs::read_to_string(&p) else {
             continue;
         };
-        let rel = p.strip_prefix(&workspace).unwrap().display().to_string();
+        let rel = p
+            .strip_prefix(&workspace)
+            .expect("file was listed under the workspace")
+            .display()
+            .to_string();
         let title = html_title(&raw).unwrap_or_else(|| rel.clone());
         let version = mtime(&p);
         let source = Source {
@@ -216,13 +233,13 @@ fn read_screens(c: &Connection) -> (usize, usize) {
         finish(c, id, &ts, &ts);
         read += 1;
     }
-    c.execute_batch("COMMIT").unwrap();
+    c.execute_batch("COMMIT").expect("write to database");
     (read, unchanged)
 }
 
 fn html_title(html: &str) -> Option<String> {
     Regex::new(r"(?is)<title>(.*?)</title>")
-        .unwrap()
+        .expect("regex literal is valid")
         .captures(html)
         .map(|m| m[1].trim().to_string())
 }
@@ -241,7 +258,7 @@ fn non_empty_lines(text: &str, min: usize) -> String {
 fn strip_html(html: &str) -> String {
     let replace = |text: String, pattern: &str, with: &str| {
         Regex::new(pattern)
-            .unwrap()
+            .expect("regex literal is valid")
             .replace_all(&text, with)
             .to_string()
     };
