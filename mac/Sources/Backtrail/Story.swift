@@ -460,3 +460,56 @@ struct SourcesView: View {
         .panel(radius: 18)
     }
 }
+
+/// Every Claude artifact link tied to the project; each row opens the real page in the browser.
+struct ArtifactsView: View {
+    @Environment(\.openURL) private var openURL
+    let artifacts: [J]
+    @State private var shown = 15
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Artifacts").font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Text("\(artifacts.count)").font(.system(size: 12.5)).foregroundStyle(Color.mut)
+            }
+            .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 8)
+            if artifacts.isEmpty {
+                Text("No artifact links found for this project.").font(.system(size: 13)).foregroundStyle(Color.mut)
+                    .padding(.horizontal, 20).padding(.bottom, 20)
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 18, alignment: .top)], alignment: .leading, spacing: 20) {
+                ForEach(artifacts.prefix(shown)) { a in
+                    Button { if let u = URL(string: a["url"].str) { openURL(u) } } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if a["source_id"].isNull {
+                                RoundedRectangle(cornerRadius: 10).fill(Color(white: 0.08))
+                                    .aspectRatio(16.0 / 10.0, contentMode: .fit)
+                                    .overlay(Image(systemName: "doc").foregroundStyle(Color.mut))
+                            } else {
+                                ArtifactThumb(sourceID: a["source_id"].int)
+                            }
+                            Text(a["title"].str.isEmpty ? a["url"].str : a["title"].str)
+                                .font(.system(size: 13, weight: .medium)).lineLimit(1)
+                            Text(dayFmt(a["ts"].s)).font(.system(size: 12)).foregroundStyle(Color.mut)
+                            if !a["about"].str.isEmpty {
+                                Text(a["about"].str).font(.system(size: 12)).foregroundStyle(Color.mut).lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 20).padding(.bottom, 16)
+            if artifacts.count > shown {
+                Divider().overlay(Color.line)
+                Button("Show \(min(15, artifacts.count - shown)) more") { shown += 15 }
+                    .buttonStyle(BtnStyle(kind: .ghost)).padding(.horizontal, 12).padding(.vertical, 8)
+            }
+        }
+        .panel(radius: 18)
+    }
+}

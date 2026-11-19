@@ -74,16 +74,18 @@ export function buildStory(d: any) {
 }
 
 /** A live, scaled-down render of an artifact's saved HTML. */
-export function Thumb({ id, title, sub }: { id: number; title: string; sub?: string }) {
+export function Thumb({ id, title, sub, href, about }: { id: number; title: string; sub?: string; href?: string; about?: string }) {
   const { data } = useApi(`/api/source_raw?id=${id}`)
   const [ref, w] = useWidth<HTMLDivElement>()
+  const Wrap: any = href ? 'a' : Link
+  const wrapProps = href ? { href, target: '_blank', rel: 'noreferrer' } : { to: `/source/${id}` }
   return (
-    <Link to={`/source/${id}`} className="group flex min-w-0 flex-col gap-2">
+    <Wrap {...wrapProps} className="group flex min-w-0 flex-col gap-2">
       <div ref={ref} className="relative overflow-hidden rounded-xl border border-line bg-[#141416] transition group-hover:border-[#3a3a42]" style={{ aspectRatio: '16 / 10' }}>
         {data?.text && w > 0 && <iframe title={title} srcDoc={data.text} sandbox="allow-scripts" tabIndex={-1} className="pointer-events-none absolute left-0 top-0 origin-top-left border-0" style={{ width: 1280, height: 800, transform: `scale(${w / 1280})`, colorScheme: 'dark' }} />}
       </div>
-      <div className="text-[12.5px] text-mut"><span className="font-medium text-ink">{title}</span>{sub ? `, ${sub}` : ''}</div>
-    </Link>
+      <div className="text-[12.5px] text-mut"><span className="font-medium text-ink">{title}</span>{sub ? `, ${sub}` : ''}{about ? <div className="mt-1 line-clamp-2 text-[12px]">{about}</div> : null}</div>
+    </Wrap>
   )
 }
 

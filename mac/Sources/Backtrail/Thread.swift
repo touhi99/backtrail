@@ -24,7 +24,7 @@ struct ThreadView: View {
     @State private var tab = Tab(rawValue: Snapshot.env["BACKTRAIL_TAB"] ?? "") ?? .steps
     @State private var story: Story?
 
-    enum Tab: String, CaseIterable { case steps = "Steps", journey = "Journey", decisions = "Decisions", made = "Made", sources = "Sources" }
+    enum Tab: String, CaseIterable { case steps = "Steps", journey = "Journey", decisions = "Decisions", made = "Made", artifacts = "Artifacts", sources = "Sources" }
 
     var body: some View {
         ScrollView {
@@ -206,6 +206,8 @@ struct ThreadView: View {
                 if let story { SettledView(s: story) }
             case .made:
                 if let story { MadeView(s: story) }
+            case .artifacts:
+                ArtifactsView(artifacts: d["artifacts"].arr)
             case .sources:
                 SourcesView(sources: d["sources"].arr)
             }

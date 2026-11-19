@@ -374,7 +374,81 @@ pub fn thread(c: &Connection, name: &str) -> Value {
          ORDER BY f.asserted_at",
         &[&name],
     );
-    json!({"thread": thread.first(), "items": items, "sources": sources, "claims": claims, "decided": decided(c, name, 8)})
+    json!({"thread": thread.first(), "items": items, "sources": sources, "claims": claims, "decided": decided(c, name, 8),
+           "artifacts": thread_artifacts(c, name)})
+}
+
+/// Every Claude artifact link tied to a thread: saved snapshots assigned to it, plus links named in its sessions and
+/// notes. Newest first; `source_id` is set when a snapshot exists.
+fn thread_artifacts(c: &Connection, name: &str) -> Vec<Value> {
+    let link = regex::Regex::new(r"claude\.ai/artifact/([A-Za-z0-9]{20,24})")
+        .expect("regex literal is valid");
+    // id -> (title, date, source_id)
+    let mut found: HashMap<String, (String, String, Option<i64>)> = HashMap::new();
+    for r in rows(
+        c,
+        "SELECT id, substr(ref, 10) AS aid, title, last_ts FROM sources WHERE kind='artifact' AND thread=?1",
+        &[&name],
+    ) {
+        found.insert(
+            s(&r, "aid").to_string(),
+            (s(&r, "title").to_string(), s(&r, "last_ts").to_string(), r["id"].as_i64()),
+        );
+    }
+    for r in rows(
+        c,
+        "SELECT ch.text AS text, s.last_ts AS ts FROM chunks ch JOIN sources s ON s.id=ch.source_id
+         WHERE s.thread=?1 AND s.kind!='artifact' AND ch.text LIKE '%claude.ai/artifact/%'",
+        &[&name],
+    ) {
+        for m in link.captures_iter(s(&r, "text")) {
+            let e = found
+                .entry(m[1].to_string())
+                .or_insert((String::new(), String::new(), None));
+            if s(&r, "ts") > e.1.as_str() && e.2.is_none() {
+                e.1 = s(&r, "ts").to_string();
+            }
+        }
+    }
+    let mut out: Vec<Value> = found
+        .into_iter()
+        .map(|(id, (title, ts, source_id))| {
+            let meta = rows(c, "SELECT title, updated FROM artifact_meta WHERE id=?1", &[&id]);
+            let (title, ts, source_id) = match source_id {
+                Some(_) => (title, ts, source_id),
+                None => {
+                    let copy = rows(
+                        c,
+                        "SELECT id, title, last_ts FROM sources WHERE kind='artifact' AND ref=?1",
+                        &[&format!("artifact:{id}")],
+                    );
+                    match copy.first() {
+                        Some(r) => (s(r, "title").to_string(), s(r, "last_ts").to_string(), r["id"].as_i64()),
+                        None => (title, ts, None),
+                    }
+                }
+            };
+            let title = if !title.is_empty() { title } else { meta.first().map(|m| s(m, "title").to_string()).unwrap_or_default() };
+            let ts = meta.first().map(|m| s(m, "updated").to_string()).filter(|u| !u.is_empty()).unwrap_or(ts);
+            let about = source_id
+                .map(|sid| {
+                    crate::db::strings(
+                        c,
+                        "SELECT text FROM chunks WHERE source_id=?1 ORDER BY seq LIMIT 5",
+                        &[&sid],
+                    )
+                    .iter()
+                    .map(|text| gist(text))
+                    .find(|g| g.chars().count() >= 40)
+                    .unwrap_or_default()
+                })
+                .unwrap_or_default();
+            json!({"id": id, "title": title, "ts": ts, "source_id": source_id, "about": about,
+                   "url": format!("https://claude.ai/artifact/{id}")})
+        })
+        .collect();
+    out.sort_by(|a, b| s(b, "ts").cmp(s(a, "ts")));
+    out
 }
 
 /// The Items page: every item, filtered by type, state, thread and thread kind (empty means any).

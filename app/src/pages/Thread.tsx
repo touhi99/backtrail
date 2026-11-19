@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Bug, Check, CheckCheck, CircleHelp, Copy, FileText, Lightbulb, MessageCircleQuestion, MessagesSquare, Network, Pin, Plus, Sparkles } from 'lucide-react'
 import { dayFmt, post, STALE_LABEL, staleOf, useApi } from '@/lib/api'
 import { useShell } from '@/components/Shell'
-import { buildStory, JourneyRail, Made, Milestones, Settled } from '@/components/Story'
+import { buildStory, JourneyRail, Made, Milestones, Settled, Thumb } from '@/components/Story'
 import ItemActions, { Who } from '@/components/ItemActions'
 import More from '@/components/More'
 import Paged from '@/components/Paged'
@@ -29,8 +29,8 @@ function Panel({ title, count, children, className = '', id }: { title: string; 
 const Empty = ({ children }: { children: React.ReactNode }) => <div className="px-5 pb-5 text-[13px] text-mut">{children}</div>
 const Src = ({ i }: { i: any }) => i.source_id ? <Link to={`/source/${i.source_id}${i.chunk_id ? `?c=${i.chunk_id}` : ''}`} className="mt-1 inline-flex items-center gap-1.5 text-[12px] text-mut hover:text-ink" title={i.state === 'looks_done' ? 'Where the step was planned. It does not show the built result.' : undefined}><FileText size={12} />{i.state === 'looks_done' ? 'Planned in: ' : ''}{i.source_title}</Link> : null
 
-type View = 'steps' | 'journey' | 'decisions' | 'made' | 'sources' | 'archive' | 'claude'
-const VIEWS: [View, string][] = [['steps', 'All steps'], ['journey', 'Journey'], ['decisions', 'Decisions'], ['made', 'Made'], ['sources', 'Sources'], ['archive', 'Archive'], ['claude', 'Claude Code']]
+type View = 'steps' | 'journey' | 'decisions' | 'made' | 'artifacts' | 'sources' | 'archive' | 'claude'
+const VIEWS: [View, string][] = [['steps', 'All steps'], ['journey', 'Journey'], ['decisions', 'Decisions'], ['made', 'Made'], ['artifacts', 'Artifacts'], ['sources', 'Sources'], ['archive', 'Archive'], ['claude', 'Claude Code']]
 
 export default function Thread() {
   const { name = '' } = useParams()
@@ -205,6 +205,19 @@ export default function Thread() {
         {view === 'journey' && <div className="flex flex-col gap-4"><JourneyRail s={story} color={c} /><Milestones s={story} color={c} /></div>}
         {view === 'decisions' && <Settled s={story} done={refresh} />}
         {view === 'made' && <Made s={story} />}
+        {view === 'artifacts' && (
+          <Panel title="Artifacts" count={(d.artifacts ?? []).length}>
+            {(d.artifacts ?? []).length === 0 ? <Empty>No artifact links found for this project.</Empty> : (
+              <Paged resetKey={name} items={d.artifacts} size={12}>{(rows: any[]) => (
+                <div className="grid gap-5 px-5 pb-5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+                  {rows.map((a: any) => a.source_id
+                    ? <Thumb key={a.id} id={a.source_id} title={a.title || a.url} sub={a.ts ? dayFmt(a.ts) : undefined} href={a.url} about={a.about} />
+                    : <a key={a.id} href={a.url} target="_blank" rel="noreferrer" className="rounded-xl border border-line p-3 text-[12.5px] text-mut">{a.title || a.url}</a>)}
+                </div>
+              )}</Paged>
+            )}
+          </Panel>
+        )}
         {view === 'sources' && (
           <Panel title="Sources" count={d.sources.length}>
             <Paged resetKey={name} items={d.sources} size={12}>{(rows: any[]) => rows.map((s: any) => <Link key={s.id} to={`/source/${s.id}`} className="nx-row" style={{ gridTemplateColumns: '10px minmax(0,1fr) auto', padding: '10px 18px' }}><span className="size-2 rounded-full" style={{ background: SRC_COLOR[s.kind] }} /><span className="truncate text-[13.5px]">{s.title}</span><span className="text-[12px] text-mut">{dayFmt(s.last_ts)}</span></Link>)}</Paged>
