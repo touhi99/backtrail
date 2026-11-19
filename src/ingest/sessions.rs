@@ -1,5 +1,3 @@
-//! Claude Code sessions: one `.jsonl` file per session under `~/.claude/projects/<project folder>/`. Only the text of
-//! user and assistant turns is stored, in passages of at most `TURN_CHUNK` characters.
 use super::threads::SessionRules;
 use super::{Source, add_chunk, begin, finish, home_dir, mtime, redact, slug};
 use crate::db::id64;
@@ -10,8 +8,6 @@ use std::path::Path;
 
 const TURN_CHUNK: usize = 2400;
 
-/// Split one turn into chunks of at most `n` characters. The first chunk is exactly the first `n` characters, so
-/// quotes filed when turns were cut at `n` still match it; later cuts prefer a line break or a space.
 fn split_turn(s: &str, n: usize) -> Vec<String> {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= n {
@@ -36,8 +32,6 @@ fn split_turn(s: &str, n: usize) -> Vec<String> {
     out
 }
 
-/// The text of one session file from byte `from` to the end of its last complete line, and the byte offset after it.
-/// A last line without a newline counts only when it is valid JSON, so a line still being written is read next time.
 fn read_lines(p: &Path, from: u64) -> Option<(String, u64)> {
     use std::io::{Read, Seek, SeekFrom};
     let mut f = std::fs::File::open(p).ok()?;
@@ -55,7 +49,6 @@ fn read_lines(p: &Path, from: u64) -> Option<(String, u64)> {
     ))
 }
 
-/// A check of the 256 bytes before `at`: if they differ next time, the file was rewritten, not appended to.
 fn tail_of(p: &Path, at: u64) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
     if at == 0 {
@@ -69,7 +62,6 @@ fn tail_of(p: &Path, at: u64) -> Option<String> {
     Some(id64(&String::from_utf8_lossy(&buf)))
 }
 
-/// The AI title (empty when none) and the kept turns (role, timestamp, text) of session lines.
 fn parse_session(raw: &str) -> (String, Vec<(String, String, String)>) {
     let mut title = String::new();
     let mut turns = vec![];
@@ -108,14 +100,12 @@ fn parse_session(raw: &str) -> (String, Vec<(String, String, String)>) {
             {
                 continue;
             }
-            // redacted here as well as in add_chunk, so a token cannot survive by straddling a chunk cut
             turns.push((t.to_string(), ts, redact(tt).into_owned()));
         }
     }
     (title, turns)
 }
 
-/// Store turns as passages, numbering passages from `seq0` and turns from `turn0`.
 fn add_turns(c: &Connection, sid: i64, seq0: i64, turn0: i64, turns: &[(String, String, String)]) {
     let mut seq = seq0;
     for (i, (role, ts, text)) in turns.iter().enumerate() {
@@ -134,7 +124,6 @@ fn add_turns(c: &Connection, sid: i64, seq0: i64, turn0: i64, turns: &[(String, 
     }
 }
 
-/// Keep the turn count in an untitled session's display title current after new turns were added.
 fn untitled_count(c: &Connection, sid: i64, proj: &str) {
     c.execute(
         "UPDATE sources SET title='Untitled session ('||?2||' · '||(SELECT COUNT(*) FROM chunks
@@ -145,7 +134,6 @@ fn untitled_count(c: &Connection, sid: i64, proj: &str) {
     .ok();
 }
 
-/// Read every session file that is new or changed. Returns (read, unchanged).
 pub fn read_all(c: &Connection) -> (usize, usize) {
     let rules = SessionRules::load();
     let root = home_dir().join(".claude/projects");
@@ -153,8 +141,6 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
     let Ok(dirs) = std::fs::read_dir(&root) else {
         return (0, 0);
     };
-    // The same session id can exist in two project folders (a folder was renamed or copied). Read only the larger
-    // copy; otherwise each run swaps the stored text between the two and claim evidence loses its passage.
     let mut largest: std::collections::HashMap<String, (u64, std::path::PathBuf)> =
         std::collections::HashMap::default();
     for d in std::fs::read_dir(&root).into_iter().flatten().flatten() {
@@ -211,7 +197,6 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
             let r = format!("session:{stem}");
             let path_s = p.to_string_lossy().to_string();
             let mt = mtime(&p);
-            // (id, mtime, bytes read, check of the bytes before that point, path, turns stored)
             let prev: Option<(i64, i64, i64, Option<String>, String, i64)> = c
                 .query_row(
                     "SELECT id, mtime, bytes, tail, ifnull(path,''), nturns FROM sources WHERE ref=?1",
@@ -227,8 +212,6 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
                 )
                 .ok()
             });
-            // mtime has whole-second resolution, so a line written in the same second as the last scan leaves it
-            // unchanged; a file longer than the bytes read so far is read again from there.
             let size = f
                 .metadata()
                 .map_or(0, |m| i64::try_from(m.len()).unwrap_or(i64::MAX));
@@ -237,9 +220,6 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
                 skipped += 1;
                 continue;
             }
-            // Claude Code appends to a session file. When the bytes read last time are unchanged, only the new lines
-            // are read and their passages added, so stored passages keep their ids. A file that shrank, moved or
-            // changed before that point is read again in full.
             let append = prev.as_ref().filter(|x| {
                 x.2 > 0 && x.4 == path_s && x.3.is_some() && tail_of(&p, x.2.unsigned_abs()) == x.3
             });
@@ -351,8 +331,6 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
     (n, skipped)
 }
 
-/// Session files on disk that the store has never indexed, with the age of each file in days. Claude Code removes old
-/// transcripts (30 days by default), so a session that stays unindexed that long is lost.
 pub fn unindexed(c: &Connection) -> Vec<(String, u64)> {
     let root = home_dir().join(".claude/projects");
     let mut out = vec![];

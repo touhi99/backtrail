@@ -1,16 +1,10 @@
 #!/bin/bash
-# Extract decisions, steps, questions and claims from sessions with a small model, one single-shot call per session.
-# Usage: extract.sh [--entity NAME] [--limit N] [--session ID] [--no-cap] | extract.sh <session ref>...
-# The backtrail binary never calls a model: `extract-input` is piped to a headless model and the answer goes back
-# through `import -`, so the verbatim-quote, known-entity, known-thread and length rules gate every fact.
 set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 TM="$DIR/../target/release/backtrail"
 MODEL="${BACKTRAIL_COMPILE_MODEL:-haiku}"
-export BACKTRAIL_COMPILE=1   # the SessionStart and SessionEnd hooks exit at once while this is set
-# a login agent starts with a minimal PATH; the claude CLI usually lives in one of these
+export BACKTRAIL_COMPILE=1
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-# without the CLI every session would fail and be logged as failed, using up the daily cap and the retry limit
 command -v claude >/dev/null 2>&1 || { echo "extract.sh: the claude CLI is not on PATH; nothing was run or logged" >&2; exit 1; }
 ENTITY=""; LIMIT=3; SESSION=""; NOCAP=""; REFS=()
 while [ $# -gt 0 ]; do
@@ -29,7 +23,7 @@ if [ ${#REFS[@]} -eq 0 ]; then
   [ -n "$NOCAP" ] && args+=(--no-cap)
   while IFS= read -r r; do [ -n "$r" ] && REFS+=("$r"); done < <("$TM" "${args[@]}")
 fi
-cd "$(mktemp -d)" || exit 1  # no project CLAUDE.md or session history is loaded here
+cd "$(mktemp -d)" || exit 1
 for ref in "${REFS[@]+"${REFS[@]}"}"; do
   packet="$("$TM" extract-input "$ref")" || { echo "$ref: no packet"; continue; }
   raw="$(printf '%s' "$packet" | claude -p --model "$MODEL" --tools "" --no-session-persistence --output-format json \
@@ -54,7 +48,6 @@ out, closed = [], []
 for i in items:
     if not isinstance(i, dict): continue
     if i.get("type") == "finished":
-        # an open step this session finished: `finish` checks the quote and decides done or "built, check it"
         f = subprocess.run([os.path.join(os.environ["DIR"], "close-step.sh"), str(i.get("step", "")), ref, str(i.get("quote", ""))], capture_output=True, text=True)
         closed.append((f.stdout or f.stderr).strip().split("  <-")[0])
         continue

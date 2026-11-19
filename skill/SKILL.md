@@ -20,6 +20,11 @@ body: it runs `ingest` and `embed`, and starts `extract.sh` and `resolve.sh` in 
 While `BACKTRAIL_COMPILE` is set, `brief` and the hook exit at once, so an extraction run cannot start another. Main
 sessions do not file facts themselves.
 
+`skill/finish.sh [--dry] [--limit N] [id...]` closes open steps, answered questions and proposed decisions that a later
+session, note or commit shows finished. A model names a passage and a verbatim quote, a second model confirms it, and
+`backtrail finish` checks the quote against the source before writing. An item judged and left open is skipped for 7 days.
+The session-end hook runs it for 15 items.
+
 Other commands for keeping the store accurate without raw SQL:
 - `backtrail flag <id> --as live|in_effect|superseded|done --reason "..."` labels a proposed item after checking it
   against later items, notes and the current code. Flag only with evidence; when unsure, flag `live`.

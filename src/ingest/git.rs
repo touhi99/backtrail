@@ -1,5 +1,3 @@
-//! Git history of the repositories listed in `config.json` (`repos`). A repository is read again when its log or
-//! its working-tree status changed.
 use super::{Source, add_chunk, begin, finish};
 use crate::config::cfg;
 use crate::db::fxhash;
@@ -16,7 +14,6 @@ fn git(dir: &Path, args: &[&str]) -> String {
         .unwrap_or_default()
 }
 
-/// Git reader: one source per repo, one passage per commit (last 400), plus a line for uncommitted and unpushed work.
 pub fn read_repos(c: &Connection) -> (usize, usize) {
     let workspace = cfg().workspace.clone();
     if workspace.as_os_str().is_empty() {

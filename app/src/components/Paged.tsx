@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
-/** Shows `size` rows at a time with previous and next controls. The page resets when the list changes length. */
 export default function Paged<T>({ items, size, children, resetKey = '' }: { items: T[]; size: number; resetKey?: string; children: (rows: T[]) => ReactNode }) {
   const [page, setPage] = useState(0)
   const pages = Math.max(1, Math.ceil(items.length / size))

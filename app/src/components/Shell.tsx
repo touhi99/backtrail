@@ -3,8 +3,8 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { House, ChevronRight, ListChecks, Plus, ScrollText, Search, Share2 } from 'lucide-react'
 import { STATE, useApi } from '@/lib/api'
 import Capture from '@/components/Capture'
+import type { KgSuggest, Today } from '@/lib/types'
 
-/** The Backtrail mark: two points joined by a winding trail. The Mac app draws the same path. */
 function TrailMark({ size = 17, className = '' }: { size?: number; className?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -13,9 +13,11 @@ function TrailMark({ size = 17, className = '' }: { size?: number; className?: s
   )
 }
 
-type Ctx = { today: any; reload: () => void; capture: (thread?: string) => void }
+type Ctx = { today: Today | null; reload: () => void; capture: (thread?: string) => void }
 const ShellCtx = createContext<Ctx>({ today: null, reload: () => {}, capture: () => {} })
 export const useShell = () => useContext(ShellCtx)
+
+const TITLE: Record<string, string> = { map: 'Map', graph: 'Graph', thread: 'Thread', source: 'Source', search: 'Search', items: 'Items', log: 'Log' }
 
 const NAV = [
   { to: '/', label: 'Home', icon: House, end: true },
@@ -27,17 +29,17 @@ const MORE = [
 ]
 
 export default function Shell({ children }: { children: ReactNode }) {
-  const { data: today, reload } = useApi('/api/today')
-  const { data: sug, reload: reloadSug } = useApi('/api/kg/suggest') as { data: any; reload: () => void }
+  const { data: today, reload } = useApi<Today>('/api/today')
+  const { data: sug, reload: reloadSug } = useApi<KgSuggest>('/api/kg/suggest')
   useEffect(() => { window.addEventListener('bt-suggest', reloadSug); return () => window.removeEventListener('bt-suggest', reloadSug) }, [reloadSug])
   const toReview = sug ? sug.entities.length + sug.aliases.length : 0
   const [cap, setCap] = useState<{ open: boolean; thread?: string }>({ open: false })
   const nav = useNavigate()
   const loc = useLocation()
   useEffect(() => { if (new URLSearchParams(loc.search).get('add')) setCap({ open: true, thread: new URLSearchParams(loc.search).get('thread') ?? undefined }) }, [loc.search])
-  const title = ({ map: 'Map', graph: 'Graph', thread: 'Thread', source: 'Source', search: 'Search', items: 'Items', log: 'Log' } as any)[loc.pathname.split('/')[1]] ?? 'Home'
-  const live = (today?.threads ?? []).filter((t: any) => t.state === 'moving')
-  const others = (today?.threads ?? []).filter((t: any) => t.state !== 'moving' && t.name !== 'Unsorted')
+  const title = TITLE[loc.pathname.split('/')[1]] ?? 'Home'
+  const live = (today?.threads ?? []).filter((t) => t.state === 'moving')
+  const others = (today?.threads ?? []).filter((t) => t.state !== 'moving' && t.name !== 'Unsorted')
   const [showOthers, setShowOthers] = useState(false)
   const toggleOthers = () => setShowOthers((v) => !v)
 
@@ -55,7 +57,7 @@ export default function Shell({ children }: { children: ReactNode }) {
             </NavLink>
           ))}
           <div className="mt-5 px-2.5 pb-1 text-[12px] text-mut" title="Threads whose state is In development.">Threads</div>
-          {live.map((t: any) => (
+          {live.map((t) => (
             <Link key={t.name} to={`/thread/${encodeURIComponent(t.name)}`} className="row-hover flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] text-soft">
               <span className="size-2 rounded-full" style={{ background: STATE.moving.color }} />
               <span className="truncate">{t.name}</span>
@@ -67,11 +69,11 @@ export default function Shell({ children }: { children: ReactNode }) {
                 <ChevronRight size={12} className={`transition ${showOthers ? 'rotate-90' : ''}`} />Other threads <span className="tabular-nums">({others.length})</span>
               </button>
               {showOthers && <div>{['built', 'parked', 'open', 'dropped'].map((st) => {
-                const g = others.filter((t: any) => t.state === st)
+                const g = others.filter((t) => t.state === st)
                 return g.length === 0 ? null : (
                   <div key={st}>
                     <div className="px-2.5 pb-0.5 pt-2.5 text-[11px] uppercase tracking-wide text-mut">{STATE[st]?.label ?? st} <span className="tabular-nums">{g.length}</span></div>
-                    {g.map((t: any) => (
+                    {g.map((t) => (
                       <Link key={t.name} to={`/thread/${encodeURIComponent(t.name)}`} className="row-hover flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] text-soft">
                         <span className="size-2 shrink-0 rounded-full" style={{ background: STATE[st]?.color ?? '#52525b' }} />
                         <span className="truncate">{t.name}</span>

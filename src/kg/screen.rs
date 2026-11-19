@@ -1,10 +1,8 @@
-//! What the app's graph pages show. Every function only reads the `fact` and `entity_stat` views (sql/views.sql).
 use super::entities;
 use crate::db::rows;
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
-/// Every entity with its aliases and claim count, most claims first.
 pub fn entities(c: &Connection) -> Value {
     json!(rows(
         c,
@@ -13,8 +11,6 @@ pub fn entities(c: &Connection) -> Value {
     ))
 }
 
-/// The entity graph: entities as nodes, an edge for each pair that shares claims (weighted by how many), and the
-/// number of facts about no entity.
 pub fn graph(c: &Connection) -> Value {
     json!({
         "nodes": rows(c, "SELECT * FROM entity_stat", &[]),
@@ -33,7 +29,6 @@ pub fn graph(c: &Connection) -> Value {
     })
 }
 
-/// Every live relation, oldest first, with its entities as `subject → object`.
 pub fn lineage(c: &Connection) -> Value {
     json!(rows(
         c,
@@ -46,7 +41,6 @@ pub fn lineage(c: &Connection) -> Value {
     ))
 }
 
-/// Terms that may be new entities, and spellings that may be aliases of known ones.
 pub fn suggestions(c: &Connection) -> Value {
     let (aliases, terms) = entities::suggest_data(c);
     json!({
@@ -57,10 +51,7 @@ pub fn suggestions(c: &Connection) -> Value {
     })
 }
 
-/// The claims list: the newest 150 facts that pass the filters, the number that pass in total, and the evidence of
-/// the listed ones. `entity` is an entity id, or `_none` for facts about no entity; an empty filter matches all.
 pub fn claims(c: &Connection, entity: &str, text: &str, status: &str, speaker: &str) -> Value {
-    // ?1 entity, ?2 text, ?3 status, ?4 speaker
     const FILTER: &str = "(?1='' OR (?1='_none' AND NOT EXISTS (SELECT 1 FROM claim_about z WHERE z.claim_id=f.id))
               OR EXISTS (SELECT 1 FROM claim_about z WHERE z.claim_id=f.id AND z.entity_id=?1))
          AND (?2='' OR f.text LIKE '%'||?2||'%' OR ifnull(f.body,'') LIKE '%'||?2||'%' OR ifnull(f.quote,'') LIKE '%'||?2||'%')

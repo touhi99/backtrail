@@ -1,6 +1,3 @@
-//! Optional local embeddings. Off unless config.json has an `embeddings` object with `url` and `model`
-//! (an Ollama-compatible server: POST <url>/api/embed). Vectors are keyed by a hash of the passage text, so a
-//! session that grows re-embeds only its new passages. Only plain `http://` URLs are supported.
 use crate::config::cfg;
 use crate::db::{id64, logw};
 use anyhow::Context;
@@ -92,7 +89,6 @@ fn unblob(b: &[u8]) -> Vec<f32> {
         .collect()
 }
 
-/// (passages with a vector, passages in total)
 pub fn coverage(c: &Connection) -> (i64, i64) {
     let have = c
         .query_row(
@@ -107,7 +103,6 @@ pub fn coverage(c: &Connection) -> (i64, i64) {
     (have, all)
 }
 
-/// Embed up to `limit` passages that have no vector yet. Returns (embedded, still pending).
 pub fn run(c: &Connection, limit: usize) -> anyhow::Result<(usize, i64)> {
     if !enabled() {
         anyhow::bail!("embeddings are turned off in config.json (\"embeddings\": false)");
@@ -181,8 +176,6 @@ pub fn run_cli(c: &Connection, limit: usize) {
 type Cache = Option<(String, Vec<(i64, Vec<f32>)>)>;
 static CACHE: Mutex<Cache> = Mutex::new(None);
 
-/// The one vector lookup: the `k` passages closest to `q` (cosine), best first. Brute force over an in-memory copy
-/// that is reloaded when the number of vectors or passages changes. Replace this function to change the index.
 pub fn nearest(c: &Connection, q: &str, k: usize) -> anyhow::Result<Vec<(i64, f32)>> {
     if !enabled() {
         anyhow::bail!("off");

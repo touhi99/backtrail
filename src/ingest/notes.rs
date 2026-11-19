@@ -1,5 +1,3 @@
-//! Documents: Markdown notes, HTML design files and saved artifact pages. Each is split at its headings into
-//! passages of at most `BLOCK` characters. A document that changed is read again in full.
 use super::threads::thread_for_document;
 use super::{Source, add_blocks, begin, finish, home_dir, mtime, slug, walk};
 use crate::clock::iso;
@@ -10,15 +8,12 @@ use std::path::{Path, PathBuf};
 
 const BLOCK: usize = 1800;
 
-/// Notes and design files. Returns (read, unchanged).
 pub fn read_notes(c: &Connection) -> (usize, usize) {
     let (a, b) = read_markdown(c);
     let (x, y) = read_screens(c);
     (a + x, b + y)
 }
 
-/// Text split into (heading, text) sections. `heading_of` returns the heading when a line is one. Text before the
-/// first heading is under "top".
 fn sections(text: &str, heading_of: impl Fn(&str) -> Option<String>) -> Vec<(String, String)> {
     let mut out = vec![("top".to_string(), String::new())];
     for line in text.lines() {
@@ -33,11 +28,9 @@ fn sections(text: &str, heading_of: impl Fn(&str) -> Option<String>) -> Vec<(Str
     out
 }
 
-/// Markdown notes: the configured note folders and Claude Code memory folders.
 fn read_markdown(c: &Connection) -> (usize, usize) {
     let workspace = cfg().workspace.clone();
     let mut files = vec![];
-    // Claude Code memory folders: the workspace's own when one is configured, otherwise every project's.
     let mut memory_dirs: Vec<(PathBuf, String)> = vec![];
     let projects = home_dir().join(".claude/projects");
     if workspace.as_os_str().is_empty() {
@@ -125,8 +118,6 @@ fn read_markdown(c: &Connection) -> (usize, usize) {
     (read, unchanged)
 }
 
-/// Saved artifact pages: `<data dir>/artifacts/<id>/index.html`. The publish date comes from the manifest
-/// (`bt artifacts --manifest`) when it is known, otherwise from the file.
 pub fn read_artifacts(c: &Connection) -> (usize, usize) {
     let Ok(entries) = std::fs::read_dir(crate::db::home().join("artifacts")) else {
         return (0, 0);
@@ -185,7 +176,6 @@ pub fn read_artifacts(c: &Connection) -> (usize, usize) {
     (read, unchanged)
 }
 
-/// HTML design files in the configured `screens_dir`, as text, so their content is searchable.
 fn read_screens(c: &Connection) -> (usize, usize) {
     let workspace = cfg().workspace.clone();
     if workspace.as_os_str().is_empty() || cfg().screens_dir.is_empty() {
@@ -244,7 +234,6 @@ fn html_title(html: &str) -> Option<String> {
         .map(|m| m[1].trim().to_string())
 }
 
-/// The trimmed lines of at least `min` bytes, joined by newlines.
 fn non_empty_lines(text: &str, min: usize) -> String {
     text.lines()
         .map(str::trim)
@@ -253,8 +242,6 @@ fn non_empty_lines(text: &str, min: usize) -> String {
         .join("\n")
 }
 
-/// The readable text of an HTML page: no styles, scripts or drawings, a line break after each block element, and
-/// each heading as a `## ` line.
 fn strip_html(html: &str) -> String {
     let replace = |text: String, pattern: &str, with: &str| {
         Regex::new(pattern)

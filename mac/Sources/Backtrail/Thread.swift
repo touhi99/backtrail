@@ -1,12 +1,10 @@
 import SwiftUI
 
-/// What a step's state means.
 let STEP_STATUS: [String: (String, Color, String)] = [
     "doing": ("In progress", .moving, "You marked it in progress. Claude does not set this."),
     "looks_done": ("Built, check it", .accent, "Claude or a commit says it is built. Confirm it works, or say not yet."),
 ]
 
-/// A project page: latest decisions, progress, the next three steps, then all open steps.
 struct ThreadView: View {
     @EnvironmentObject var store: Store
     @Environment(\.openURL) private var openURL

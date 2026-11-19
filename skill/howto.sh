@@ -1,17 +1,14 @@
 #!/bin/bash
-# Write "how to check" text for steps waiting on the owner, one single-shot call per step.
-# Usage: howto.sh [--dry] [--again] [--limit N] | howto.sh [--dry] <step id>...
-# --dry prints each verdict as a JSON line and applies nothing.
 set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 TM="$DIR/../target/release/backtrail"
 MODEL="${BACKTRAIL_HOWTO_MODEL:-haiku}"
-export BACKTRAIL_COMPILE=1   # the SessionStart and SessionEnd hooks exit at once while this is set
+export BACKTRAIL_COMPILE=1
 LIMIT=30; IDS=(); DRY=; AGAIN=
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry) DRY=1; shift ;;
-    --again) AGAIN=--again; shift ;;   # also steps an earlier run judged to need no hand check
+    --again) AGAIN=--again; shift ;;
     --limit) LIMIT="$2"; shift 2 ;;
     *) IDS+=("$1"); shift ;;
   esac
@@ -19,7 +16,7 @@ done
 if [ ${#IDS[@]} -eq 0 ]; then
   while IFS= read -r i; do [ -n "$i" ] && IDS+=("$i"); done < <("$TM" howto-queue --limit "$LIMIT" $AGAIN)
 fi
-cd "$(mktemp -d)" || exit 1  # no project CLAUDE.md or session history is loaded here
+cd "$(mktemp -d)" || exit 1
 for id in "${IDS[@]+"${IDS[@]}"}"; do
   packet="$("$TM" howto-packet "$id")" || { echo "$id: no packet"; continue; }
   raw="$(printf '%s' "$packet" | claude -p --model "$MODEL" --tools "" --no-session-persistence --output-format json \

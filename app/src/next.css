@@ -1,4 +1,3 @@
-/* /next: the redesign preview. Dark only, same tokens as index.css. */
 .nx-page { position: relative; min-height: 100%; padding: 26px 32px 44px;
   background:
     radial-gradient(820px 380px at 92% -8%, rgba(52, 211, 153, .11), transparent 62%),
@@ -30,7 +29,6 @@
 .nx-pill { display: inline-block; width: 9px; height: 22px; border-radius: 4px; }
 .nx-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 99px; font-size: 12px; font-weight: 600; }
 
-/* map */
 .nx-map { position: relative; height: 100%; min-height: 720px; overflow: hidden; background:
   radial-gradient(700px 420px at 70% 20%, rgba(96, 165, 250, .07), transparent 60%),
   radial-gradient(700px 420px at 20% 80%, rgba(52, 211, 153, .06), transparent 60%), var(--color-bg); }
@@ -40,7 +38,6 @@
   background: rgba(24, 24, 28, .92); border: 1px solid var(--color-line2); box-shadow: 0 10px 28px rgba(0, 0, 0, .4); backdrop-filter: blur(8px); }
 @media (prefers-reduced-motion: reduce) { .nx-in { animation: none; } }
 
-/* graph page: like .nx-map, but icons inside it keep their size */
 .nx-gmap { position: relative; height: 100%; min-height: 640px; overflow: hidden; background:
   radial-gradient(700px 420px at 62% 20%, rgba(96, 165, 250, .08), transparent 60%),
   radial-gradient(700px 420px at 20% 80%, rgba(52, 211, 153, .06), transparent 60%), var(--color-bg); }

@@ -1,6 +1,4 @@
 #!/bin/sh
-# Builds the web app and the binary and links the binary as `bt` in $BT_BIN_DIR (default ~/.local/bin).
-# On macOS it also installs the login agent that runs the server and builds the Mac app.
 set -e
 cd "$(dirname "$0")"
 for tool in cargo npm; do
@@ -14,7 +12,6 @@ bin_dir="${BT_BIN_DIR:-$HOME/.local/bin}"
 mkdir -p "$bin_dir"
 ln -sf "$PWD/target/release/backtrail" "$bin_dir/bt"
 echo "Linked $bin_dir/bt"
-# macOS: a login agent runs `backtrail serve` at login and restarts it if it exits. BT_NO_AGENT=1 skips it.
 if [ "$(uname)" = Darwin ] && [ -z "$BT_NO_AGENT" ]; then
   label=dev.backtrail.serve
   data="${BACKTRAIL_HOME:-$HOME/Library/Application Support/Backtrail}"
@@ -62,7 +59,6 @@ PLIST
   echo "The server starts at http://127.0.0.1:8799 (port: config.json key \"port\")."
   echo "If macOS asks whether backtrail may access a folder, allow it; the server waits for the answer."
 fi
-# macOS with Swift: the Mac app. BT_NO_MAC_APP=1 skips it.
 if [ "$(uname)" = Darwin ] && [ -z "$BT_NO_MAC_APP" ] && command -v swift >/dev/null; then
   mac/build.sh && echo "Mac app: $PWD/mac/Backtrail.app"
 fi

@@ -1,14 +1,9 @@
 #!/bin/bash
-# Close one open step from a quote: `backtrail finish` checks the quote is in the source, then a second model confirms
-# the passage shows this step finished. Confirmed, the step closes; otherwise nothing changes. Used by extract.sh and
-# finish.sh.
-# Usage: close-step.sh <step id> <source ref> <quote> [--dry]
 set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 TM="$DIR/../target/release/backtrail"
 VMODEL="${BACKTRAIL_VERIFY_MODEL:-opus}"
 id="$1"; src="$2"; quote="$3"; dry="${4:-}"
-# first, only whether the quote is in the source and the step is open
 first="$("$TM" finish "$id" --source "$src" --quote "$quote" --verified --dry 2>&1)" || { echo "rejected: $first"; exit 0; }
 verified=()
 case "$first" in

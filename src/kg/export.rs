@@ -1,10 +1,7 @@
-//! `bt kg export` and `bt kg restore`: entities and every claim as JSON lines. A claim's evidence is written as a
-//! source ref and a quote, not as row ids, so another machine can find the passage again.
 use crate::db::{find_quote, source_id};
 use rusqlite::{Connection, params};
 use std::fmt::Write;
 
-/// One JSON object per line. A claim's evidence is stored by source ref and quote, not by row id, so another machine can re-locate it.
 pub fn export(c: &Connection, path: &str) -> std::io::Result<()> {
     use std::io::Write;
     let mut f = std::fs::File::create(path)?;
@@ -86,7 +83,6 @@ pub fn export(c: &Connection, path: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Restore an export into this store. A claim whose source or quote cannot be found here is kept without a quote and counted.
 pub fn restore(c: &Connection, path: &str) -> (usize, usize) {
     let raw = std::fs::read_to_string(path).unwrap_or_default();
     let (mut n, mut orphan) = (0, 0);
@@ -115,7 +111,6 @@ pub fn restore(c: &Connection, path: &str) -> (usize, usize) {
             }
             "claim" => {
                 let hit = locate(c, g("source"), &g("quote").unwrap_or_default());
-                // An export from before items and claims were merged names the fields text and status.
                 let (Some(title), state) = (
                     g("title").or_else(|| g("text")),
                     g("state").or_else(|| {
@@ -172,27 +167,23 @@ pub fn restore(c: &Connection, path: &str) -> (usize, usize) {
                 c.execute("INSERT OR REPLACE INTO kg_overrides(target,field,value,by,ts) VALUES(?1,?2,?3,?4,?5)", params![g("target"), g("field"), g("value"), g("by"), g("ts")]).expect("write to database");
                 n += 1;
             }
-            "evidence" => {
-                // Old exports kept evidence in its own rows; the claim now carries its quote.
-                match locate(c, g("source"), &g("quote").unwrap_or_default()) {
-                    Some((sid, cid)) => {
-                        c.execute(
+            "evidence" => match locate(c, g("source"), &g("quote").unwrap_or_default()) {
+                Some((sid, cid)) => {
+                    c.execute(
                             "UPDATE claims SET source_id=?2, chunk_id=?3, quote=?4, stated=?5 WHERE id=?1 AND quote IS NULL",
                             params![g("claim_id"), sid, cid, g("quote"), g("stated").unwrap_or("stated".into())],
                         )
                         .expect("write to database");
-                        n += 1;
-                    }
-                    None => orphan += 1,
+                    n += 1;
                 }
-            }
+                None => orphan += 1,
+            },
             _ => {}
         }
     }
     (n, orphan)
 }
 
-/// The source and passage that hold a quote, on this machine.
 fn locate(c: &Connection, source: Option<String>, quote: &str) -> Option<(i64, i64)> {
     let source = source_id(c, &source?)?;
     find_quote(c, source, quote).map(|p| (source, p.chunk_id))
@@ -205,10 +196,6 @@ fn xml(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-/// The entity graph for Gephi or `NetworkX`, not a backup: nodes are entities (name, kind, claims in force), an edge joins
-/// two entities when a claim in force names both (weight = shared claims, first and last day, newest claim's text).
-/// `.graphml` writes `GraphML`; any other name writes JSON in `NetworkX` node-link form (`links`). Honours `--as-of`.
-/// Returns (nodes, edges).
 pub fn graph(c: &Connection, path: &str) -> std::io::Result<(usize, usize)> {
     let live = super::query::in_force();
     let nodes: Vec<(String, String, i64)> = c

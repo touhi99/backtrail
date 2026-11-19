@@ -1,6 +1,3 @@
-//! `backtrail hooks [install|remove]`: add or remove the two Claude Code hooks in `~/.claude/settings.json`.
-//! `SessionStart` runs `brief`; `SessionEnd` runs `skill/session-end.sh`. The file is copied to
-//! `settings.json.bak-backtrail` before it is changed.
 use anyhow::Context;
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -34,7 +31,6 @@ fn settings_path() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".claude/settings.json")
 }
 
-/// A hook command of ours: the exact command, or `bt brief` as written by hand.
 fn ours(cmd: &str, want: &str) -> bool {
     cmd == want || cmd == "bt brief" && want.ends_with(" brief")
 }

@@ -24,11 +24,9 @@ let STATE_COLOR: [String: Color] = [
     "moving": .moving, "built": .accent, "parked": .mut, "dropped": .dropped, "open": .open,
 ]
 let STATE_NAME: [String: String] = ["moving": "In development", "built": "Built", "parked": "Parked", "dropped": "Dropped", "open": "Open idea"]
-/// Who confirmed a decision.
 let HOW_COLOR: [String: Color] = ["owner-stated": .accent, "owner-accepted": .moving, "from a note": .mut]
 let HOW_NAME: [String: String] = ["owner-stated": "you said it", "owner-accepted": "you accepted it", "from a note": "from a note"]
 
-/// The rounded dark panel used for every card.
 struct Panel: ViewModifier {
     var radius: CGFloat = 20
     var border: Color = .line
@@ -49,7 +47,6 @@ extension View {
     func panel(radius: CGFloat = 20, border: Color = .line) -> some View { modifier(Panel(radius: radius, border: border)) }
 }
 
-/// A button style with hover and press states.
 struct BtnStyle: ButtonStyle {
     enum Kind { case primary, normal, ghost }
     var kind: Kind = .normal
@@ -80,7 +77,6 @@ struct BtnStyle: ButtonStyle {
     }
 }
 
-/// Lifts a card slightly on hover.
 struct HoverLift: ViewModifier {
     @State private var hover = false
     func body(content: Content) -> some View {
@@ -108,7 +104,6 @@ struct Ring: View {
     }
 }
 
-/// A ring split into coloured segments with small gaps.
 struct SegRing: View {
     var segs: [(Double, Color)]
     var size: CGFloat = 84
@@ -132,7 +127,6 @@ struct SegRing: View {
     }
 }
 
-/// The square letter badge for a project.
 struct Glyph: View {
     var name: String
     var color: Color
@@ -159,7 +153,6 @@ struct Chip: View {
     }
 }
 
-/// The soft green glow at the top of each page.
 struct PageGlow: View {
     var body: some View {
         RadialGradient(colors: [Color.accent.opacity(0.09), .clear], center: UnitPoint(x: 0.3, y: -0.15), startRadius: 0, endRadius: 650)
@@ -169,7 +162,6 @@ struct PageGlow: View {
     }
 }
 
-/// The Backtrail mark: two points joined by a winding trail, on a 24-unit grid. The web app draws the same path.
 struct TrailMark: Shape {
     func path(in rect: CGRect) -> Path {
         let s = min(rect.width, rect.height) / 24
@@ -186,7 +178,6 @@ struct TrailMark: Shape {
     }
 }
 
-/// The app icon artwork: the mark in green on a dark rounded square.
 struct AppIconArt: View {
     var body: some View {
         ZStack {

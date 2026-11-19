@@ -1,5 +1,3 @@
-//! Backfill of `check_how` for steps the owner must confirm by hand. The binary lists the steps and records the
-//! text; `skill/howto.sh` pipes each packet to a headless model.
 use crate::db::{logw, rows, s, strings};
 use anyhow::Context;
 use rusqlite::{Connection, params};
@@ -9,14 +7,12 @@ fn clip(text: &str, max: usize) -> String {
     text.chars().take(max).collect()
 }
 
-/// Whether [`queue`] lists steps that were already sent for a check text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Asked {
     Skip,
     Include,
 }
 
-/// Steps waiting on the owner (open, in progress or built) with no check text yet and none ruled out.
 pub fn queue(c: &Connection, limit: usize, asked: Asked) {
     for id in strings(
         c,
@@ -29,7 +25,6 @@ pub fn queue(c: &Connection, limit: usize, asked: Asked) {
     }
 }
 
-/// What the model reads for one step: the step, what was built, the passage it came from and the thread's summary.
 pub fn packet(c: &Connection, id: &str) {
     let me = rows(
         c,
@@ -56,7 +51,6 @@ pub fn packet(c: &Connection, id: &str) {
     );
 }
 
-/// Apply `{"id", "check"}`. An empty check records that the step needs no hand check, so it is not asked again.
 pub fn apply(c: &Connection, v: &Value) -> anyhow::Result<String> {
     let id = v["id"].as_str().context("no id")?;
     let check = clip(v["check"].as_str().unwrap_or("").trim(), 300);

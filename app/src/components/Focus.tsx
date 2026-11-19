@@ -1,36 +1,37 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Check, CircleHelp, FileText, MessageCircleQuestion, Pin, Plus } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { dayFmt, post } from '@/lib/api'
+import type { Done, Item } from '@/lib/types'
 
-/** Items older than this leave the focus deck and wait in the archive. */
 export const WEEK = 7 * 864e5
 export const DECK = 3
-export const ts = (i: any) => Date.parse(i.source_ts ?? i.created ?? '') || 0
+export const ts = (i: Pick<Item, 'source_ts' | 'created'>) => Date.parse(i.source_ts ?? i.created ?? '') || 0
 
 const LATER_KEY = 'bt-later'
 const readLater = (): string[] => { try { const v = JSON.parse(localStorage.getItem(LATER_KEY) ?? '[]'); return Array.isArray(v) ? v.map(String) : [] } catch { return [] } }
-/** Ids the viewer put off with Later; kept in this browser only. Every instance of the hook sees a change at once. */
+const writeLater = (n: string[]): boolean => { try { localStorage.setItem(LATER_KEY, JSON.stringify(n)); return true } catch { return false } }
 export function useLater() {
   const [later, setLater] = useState<string[]>(readLater)
   useEffect(() => { const h = () => setLater(readLater()); window.addEventListener('bt-later', h); return () => window.removeEventListener('bt-later', h) }, [])
-  const save = (n: string[]) => { setLater(n); try { localStorage.setItem(LATER_KEY, JSON.stringify(n)) } catch { /* private window */ } window.dispatchEvent(new Event('bt-later')) }
+  const save = (n: string[]) => { setLater(n); writeLater(n); window.dispatchEvent(new Event('bt-later')) }
   const add = (id: string) => save([...later.filter((x) => x !== id), id].slice(-500))
   const remove = (id: string) => save(later.filter((x) => x !== id))
   return { later, add, remove }
 }
 
 type Kind = 'done' | 'question' | 'step' | 'decision' | 'idea'
-const KIND: Record<Kind, { label: string; color: string; icon: any; yes: string; no: string }> = {
+const KIND: Record<Kind, { label: string; color: string; icon: LucideIcon; yes: string; no: string }> = {
   done: { label: 'Done?', color: '#fbbf24', icon: Check, yes: 'Yes, done', no: 'Not yet' },
   question: { label: 'Claude asks', color: '#c084fc', icon: MessageCircleQuestion, yes: 'Answer', no: '' },
   step: { label: 'New step', color: '#60a5fa', icon: Plus, yes: 'Add', no: "Don't add" },
   decision: { label: 'Decision', color: '#d4d4d8', icon: Pin, yes: 'Keep', no: 'Wrong' },
   idea: { label: 'Open question', color: '#c084fc', icon: CircleHelp, yes: 'Keep', no: 'Drop' },
 }
-const kindOf = (i: any): Kind => (i.state === 'looks_done' ? 'done' : i.state === 'open' && i.type === 'question' ? 'question' : i.type === 'step' ? 'step' : i.type === 'question' ? 'idea' : 'decision')
+const kindOf = (i: Item): Kind => (i.state === 'looks_done' ? 'done' : i.state === 'open' && i.type === 'question' ? 'question' : i.type === 'step' ? 'step' : i.type === 'question' ? 'idea' : 'decision')
 
-function FocusCard({ i, pos, total, act, later, project }: { i: any; pos: number; total: number; act: (url: string, body: any) => Promise<void>; later: () => void; project?: { name: string; color: string } }) {
+function FocusCard({ i, pos, total, act, later, project }: { i: Item; pos: number; total: number; act: (url: string, body: { id: string } & Record<string, unknown>) => Promise<void>; later: () => void; project?: { name: string; color: string } }) {
   const k = kindOf(i), K = KIND[k], Icon = K.icon
   const [ans, setAns] = useState('')
   const long = i.title.length > 48
@@ -72,26 +73,28 @@ function FocusCard({ i, pos, total, act, later, project }: { i: any; pos: number
   )
 }
 
-/**
- * Up to three items at a time from `queue`, one in focus, with the rest peeking underneath. The batch stays fixed
- * until it is cleared; then "Show three more" takes the next batch. `focus` puts that item first.
- */
-export function FocusDeck({ queue, refresh, resetKey, focus, projectOf }: { queue: any[]; refresh: () => void; resetKey: string; focus?: string | null; projectOf?: (i: any) => { name: string; color: string } | undefined }) {
+export function FocusDeck({ queue, refresh, resetKey, focus, projectOf }: { queue: Item[]; refresh: () => void; resetKey: string; focus?: string | null; projectOf?: (i: Item) => { name: string; color: string } | undefined }) {
   const { add } = useLater()
   const [batch, setBatch] = useState<string[] | null>(null)
   const [pos, setPos] = useState(0)
   const [gone, setGone] = useState<string[]>([])
-  const live = queue.filter((q) => !gone.includes(q.id))
+  const live = useMemo(() => queue.filter((q) => !gone.includes(q.id)), [queue, gone])
+  const shownFocus = useRef<string | null>(null)
   useEffect(() => { setBatch(null); setPos(0); setGone([]) }, [resetKey])
-  useEffect(() => { if (batch === null && queue.length) setBatch(live.slice(0, DECK).map((i) => i.id)) }, [batch, queue])
-  useEffect(() => { if (focus && live.some((q) => q.id === focus)) { setBatch([focus, ...live.filter((q) => q.id !== focus).slice(0, DECK - 1).map((q) => q.id)]); setPos(0) } }, [focus, queue.length > 0])
+  useEffect(() => { if (batch === null && live.length) setBatch(live.slice(0, DECK).map((i) => i.id)) }, [batch, live])
+  useEffect(() => {
+    if (!focus || shownFocus.current === focus || !live.some((q) => q.id === focus)) return
+    shownFocus.current = focus
+    setBatch([focus, ...live.filter((q) => q.id !== focus).slice(0, DECK - 1).map((q) => q.id)])
+    setPos(0)
+  }, [focus, live])
   const ids = batch ?? []
   const card = ids.slice(pos).map((id) => live.find((q) => q.id === id)).find(Boolean)
   const cardPos = card ? ids.indexOf(card.id) : ids.length
   const after = card ? ids.slice(cardPos + 1).filter((id) => live.some((q) => q.id === id)).length : 0
   const more = live.some((q) => !ids.includes(q.id))
   const next = (id: string) => { setGone((g) => [...g, id]); setPos(ids.indexOf(id) + 1) }
-  const act = async (url: string, body: any) => { const r = await post(url, body); if (r?.ok !== false) next(body.id); refresh() }
+  const act = async (url: string, body: { id: string } & Record<string, unknown>) => { const r = await post<Done>(url, body); if (r?.ok !== false) next(body.id); refresh() }
   return (
     <section className="relative min-w-0 pb-[22px]" style={{ flex: '999 1 560px' }}>
       {card ? (<>

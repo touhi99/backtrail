@@ -1,19 +1,16 @@
 import SwiftUI
 
-/// The first open step by creation time, as `bt brief` picks it.
 func nextStep(_ detail: J?) -> String? {
     let steps = (detail?["items"].arr ?? []).filter { $0["type"].str == "step" && $0["state"].str == "open" }
     return steps.min { $0["created"].str < $1["created"].str }?["title"].s
 }
 
-/// Steps on the project page: built (done or waiting for your OK) and total. Nil until the detail loads.
 func stepCounts(_ detail: J?) -> (built: Int, total: Int)? {
     guard let detail else { return nil }
     let steps = detail["items"].arr.filter { $0["type"].str == "step" && !["proposed", "rejected", "parked", "superseded"].contains($0["state"].str) }
     return (steps.filter { ["done", "looks_done"].contains($0["state"].str) }.count, steps.count)
 }
 
-/// Home: the most recently active project large, the other projects in motion as cards.
 struct HomeView: View {
     @EnvironmentObject var store: Store
     @State private var details: [String: J] = [:]
@@ -87,7 +84,6 @@ struct HomeView: View {
     }
 }
 
-/// The one loud card: the project worked on last, with its next step.
 struct NowCard: View {
     @EnvironmentObject var store: Store
     let t: J

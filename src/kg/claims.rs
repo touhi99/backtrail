@@ -1,31 +1,22 @@
-//! Filing claims about entities: state and rationale claims, and relations between two entities. The write rule is
-//! the same as for work items: an indexed source and a quote found in it.
 use super::{clip, entities};
 use crate::clock::now;
 use crate::db::{find_quote, fxhash, id64, logw, norm, source_id, thread_exists};
 use anyhow::Context;
 use rusqlite::{Connection, params};
 
-/// Relations that can be filed between two threads; each reads "A <kind> B".
 const THREAD_RELATIONS: &[&str] = &["spun out of", "forked from", "built on", "replaced by"];
 
 pub struct NewClaim<'a> {
-    /// `state`, `rationale` or `relation:<kind>`.
     pub kind: &'a str,
     pub text: &'a str,
     pub body: &'a str,
     pub source: &'a str,
     pub quote: &'a str,
-    /// Entity names or aliases. A relation names its subject, then its object.
     pub entities: &'a [String],
-    /// `stated` when the quote says it in so many words, `inferred` otherwise.
     pub stated: &'a str,
     pub origin: &'a str,
 }
 
-/// The write rule for a claim: the source exists, the quote is found word for word in one of its passages, and
-/// every entity exists. The speaker and the date come from that passage, never from the caller. Filing the same
-/// entities, type and text again changes nothing. Returns the claim's id.
 pub fn add(c: &Connection, claim: &NewClaim<'_>) -> anyhow::Result<String> {
     let relation = claim.kind.starts_with("relation:");
     if !relation && !["state", "rationale"].contains(&claim.kind) {
@@ -81,8 +72,6 @@ pub fn add(c: &Connection, claim: &NewClaim<'_>) -> anyhow::Result<String> {
         about.dedup();
     }
 
-    // A relation between the same two entities in the same direction and of the same kind is one claim, however
-    // it is worded: filing it again returns the live one.
     if relation {
         let live: Option<String> = c
             .query_row(
@@ -99,8 +88,6 @@ pub fn add(c: &Connection, claim: &NewClaim<'_>) -> anyhow::Result<String> {
         }
     }
 
-    // The id is a hash of the entities, type and text. Claims filed before store version 1 have a 32-bit id; one
-    // of those with the same content is the same claim. A new id taken by different content is refused.
     let natural = format!("{}{}{}", about.join(","), claim.kind, norm(claim.text));
     let same_content = |id: &str| -> Option<bool> {
         c.query_row(
@@ -155,8 +142,6 @@ fn link(c: &Connection, claim: &str, entity: &str, role: &str) {
     .expect("write to database");
 }
 
-/// A relation between two projects that the owner states without a quote (`bt link`). These are the only claims
-/// allowed to have no evidence. Returns the claim's id.
 pub fn owner_relation(c: &Connection, a: &str, b: &str, kind: &str, ts: &str) -> String {
     let subject = entities::ensure(c, a, "project", ts);
     let object = entities::ensure(c, b, "project", ts);
@@ -172,7 +157,6 @@ pub fn owner_relation(c: &Connection, a: &str, b: &str, kind: &str, ts: &str) ->
     id
 }
 
-/// File a relation between two threads with its evidence (`bt relate`). `state` is proposed, settled or rejected.
 pub fn relate(
     c: &Connection,
     a: &str,
@@ -193,7 +177,6 @@ pub fn relate(
     if a == b {
         anyhow::bail!("a relation needs two different threads");
     }
-    // Checked here as well as in `add`, so that a refused relation does not leave new entities behind.
     let found = source_id(c, source).with_context(|| format!("source '{source}' not found"))?;
     if quote.trim().len() < 8 {
         anyhow::bail!("quote of at least 8 chars from the source is required");
@@ -238,7 +221,6 @@ pub fn relate(
     Ok(())
 }
 
-/// Merge a duplicate claim into the one to keep: its entities move over and it is closed as superseded.
 pub fn merge(c: &Connection, keep: &str, duplicate: &str) -> anyhow::Result<()> {
     let exists =
         |id: &str| crate::db::count(c, "SELECT COUNT(*) FROM claims WHERE id=?1", &[&id]) > 0;

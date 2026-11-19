@@ -1,5 +1,3 @@
-//! Entities: the projects, tools and topics that claims are about. Each has aliases, the spellings that count as a
-//! mention of it. Entities come from `config.json`, from a built-in list of topics, or are added by the owner.
 use super::has_word;
 use crate::clock::now;
 use crate::config::cfg;
@@ -21,7 +19,6 @@ pub fn ensure(c: &Connection, name: &str, kind: &str, now: &str) -> String {
     id
 }
 
-/// An entity by exact name or alias (case-insensitive).
 pub fn find(c: &Connection, name: &str) -> Option<(String, String)> {
     let look = |n: &str| {
         c.query_row(
@@ -31,7 +28,6 @@ pub fn find(c: &Connection, name: &str) -> Option<(String, String)> {
         )
         .ok()
     };
-    // The extraction packet lists entities as "Name (kind)"; a model may copy the suffix.
     look(name).or_else(|| {
         let n = name.trim_end();
         ["project", "topic", "tool", "service", "model", "site"]
@@ -41,7 +37,6 @@ pub fn find(c: &Connection, name: &str) -> Option<(String, String)> {
     })
 }
 
-/// Entities whose name or alias appears as a whole word in `text`.
 pub fn mentions(c: &Connection, text: &str) -> Vec<(String, String)> {
     let hay = norm(text);
     let mut st = c.prepare("SELECT e.id, e.name, a.alias FROM entities e JOIN entity_aliases a ON a.entity_id=e.id").expect("prepare query");
@@ -64,9 +59,6 @@ pub fn mentions(c: &Connection, text: &str) -> Vec<(String, String)> {
     out
 }
 
-/// Technologies and concepts offered as entities, each with the kind it starts as (the owner can change a kind later). One is created only when owner turns in at least
-/// `TOPIC_MIN_SESSIONS` sessions mention it, so the list can be long without filling the graph. Ambiguous words
-/// (go, swift, bun, node) are left out; aliases are matched as whole words.
 const TOPIC_MIN_SESSIONS: i64 = 3;
 
 const TOPICS: &[(&str, &str, &[&str])] = &[
@@ -132,7 +124,6 @@ const TOPICS: &[(&str, &str, &[&str])] = &[
     ("Opus", "model", &["claude opus", "claude-opus-5-5"]),
 ];
 
-/// Create the built-in topics that the owner's turns mention often enough.
 fn seed_topics(c: &Connection) {
     let now = now();
     for (name, kind, aliases) in TOPICS {
@@ -182,7 +173,6 @@ fn seed_topics(c: &Connection) {
     }
 }
 
-/// Create the configured entities and their aliases.
 pub fn sync_configured(c: &Connection) -> usize {
     let now = now();
     seed_topics(c);
@@ -207,8 +197,6 @@ pub fn sync_configured(c: &Connection) -> usize {
     list.len()
 }
 
-/// Link a decision to the entities it is about: those whose name or alias appears as a whole word in `hay`
-/// (its title, body and quote), and the entity named like its thread. Returns how many were linked.
 pub fn link_claim(c: &Connection, id: &str, thread: &str, hay: &str) -> usize {
     let ents: Vec<(String, String, Vec<String>)> = {
         let mut st = c
@@ -227,8 +215,6 @@ pub fn link_claim(c: &Connection, id: &str, thread: &str, hay: &str) -> usize {
         .collect()
     };
     let hay = norm(hay);
-    // Longest alias first: once "marvel rivals" matched, those words no longer count for the entity "marvel", which
-    // still matches where the text says "Marvel" on its own.
     let mut pairs: Vec<(&str, &str)> = ents
         .iter()
         .flat_map(|(eid, _, al)| {
@@ -268,7 +254,6 @@ pub fn link_claim(c: &Connection, id: &str, thread: &str, hay: &str) -> usize {
     n
 }
 
-/// `text` with every whole-word occurrence of `word` replaced by spaces of the same length.
 fn mask_word(text: &str, word: &str) -> String {
     let mut out = String::new();
     let mut from = 0;
@@ -294,7 +279,6 @@ fn mask_word(text: &str, word: &str) -> String {
     out
 }
 
-/// Link every decision, state and rationale to the entities its text names. Run after an entity or an alias is added.
 pub fn relink_all(c: &Connection) -> usize {
     let rows: Vec<(String, String, String)> = c
         .prepare("SELECT id, ifnull(thread,''), title||' '||ifnull(body,'')||' '||ifnull(quote,'') FROM claims WHERE type IN ('decision','state','rationale')")
@@ -308,7 +292,6 @@ pub fn relink_all(c: &Connection) -> usize {
         .sum()
 }
 
-/// Add an entity with its aliases, then link decisions that mention it. Returns its id.
 pub fn add(c: &Connection, name: &str, kind: &str, aliases: &[String]) -> String {
     let id = ensure(c, name, kind, &now());
     c.execute("UPDATE entities SET kind=?2 WHERE id=?1", params![id, kind])
@@ -325,8 +308,6 @@ pub fn add(c: &Connection, name: &str, kind: &str, aliases: &[String]) -> String
     id
 }
 
-/// Add an alias to an existing entity (named by name or alias), then link decisions that mention it. Returns false
-/// when the entity is unknown.
 pub fn add_alias(c: &Connection, entity: &str, alias: &str) -> bool {
     let Some((id, name)) = find(c, entity) else {
         return false;
@@ -341,13 +322,11 @@ pub fn add_alias(c: &Connection, entity: &str, alias: &str) -> bool {
     true
 }
 
-/// Up to `n` of the owner's newest turns that contain `term`, as (date, snippet around the term, source id).
 pub fn examples(c: &Connection, term: &str, n: usize) -> Vec<(String, String, i64)> {
     let like = format!("%{}%", term.replace(['%', '_'], ""));
     let mut st = c
         .prepare("SELECT ifnull(c.ts,''), c.text, c.source_id FROM chunks c JOIN sources s ON s.id=c.source_id WHERE s.kind='session' AND c.role='user' AND length(c.text)<3000 AND c.text NOT LIKE '%task-notification%' AND c.text NOT LIKE 'This session is being continued%' AND c.text LIKE ?1 ORDER BY c.ts DESC LIMIT ?2")
         .expect("prepare query");
-    // the same message can sit in several sessions; fetch extra rows and drop repeats below
     let n_rows = n * 4;
     st.query_map(params![like, crate::db::sql_int(n_rows)], |r| {
         Ok((
@@ -385,7 +364,6 @@ pub fn examples(c: &Connection, term: &str, n: usize) -> Vec<(String, String, i6
     })
 }
 
-/// Hide a term from the entity suggestions.
 pub fn ignore_suggestion(c: &Connection, term: &str) {
     c.execute(
         "INSERT OR REPLACE INTO kg_overrides(target,field,value,by,ts) VALUES(?1,'entity_ignore','1','owner',?2)",
@@ -394,7 +372,6 @@ pub fn ignore_suggestion(c: &Connection, term: &str) {
     .expect("write to database");
 }
 
-/// Bring a hidden term back into the suggestions. Returns false when it was not hidden.
 pub fn unignore_suggestion(c: &Connection, term: &str) -> bool {
     let n = c
         .execute(
@@ -408,7 +385,6 @@ pub fn unignore_suggestion(c: &Connection, term: &str) -> bool {
     n > 0
 }
 
-/// Terms the owner hid from the suggestions, newest first.
 pub fn ignored_terms(c: &Connection) -> Vec<String> {
     c.prepare("SELECT target FROM kg_overrides WHERE field='entity_ignore' ORDER BY ts DESC")
         .expect("prepare query")
@@ -418,13 +394,9 @@ pub fn ignored_terms(c: &Connection) -> Vec<String> {
         .collect()
 }
 
-/// A term that matches a known alias once squashed: (term, known alias, mentions).
 type AliasHit = (String, String, usize);
-/// A term that looks like a name but is no entity yet: (term, mentions, sessions).
 type NameCandidate = (String, usize, usize);
 
-/// Terms that look like names but are not entities or aliases yet, with counts; and likely alias spellings of known names.
-/// Nothing is written: the owner adds an entity with `kg entity add`.
 pub fn suggest_data(c: &Connection) -> (Vec<AliasHit>, Vec<NameCandidate>) {
     let words: std::collections::HashSet<String> = std::fs::read_to_string("/usr/share/dict/words")
         .unwrap_or_default()
@@ -447,7 +419,7 @@ pub fn suggest_data(c: &Connection) -> (Vec<AliasHit>, Vec<NameCandidate>) {
         .map(|row| row.expect("decode query row"))
     {
         let mut seen = std::collections::HashSet::new();
-        let mut prev_end = true; // the previous word ended a sentence
+        let mut prev_end = true;
         for w in t.split_whitespace() {
             let ends = w.ends_with(['.', '!', '?', ':']);
             let core = w.trim_matches(|ch: char| !(ch.is_alphanumeric()));
@@ -481,7 +453,6 @@ pub fn suggest_data(c: &Connection) -> (Vec<AliasHit>, Vec<NameCandidate>) {
     let squash = |s: &str| s.replace(['-', '_', ' ', '.'], "");
     let known_sq: std::collections::HashMap<String, String> =
         known.iter().map(|k| (squash(k), k.clone())).collect();
-    // Terms the owner dismissed from the suggestions (kept in kg_overrides, so nothing is hard-coded).
     let ignored: std::collections::HashSet<String> = c
         .prepare("SELECT target FROM kg_overrides WHERE field='entity_ignore'")
         .expect("prepare query")
@@ -509,7 +480,6 @@ pub fn suggest_data(c: &Connection) -> (Vec<AliasHit>, Vec<NameCandidate>) {
         if *n < 5 || ss.len() < 3 || known.contains(w) || ignored.contains(w) {
             continue;
         }
-        // a file name counts as its stem: "readme.md" is the entity "readme"
         let base = [
             ".md", ".json", ".toml", ".yaml", ".yml", ".lock", ".rs", ".ts", ".tsx", ".js", ".py",
             ".sh", ".html", ".css", ".svg", ".txt", ".db",
@@ -527,12 +497,8 @@ pub fn suggest_data(c: &Connection) -> (Vec<AliasHit>, Vec<NameCandidate>) {
             cands.push((w.clone(), *n, ss.len(), *caps));
         }
     }
-    // ties broken by sessions, then name: the HashMap order is random per call, so without this the cut at 150 differs
-    // between requests and the list changes length
     cands.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.cmp(&a.2)).then(a.0.cmp(&b.0)));
     alias_hits.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
-    // A name is written capitalised in the middle of a sentence ("GitHub", "SQLite"); a common word or a typo is not.
-    // The assistant's turns are the reference, since the owner rarely capitalises.
     cands.truncate(150);
     let want: std::collections::HashSet<&str> = cands.iter().map(|x| x.0.as_str()).collect();
     let mut seen: std::collections::HashMap<String, (usize, usize)> =

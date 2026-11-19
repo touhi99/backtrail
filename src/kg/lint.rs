@@ -1,9 +1,7 @@
-//! Graph checks, printed as part of `bt check`.
 use super::clip;
 use crate::db::{fxhash, norm};
 use rusqlite::{Connection, params};
 
-/// Graph checks for `backtrail check`. Precision needs judgment, so a fixed sample is printed instead of a score.
 pub fn lint(c: &Connection) {
     let n = |sql: &str| -> i64 { c.query_row(sql, [], |r| r.get(0)).unwrap_or(0) };
     println!(

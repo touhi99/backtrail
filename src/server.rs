@@ -1,5 +1,3 @@
-//! The local web server: the app's files (embedded in the binary) and its JSON API. It listens on loopback only.
-//! Each route calls one function in `views`, `search`, `items` or `kg`; nothing is decided here.
 use crate::items::{self, Verdict};
 use crate::search::Filters;
 use crate::{db, kg, search, views};
@@ -14,7 +12,6 @@ type Reply = Response<std::io::Cursor<Vec<u8>>>;
 #[folder = "app/dist/"]
 struct Assets;
 
-/// A file of the web app. Any path that is not a built asset gets `index.html`, so page URLs load the app.
 fn asset(path: &str) -> Option<Reply> {
     let name = path.trim_start_matches('/');
     let name = if name.is_empty() { "index.html" } else { name };
@@ -48,7 +45,6 @@ fn error_reply(status: u16, message: &str) -> Reply {
     json_reply(&json!({"error": message})).with_status_code(status)
 }
 
-/// The reply to a change: `{"ok": true|false}`.
 #[expect(
     clippy::fn_params_excessive_bools,
     reason = "private helper; every call passes another function's result"
@@ -57,7 +53,6 @@ fn done(ok: bool) -> Value {
     json!({"ok": ok})
 }
 
-/// The reply to a change that can be refused with a reason.
 fn done_or_error(result: anyhow::Result<Value>) -> Value {
     result.unwrap_or_else(|error| json!({"ok": false, "error": error.to_string()}))
 }
@@ -81,7 +76,6 @@ fn url_decode(text: &str) -> String {
     String::from_utf8_lossy(&out).to_string()
 }
 
-/// The query parameters of a URL; a missing one reads as empty.
 struct Query(Vec<(String, String)>);
 
 impl Query {
@@ -107,7 +101,6 @@ impl Query {
     }
 }
 
-/// True when a Host or Origin header value names this machine (`127.0.0.1`, `localhost` or `[::1]`, any port).
 fn loopback(value: &str) -> bool {
     let rest = value.strip_prefix("http://").unwrap_or(value);
     let host = match rest.strip_prefix('[') {
@@ -117,8 +110,6 @@ fn loopback(value: &str) -> bool {
     matches!(host, Some("127.0.0.1" | "localhost" | "::1"))
 }
 
-/// Only this machine's browser may talk to the store. A page on another site reaches a loopback server through DNS
-/// rebinding (its own name in Host) or a cross-site POST (its own Origin); both are refused.
 fn from_this_machine(rq: &Request) -> bool {
     let header = |name: &'static str| {
         rq.headers()
@@ -255,7 +246,6 @@ fn post(c: &Connection, path: &str, body: &Value) -> Option<Value> {
             };
             match target.and_then(|t| kg::entities::find(c, t)) {
                 None => done(false),
-                // how far the recompute reached: claims now linked, and sessions that mention it with no claims yet
                 Some((id, ename)) => json!({
                     "ok": true,
                     "entity": ename,
@@ -265,7 +255,6 @@ fn post(c: &Connection, path: &str, body: &Value) -> Option<Value> {
                 }),
             }
         }
-        // reads the sessions that mention an entity with a small model, in the background (skill/extract.sh)
         "/api/kg/extract" => {
             let entity = text("entity");
             let limit = body["limit"].as_u64().unwrap_or(10).clamp(1, 40);
@@ -296,7 +285,6 @@ fn handle(c: &Connection, rq: &mut Request) -> Reply {
     reply.map_or_else(|| error_reply(404, "not found"), |v| json_reply(&v))
 }
 
-/// Every five minutes: read new sources, write the daily backup and embed new passages.
 fn background_scan() {
     let mut warned = false;
     loop {
@@ -327,7 +315,6 @@ pub fn serve(c: &Connection, port: u16) {
         std::thread::spawn(background_scan);
     }
     for mut rq in server.incoming_requests() {
-        // A failed request answers 500 and the server keeps running.
         let reply = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle(c, &mut rq)))
             .unwrap_or_else(|_| error_reply(500, "internal error"));
         rq.respond(reply).ok();

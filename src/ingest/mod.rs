@@ -1,6 +1,3 @@
-//! Readers that turn sources into passages (`chunks`): Claude Code sessions, Markdown notes, artifact snapshots and
-//! git history. Sources are read and never changed. A source is read again only when it changed; a session file
-//! that grew is read from where the last read stopped.
 pub mod git;
 pub mod notes;
 pub mod sessions;
@@ -12,8 +9,6 @@ use rusqlite::{Connection, params};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-/// What one scan read: (new or changed, unchanged) per kind of source, and (facts traced to their quote, facts
-/// whose quote is no longer in its source).
 pub struct Report {
     pub sessions: (usize, usize),
     pub notes: (usize, usize),
@@ -22,7 +17,6 @@ pub struct Report {
     pub quotes: (usize, usize),
 }
 
-/// Read every new or changed source, assign sessions to threads and re-link facts whose passage changed.
 pub fn scan(c: &Connection) -> Report {
     threads::seed(c);
     let report = Report {
@@ -39,8 +33,6 @@ pub fn scan(c: &Connection) -> Report {
     }
 }
 
-/// The scan that `brief` and the server's timer run: read sources and write the daily backup. Commit matching
-/// (`bt match`) is no longer part of it: a shared two-word phrase marked unrelated steps as done.
 pub fn rescan(c: &Connection) {
     scan(c);
     if !crate::db::is_demo() {
@@ -48,11 +40,8 @@ pub fn rescan(c: &Connection) {
     }
 }
 
-/// Daily copy of the store (answers, ticks and accepts exist nowhere else), in `<data dir>/backups`. The newest
-/// three are kept. Returns the path, or None when today's copy exists.
 pub fn backup(c: &Connection) -> Option<String> {
     let dir = crate::db::home().join("backups");
-    // Older versions wrote to a `BacktrailBackups` folder next to the data folder; move it once.
     if std::env::var("BACKTRAIL_HOME").is_err()
         && !dir.exists()
         && let Some(old) = crate::db::home()
@@ -88,7 +77,6 @@ fn home_dir() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_default())
 }
 
-/// Claude Code names a project folder after its path with every non-alphanumeric character turned into "-".
 fn slug(p: &Path) -> String {
     p.to_string_lossy()
         .chars()
@@ -104,7 +92,6 @@ fn mtime(p: &Path) -> i64 {
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
-/// Every file with the extension under a folder, skipping hidden folders and dependency folders.
 fn walk(dir: &Path, out: &mut Vec<PathBuf>, ext: &str) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -123,7 +110,6 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>, ext: &str) {
     }
 }
 
-/// A source about to be read.
 #[expect(
     clippy::struct_field_names,
     reason = "`ref` is a keyword; `source_ref` matches the name used for source refs across the crate"
@@ -135,12 +121,9 @@ struct Source<'a> {
     project: &'a str,
     thread: Option<&'a str>,
     path: &'a str,
-    /// Changes when the source changed: the file's mtime, or a hash for a git repository.
     version: i64,
 }
 
-/// Start reading a source: create its row, or clear its passages when it changed. Returns None when the stored
-/// version is current and nothing needs reading.
 fn begin(c: &Connection, s: &Source<'_>) -> Option<i64> {
     let stored: Option<(i64, i64)> = c
         .query_row(
@@ -175,7 +158,6 @@ fn begin(c: &Connection, s: &Source<'_>) -> Option<i64> {
     Some(id)
 }
 
-/// Finish reading a source: record its passage count and the time span it covers.
 fn finish(c: &Connection, source_id: i64, first_ts: &str, last_ts: &str) {
     c.execute(
         "UPDATE sources SET nchunks=(SELECT COUNT(*) FROM chunks WHERE source_id=?1), first_ts=?2, last_ts=?3 WHERE id=?1",
@@ -184,8 +166,6 @@ fn finish(c: &Connection, source_id: i64, first_ts: &str, last_ts: &str) {
     .expect("write to database");
 }
 
-/// Replace access tokens and private keys with a marker before text is stored. Pattern-based: it covers the common
-/// token formats below and misses secrets that have no fixed shape (passwords, custom tokens).
 fn redact(text: &str) -> std::borrow::Cow<'_, str> {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
@@ -204,7 +184,6 @@ fn redact(text: &str) -> std::borrow::Cow<'_, str> {
     .replace_all(text, "[redacted secret]")
 }
 
-/// Store one passage and index it for keyword search. Returns its id.
 pub fn add_chunk(
     c: &Connection,
     source_id: i64,
@@ -229,7 +208,6 @@ pub fn add_chunk(
     id
 }
 
-/// Store text as passages of at most `max` characters under one locator, numbering them from `seq`.
 fn add_blocks(
     c: &Connection,
     source_id: i64,
@@ -254,9 +232,6 @@ fn add_blocks(
     }
 }
 
-/// A note, artifact or session read again in full gets new passage ids. Point each fact whose passage no longer
-/// holds its quote at the passage that does; facts whose passage still holds the quote are left alone. Returns
-/// (facts traced to their quote, facts whose quote is no longer in the source).
 pub fn relink(c: &Connection) -> (usize, usize) {
     let facts = crate::db::rows(
         c,

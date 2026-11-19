@@ -1,7 +1,3 @@
-//! Resolving proposed items against what the store already knows. The binary finds candidates (entity
-//! neighbourhood, shared word stems, nearest passages) and records a verdict; a model call decides, either the
-//! Claude session that files the item or `skill/resolve.sh`. A resolved item stays on file: a question becomes
-//! `answered`, a step or decision becomes `superseded`, and `superseded_by` names the item that settled it.
 use crate::clock::now;
 use crate::db::{count, logw, rows, s, strings};
 use crate::items::COMMON_WORDS;
@@ -24,8 +20,6 @@ const STOP: &[&str] = &[
     "make", "made", "keep", "now", "for", "who", "why", "where",
 ];
 
-/// The first five letters of each word of three letters or more, stop words left out: "removed" and "remove" count
-/// as one, and "menu" and "bar" still count.
 fn stems(text: &str) -> HashSet<String> {
     text.to_lowercase()
         .split(|ch: char| !ch.is_alphanumeric())
@@ -43,8 +37,6 @@ pub struct Candidate {
     pub score: usize,
 }
 
-/// Existing items that may already settle `id`: those sharing an entity, a word stem or a nearby passage with it.
-/// Best first. An item that only shares a broad entity with it, and nothing else, is not listed.
 #[expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -79,7 +71,6 @@ pub fn candidates(c: &Connection, id: &str, limit: usize) -> Vec<Candidate> {
         &[&id],
     )
     ;
-    // A shared word counts for more when few items use it: "backtrail" says little, "menu" says a lot.
     let docs: Vec<HashSet<String>> = others.iter().map(|o| stems(s(o, "title"))).collect();
     let mut df: HashMap<&str, usize> = HashMap::new();
     for d in &docs {
@@ -119,7 +110,6 @@ pub fn candidates(c: &Connection, id: &str, limit: usize) -> Vec<Candidate> {
     scored
 }
 
-/// After a filing: the existing items that may already settle the new one, for the filer to judge.
 pub fn print_candidates(c: &Connection, id: &str) {
     let list = candidates(c, id, 6);
     if list.is_empty() {
@@ -140,8 +130,6 @@ pub fn print_candidates(c: &Connection, id: &str) {
     }
 }
 
-/// Settle `id` with `by`: a question is answered; a step or decision is superseded. Entity links of the settled item
-/// are copied to `by`, so the graph keeps one node for the matter.
 pub fn resolve(c: &Connection, id: &str, by: &str, reason: &str) -> anyhow::Result<bool> {
     let reason = clip(reason.trim(), 320);
     if reason.is_empty() || by.is_empty() {
@@ -183,8 +171,6 @@ pub fn resolve(c: &Connection, id: &str, by: &str, reason: &str) -> anyhow::Resu
     Ok(true)
 }
 
-/// When a decision was said, as an ISO string: the claim's own date, else its source's first timestamp, else when it
-/// was filed. Dates without a time sort before a timestamp of the same day.
 fn when(c: &Connection, id: &str) -> String {
     rows(
         c,
@@ -197,10 +183,6 @@ fn when(c: &Connection, id: &str) -> String {
     .unwrap_or_default()
 }
 
-/// The older settled decisions a new settled decision may reverse: the best word and passage matches among them, then
-/// the ones that share its most specific entities, up to `limit`. Word overlap alone misses a reversal that uses
-/// different words ("Stop Vigil" against "Track open Vigil work"); an entity alone is too broad when it has hundreds
-/// of claims, so the most specific entities come first.
 pub fn reverse_candidates(c: &Connection, id: &str, limit: usize) -> Vec<Value> {
     let said = when(c, id);
     if said.is_empty() {
@@ -248,7 +230,6 @@ pub fn reverse_candidates(c: &Connection, id: &str, limit: usize) -> Vec<Value> 
         .collect()
 }
 
-/// The text a model reads to decide whether one settled decision reverses older ones.
 pub fn reverse_packet(c: &Connection, id: &str) {
     let me = rows(
         c,
@@ -282,8 +263,6 @@ pub fn reverse_packet(c: &Connection, id: &str) {
     }
 }
 
-/// Settled decisions no reversal check has looked at yet, newest first. One with nothing older to compare with is
-/// recorded as checked without a model call.
 pub fn reverse_queue(c: &Connection, limit: usize) {
     let mut listed = 0;
     for id in strings(
@@ -305,8 +284,6 @@ pub fn reverse_queue(c: &Connection, limit: usize) {
     }
 }
 
-/// Apply a reversal verdict `{"id", "replaces": [..], "reason"}`: every older settled decision named is marked
-/// `superseded` by the new one. Each must be a settled decision that was said no later than the new one.
 fn apply_reverse(c: &Connection, v: &Value) -> anyhow::Result<String> {
     let id = v["id"].as_str().context("no id")?;
     let reason = clip(v["reason"].as_str().unwrap_or("").trim(), 320);
@@ -353,8 +330,6 @@ fn apply_reverse(c: &Connection, v: &Value) -> anyhow::Result<String> {
     Ok(done.join("; "))
 }
 
-/// Undo a resolution: the item goes back to `proposed` with no answer, no settling item and no closing date. A
-/// settled decision that a reversal replaced goes back to `settled` instead.
 pub fn unresolve(c: &Connection, id: &str) -> bool {
     let reversed = count(
         c,
@@ -397,7 +372,6 @@ pub fn unresolve(c: &Connection, id: &str) -> bool {
     ok
 }
 
-/// Time-bound items whose `valid_to` has passed leave the queue. Returns how many.
 pub fn expire(c: &Connection) -> usize {
     let today = &now()[..10];
     let ids = strings(
@@ -417,8 +391,6 @@ pub fn expire(c: &Connection) -> usize {
     ids.len() + park_stale(c) + park_closed_threads(c)
 }
 
-/// Claude's unconfirmed proposals on a thread that is built, dropped or parked leave every list the same way: the
-/// project is not being worked on, so its suggestions are not to-dos. `unresolve` brings one back; owner items are kept.
 fn park_closed_threads(c: &Connection) -> usize {
     let rows = crate::db::rows(
         c,
@@ -440,12 +412,8 @@ fn park_closed_threads(c: &Connection) -> usize {
     rows.len()
 }
 
-/// Days after which Claude's own proposals and open questions are parked if nobody has settled them.
 const PARK_DAYS: i64 = 14;
 
-/// Claude's proposals and open questions whose session is more than `PARK_DAYS` days old and that are still
-/// unconfirmed leave every list without being deleted: they become `superseded` with the reason in `answer`, and `unresolve` brings one back. Items the owner
-/// filed are never parked.
 fn park_stale(c: &Connection) -> usize {
     let ids = strings(
         c,
@@ -470,7 +438,6 @@ fn park_stale(c: &Connection) -> usize {
     ids.len()
 }
 
-/// Proposed items a model has not looked at yet, oldest first.
 pub fn queue(c: &Connection, limit: usize) {
     expire(c);
     for id in strings(
@@ -484,7 +451,6 @@ pub fn queue(c: &Connection, limit: usize) {
     }
 }
 
-/// The text a small model reads for one item: the item, the entities it may name, the threads, the candidates.
 pub fn packet(c: &Connection, id: &str) {
     let me = rows(
         c,
@@ -538,8 +504,6 @@ pub fn packet(c: &Connection, id: &str) {
     }
 }
 
-/// Apply a model's verdict: `{"id", "entities", "thread", "valid_to", "resolves_by", "reason"}`. Entities and thread
-/// are checked against the store; a resolution needs an existing item and a reason.
 pub fn apply(c: &Connection, v: &Value) -> anyhow::Result<String> {
     if v.get("replaces").is_some() {
         return apply_reverse(c, v);
@@ -572,8 +536,6 @@ pub fn apply(c: &Connection, v: &Value) -> anyhow::Result<String> {
                 |r| r.get(0),
             )
             .unwrap_or_default();
-        // the entity is the subject and the thread follows it: a project thread moves only to the thread of the
-        // item's main entity; an item on a topic thread may move to any project thread
         let main = v["entities"]
             .as_array()
             .and_then(|a| a.first())

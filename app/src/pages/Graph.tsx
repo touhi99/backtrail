@@ -6,6 +6,8 @@ import Trail from '@/pages/Trail'
 import More from '@/components/More'
 import Paged from '@/components/Paged'
 import Topics, { KIND_C, KINDS } from '@/components/Topics'
+import type { LucideIcon } from 'lucide-react'
+import type { GraphNode, KgClaim, KgClaims, KgEvidence, KgGraph, KgSuggest, LineageClaim } from '@/lib/types'
 import '@/next.css'
 
 const STATUS_C: Record<string, string> = { active: '#34d399', proposed: '#8b8b95', superseded: '#fbbf24', retracted: '#fb7185' }
@@ -13,8 +15,7 @@ const STATUS_L: Record<string, string> = { active: 'kept', proposed: 'suggested'
 const WHO: Record<string, string> = { owner: 'You', assistant: 'Claude', unknown: 'Unknown' }
 const W = 1300, H = 1000, SX = W / 880, SY = H / 700
 
-/** Fixed-seed force layout: repulsion between nodes, springs along shared-claim edges, a weak pull to the centre. */
-function layout(nodes: any[], edges: any[]) {
+function layout(nodes: GraphNode[], edges: KgGraph['edges']) {
   const pos = new Map<string, { x: number; y: number }>()
   const topics = nodes.filter((n) => n.kind === 'topic'), main = nodes.filter((n) => n.kind !== 'topic')
   const isTopic = new Set(topics.map((n) => n.id))
@@ -43,7 +44,7 @@ function layout(nodes: any[], edges: any[]) {
   return pos
 }
 
-function ClaimCard({ c, ev, showEntities, kindOf, onPick }: { c: any; ev: any[]; showEntities?: boolean; kindOf: (n: string) => string | undefined; onPick: (n: string) => void }) {
+function ClaimCard({ c, ev, showEntities, kindOf, onPick }: { c: KgClaim; ev: KgEvidence[]; showEntities?: boolean; kindOf: (n: string) => string | undefined; onPick: (n: string) => void }) {
   const col = STATUS_C[c.status] ?? '#8b8b95'
   const names: string[] = showEntities && c.entities ? String(c.entities).split(' | ').filter(Boolean) : []
   return (
@@ -61,7 +62,7 @@ function ClaimCard({ c, ev, showEntities, kindOf, onPick }: { c: any; ev: any[];
           ))}
         </div>
       )}
-      {ev.length > 0 && <More label="Quote" className="mt-1.5">{ev.slice(0, 2).map((v: any, i: number) => (
+      {ev.length > 0 && <More label="Quote" className="mt-1.5">{ev.slice(0, 2).map((v, i) => (
         <div key={i} className="mt-1.5 border-l-2 border-line2 pl-2.5 text-[12px] leading-snug text-soft">
           “{v.quote}”
           <div className="mt-0.5 text-[11px] text-mut">{v.stated === 'inferred' ? 'inferred · ' : ''}<Link className="underline decoration-line2" to={`/source/${v.source_id}`}>{v.source_title ?? v.source}</Link></div>
@@ -72,9 +73,9 @@ function ClaimCard({ c, ev, showEntities, kindOf, onPick }: { c: any; ev: any[];
 }
 
 function Network({ tabs }: { tabs: React.ReactNode }) {
-  const { data: lin } = useApi('/api/kg/lineage')
-  const { data: sug, reload: reloadSug } = useApi('/api/kg/suggest') as { data: any; reload: () => void }
-  const { data: g, reload: reloadG } = useApi('/api/kg/graph') as { data: any; reload: () => void }
+  const { data: lin } = useApi<LineageClaim[]>('/api/kg/lineage')
+  const { data: sug, reload: reloadSug } = useApi<KgSuggest>('/api/kg/suggest')
+  const { data: g, reload: reloadG } = useApi<KgGraph>('/api/kg/graph')
   const [sp] = useSearchParams()
   const [sel, setSel] = useState('')
   const [q, setQ] = useState('')
@@ -85,13 +86,13 @@ function Network({ tabs }: { tabs: React.ReactNode }) {
   const [view, setView] = useState({ x: 0, y: 0, k: 1 })
   const svg = useRef<SVGSVGElement>(null)
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null)
-  const { data: det } = useApi(`/api/kg/claims?entity=${encodeURIComponent(sel)}&q=${encodeURIComponent(q)}&status=${status}&speaker=${speaker}`)
+  const { data: det } = useApi<KgClaims>(`/api/kg/claims?entity=${encodeURIComponent(sel)}&q=${encodeURIComponent(q)}&status=${status}&speaker=${speaker}`)
 
-  const nodes = useMemo(() => (g?.nodes ?? []).filter((n: any) => n.claims > 0), [g])
-  const pos = useMemo(() => (g ? layout(nodes, g.edges) : new Map()), [g, nodes])
-  useEffect(() => { const e = sp.get('e'); if (e && nodes.length) { const n = nodes.find((x: any) => x.name.toLowerCase() === e.toLowerCase()); if (n) setSel(n.id) } }, [sp, nodes])
-  const cur = nodes.find((n: any) => n.id === sel)
-  const byId = useMemo(() => new Map<string, any>(nodes.map((n: any) => [n.id, n])), [nodes])
+  const nodes = useMemo(() => (g?.nodes ?? []).filter((n) => n.claims > 0), [g])
+  const pos = useMemo(() => (g ? layout(nodes, g.edges) : new Map<string, { x: number; y: number }>()), [g, nodes])
+  useEffect(() => { const e = sp.get('e'); if (e && nodes.length) { const n = nodes.find((x) => x.name.toLowerCase() === e.toLowerCase()); if (n) setSel(n.id) } }, [sp, nodes])
+  const cur = nodes.find((n) => n.id === sel)
+  const byId = useMemo(() => new Map<string, GraphNode>(nodes.map((n) => [n.id, n])), [nodes])
   useEffect(() => { if (sel) setOpen(true) }, [sel])
   const focus = hover || sel
   const nbr = useMemo(() => {
@@ -99,13 +100,13 @@ function Network({ tabs }: { tabs: React.ReactNode }) {
     if (focus) for (const e of g?.edges ?? []) { if (e.a === focus) m.set(e.b, e.w); if (e.b === focus) m.set(e.a, e.w) }
     return m
   }, [g, focus])
-  const aliases = cur ? (g?.nodes.find((n: any) => n.id === cur.id)?.aliases ?? '') : ''
+  const aliases = cur ? (g?.nodes.find((n) => n.id === cur.id)?.aliases ?? '') : ''
   const [tab, setTab] = useState(sp.get('tab') ?? 'claims')
   useEffect(() => { const t = sp.get('tab'); if (t) setTab(t) }, [sp])
   const toReview = sug ? sug.entities.length + sug.aliases.length : 0
-  const kindOfName = (n: string) => nodes.find((x: any) => x.name === n)?.kind
-  const pickByName = (n: string) => { const m = nodes.find((x: any) => x.name === n); if (m) { setSel(m.id); setTab('claims') } }
-  const entLineage = (lin ?? []).filter((l: any) => !cur || (l.path ?? '').split(' → ').includes(cur.name))
+  const kindOfName = (n: string) => nodes.find((x) => x.name === n)?.kind
+  const pickByName = (n: string) => { const m = nodes.find((x) => x.name === n); if (m) { setSel(m.id); setTab('claims') } }
+  const entLineage = (lin ?? []).filter((l) => !cur || (l.path ?? '').split(' → ').includes(cur.name))
 
   useEffect(() => {
     const el = svg.current; if (!el) return
@@ -121,7 +122,7 @@ function Network({ tabs }: { tabs: React.ReactNode }) {
   }, [])
 
   const zoom = (f: number) => setView((v) => { const k = Math.min(3, Math.max(0.5, v.k * f)); return { k, x: W / 2 - ((W / 2 - v.x) / v.k) * k, y: H / 2 - ((H / 2 - v.y) / v.k) * k } })
-  const Chip = ({ v, cur: c, set, label, dot }: any) => <button onClick={() => set(c === v ? '' : v)} className="inline-flex items-center gap-1.5 rounded-full px-2 text-[12px] font-medium transition-colors" style={{ height: 26, border: '1px solid var(--color-line2)', background: c === v ? '#34d39926' : 'rgba(255,255,255,.04)', color: c === v ? '#34d399' : 'var(--color-soft)' }}>{dot && <span className="size-1.5 rounded-full" style={{ background: dot }} />}{label}</button>
+  const Chip = ({ v, cur: c, set, label, dot }: { v: string; cur: string; set: (v: string) => void; label: string; dot?: string }) => <button onClick={() => set(c === v ? '' : v)} className="inline-flex items-center gap-1.5 rounded-full px-2 text-[12px] font-medium transition-colors" style={{ height: 26, border: '1px solid var(--color-line2)', background: c === v ? '#34d39926' : 'rgba(255,255,255,.04)', color: c === v ? '#34d399' : 'var(--color-soft)' }}>{dot && <span className="size-1.5 rounded-full" style={{ background: dot }} />}{label}</button>
   const shownTab = cur && tab === 'topics' ? 'claims' : tab
 
   return (
@@ -136,13 +137,13 @@ function Network({ tabs }: { tabs: React.ReactNode }) {
           ))}
         </defs>
         <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
-          {(g?.edges ?? []).map((e: any, i: number) => {
+          {(g?.edges ?? []).map((e, i) => {
             const a = pos.get(e.a), b = pos.get(e.b); if (!a || !b) return null
             const on = focus && (e.a === focus || e.b === focus)
             if (!on && (byId.get(e.a)?.kind === 'topic' || byId.get(e.b)?.kind === 'topic')) return null
             return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={on ? '#34d399' : '#a1a1aa'} strokeOpacity={on ? 0.85 : focus ? 0.05 : 0.16} strokeWidth={(on ? 1.4 : 0.8) + Math.log(1 + e.w) * 0.8} />
           })}
-          {nodes.map((n: any) => {
+          {nodes.map((n) => {
             const p = pos.get(n.id); if (!p) return null
             const r = Math.min(46, (9 + Math.sqrt(n.claims) * 2.1) * 1.15), on = n.id === sel, lit = !focus || n.id === focus || nbr.has(n.id)
             const c = KIND_C[n.kind] ?? '#8b8b95'
@@ -165,7 +166,7 @@ function Network({ tabs }: { tabs: React.ReactNode }) {
       </div>
 
       <div className="absolute bottom-5 left-5 flex flex-col gap-1.5">
-        {[[Plus, () => zoom(1.25), 'Zoom in'], [Minus, () => zoom(1 / 1.25), 'Zoom out'], [Maximize2, () => setView({ x: 0, y: 0, k: 1 }), 'Reset view']].map(([I, f, t]: any) => (
+        {([[Plus, () => zoom(1.25), 'Zoom in'], [Minus, () => zoom(1 / 1.25), 'Zoom out'], [Maximize2, () => setView({ x: 0, y: 0, k: 1 }), 'Reset view']] as [LucideIcon, () => void, string][]).map(([I, f, t]) => (
           <button key={t} title={t} onClick={f} className="grid size-8 place-items-center rounded-[10px] border border-line2 bg-[#18181c]/90 text-soft transition hover:bg-[#222226] active:scale-95"><I size={15} /></button>
         ))}
       </div>
@@ -184,14 +185,14 @@ function Network({ tabs }: { tabs: React.ReactNode }) {
               {nbr.size > 0 && (
                 <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {[...nbr.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([id, w]) => (
-                    <button key={id} onClick={() => setSel(id)} className="inline-flex items-center gap-1 rounded-full border border-line2 bg-white/[.04] px-2 text-[11.5px] text-soft hover:bg-white/10" style={{ height: 24 }}><span className="size-1.5 rounded-full" style={{ background: KIND_C[byId.get(id)?.kind] ?? '#8b8b95' }} />{byId.get(id)?.name.replace(/ \(.*\)/, '')} <span className="text-mut">{w}</span></button>
+                    <button key={id} onClick={() => setSel(id)} className="inline-flex items-center gap-1 rounded-full border border-line2 bg-white/[.04] px-2 text-[11.5px] text-soft hover:bg-white/10" style={{ height: 24 }}><span className="size-1.5 rounded-full" style={{ background: KIND_C[byId.get(id)?.kind ?? ''] ?? '#8b8b95' }} />{byId.get(id)?.name.replace(/ \(.*\)/, '')} <span className="text-mut">{w}</span></button>
                   ))}
                 </div>
               )}
             </div>
           )}
           <div className="flex items-center gap-1.5"><div className="flex flex-1 gap-1 rounded-[11px] bg-white/[.05] p-1">
-            {([['claims', 'Claims', det?.total ?? ''], ['lineage', 'Lineage', entLineage.length || ''], ...(cur ? [] : [['topics', 'Topics', toReview || '']])] as [string, string, any][]).map(([k, l, n]) => (
+            {([['claims', 'Claims', det?.total ?? ''], ['lineage', 'Lineage', entLineage.length || ''], ...(cur ? [] : [['topics', 'Topics', toReview || '']])] as [string, string, number | ''][]).map(([k, l, n]) => (
               <button key={k} type="button" onClick={() => setTab(k)} className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-[8px] text-[13px] font-medium transition-colors" style={{ background: shownTab === k ? '#2a2a30' : 'transparent', color: shownTab === k ? '#fff' : 'var(--color-soft)' }}>
                 {l}{n !== '' && <span className="rounded-full px-1.5 text-[11px] tabular-nums" style={k === 'topics' ? { background: '#fbbf2426', color: '#fbbf24' } : { color: 'var(--color-mut)' }}>{n}</span>}
               </button>
@@ -203,10 +204,10 @@ function Network({ tabs }: { tabs: React.ReactNode }) {
           {shownTab === 'lineage' && (
             <div className="flex flex-col gap-2">
               {entLineage.length === 0 && <div className="text-[13px] text-mut">No lineage recorded{cur ? ' for this one' : ''}.</div>}
-              {entLineage.slice(0, 40).map((l: any) => (
+              {entLineage.slice(0, 40).map((l) => (
                 <div key={l.id} className="rounded-[14px] border border-line bg-white/[.025] px-3 py-2.5">
                   <div className="flex flex-wrap items-center gap-1.5 text-[13px]">
-                    {(l.path ?? '').split(' → ').map((n: string, i: number) => (
+                    {(l.path ?? '').split(' → ').map((n, i) => (
                       <span key={i} className="inline-flex items-center gap-1.5">{i > 0 && <span className="text-mut">→</span>}<button onClick={() => pickByName(n)} className="inline-flex items-center gap-1 rounded-full border border-line2 px-2 py-px hover:bg-white/10"><span className="size-1.5 rounded-full" style={{ background: KIND_C[kindOfName(n) ?? ''] ?? '#8b8b95' }} />{n.replace(/ \(.*\)/, '')}</button></span>
                     ))}
                   </div>
@@ -227,7 +228,7 @@ function Network({ tabs }: { tabs: React.ReactNode }) {
                 </div>
               </div>
               <div className="flex flex-col gap-2">
-                <Paged resetKey={`${sel}|${q}|${status}|${speaker}`} items={det?.claims ?? []} size={8}>{(pageRows: any[]) => pageRows.map((c: any) => <ClaimCard key={c.id} c={c} ev={(det.evidence ?? []).filter((v: any) => v.claim_id === c.id)} showEntities={!cur} kindOf={kindOfName} onPick={pickByName} />)}</Paged>
+                <Paged resetKey={`${sel}|${q}|${status}|${speaker}`} items={det?.claims ?? []} size={8}>{(pageRows) => pageRows.map((c) => <ClaimCard key={c.id} c={c} ev={(det?.evidence ?? []).filter((v) => v.claim_id === c.id)} showEntities={!cur} kindOf={kindOfName} onPick={pickByName} />)}</Paged>
                 {det && det.claims.length === 0 && <div className="text-[13px] text-mut">Nothing matches.</div>}
               </div>
             </>
@@ -244,7 +245,7 @@ export default function Graph() {
   const tabs = (
     <div className="flex gap-1.5">
       {([['', 'Network'], ['trail', 'Trail']] as const).map(([k, l]) => (
-        <button key={k} type="button" onClick={() => { const n = new URLSearchParams(sp); k ? n.set('view', k) : n.delete('view'); setSp(n) }} className="rounded-full px-3 text-[12.5px] font-medium" style={{ height: 28, border: '1px solid var(--color-line2)', background: growth === !!k ? '#34d39926' : 'rgba(255,255,255,.04)', color: growth === !!k ? '#34d399' : 'var(--color-soft)' }}>{l}</button>
+        <button key={k} type="button" onClick={() => { const n = new URLSearchParams(sp); if (k) n.set('view', k); else n.delete('view'); setSp(n) }} className="rounded-full px-3 text-[12.5px] font-medium" style={{ height: 28, border: '1px solid var(--color-line2)', background: growth === !!k ? '#34d39926' : 'rgba(255,255,255,.04)', color: growth === !!k ? '#34d399' : 'var(--color-soft)' }}>{l}</button>
       ))}
     </div>
   )

@@ -15,7 +15,7 @@ Commands run as `bt <command>`.
 | `add <type> --thread --title --entities A,B --source --quote [--body --state --origin --valid-to]` | File one decision, step, question or turn. At least one entity is required; the thread follows the entity. Lists existing items that may already settle it |
 | `resolve <id> --by <id> --reason T` | Settle an item with an existing one: a question becomes `answered`, a step or decision `superseded`, `superseded_by` names the settling item |
 | `unresolve <id>` | Put a resolved or expired item back to `proposed`; a settled decision that a reversal replaced goes back to `settled` |
-| `resolve --expired` | Items whose `valid_to` has passed leave the queue (also done by `resolve-queue`). Claude's proposals and open questions whose session is more than 14 days old and that are still unconfirmed are parked the same way: state `superseded`, reason in `answer`, `unresolve` brings one back. `bt serve` runs this every 5 minutes. Proposals on a thread whose state is `built`, `dropped` or `parked` are parked the same way. Items the owner filed are never parked |
+| `resolve --expired` | Items whose `valid_to` has passed leave the queue (also done by `resolve-queue`). Claude's proposals and open questions whose session is more than 14 days old and that are still unconfirmed are parked the same way: state `superseded`, reason in `answer`, `unresolve` brings one back. `bt serve` runs this every 5 minutes. Proposals on a thread whose state is `built`, `dropped` or `parked` are parked the same way. Parking applies to Claude's items; items the owner filed stay as they are |
 | `answer <question id> --text T` | Record the owner's reply to a question Claude asked; the brief lists open questions with their ids |
 | `keep` | Run the keep rule over every proposed fact |
 | `resolve-queue [--limit N]`, `resolve-packet <id>`, `resolve-apply <file\|->` | The three halves of `skill/resolve.sh`: unjudged proposed items, the text a model reads for one, and applying its verdict. With `--reverses` (`resolve-queue`, `resolve-packet`) they work on settled decisions: the packet lists the older settled decisions on the same subject (best word and passage matches, then those sharing the newest decision's most specific entities), and a verdict `{"id", "replaces": [..], "reason"}` marks each named older decision `superseded` by the new one. `resolve.sh --reverses` asks a second model to confirm each reversal before it is applied |
@@ -29,7 +29,7 @@ Commands run as `bt <command>`.
 | `search <words> [--thread T] [--kind session\|note\|artifact\|commit] [--state S] [--from DATE] [--to DATE] [--text]` | Search with filters. `--state` keeps passages whose source has a filed item in that state. `--text` forces keyword-only |
 | `embed [--limit N]` | Embed passages that have no vector yet (needs the embedding server; see the `embeddings` key) |
 | `show <ref>` | Print a source's passages |
-| `check [--pairs]` | Report lost quotes, session files that were never indexed, orphan threads, stale work; `--pairs` lists candidate contradictions |
+| `check [--pairs]` | Report lost quotes, session files not indexed yet, orphan threads, stale work; `--pairs` lists candidate contradictions |
 | `match` | Mark open steps that a later commit seems to complete as `looks done?` (word-overlap heuristic; it marks unrelated steps that share a phrase, so it runs only when called) |
 | `pending [--days N]` | List recent sessions that no item cites |
 | `artifacts [--manifest list.json]` | Record publish dates and report missing or stale snapshots |
@@ -95,7 +95,7 @@ indexed. It holds custom thread rules, note folders and repositories:
 | `screens_dir` | Folder of HTML design files to index |
 | `threads` | Thread definitions: `name`, `area`, `state`, `summary`, `kind`, `regex` (matches session titles and project folders). When set, one thread per project folder is no longer created |
 | `note_rules`, `artifact_rules` | Lists of `[thread name, regex]` pairs that assign notes and artifacts to threads |
-| `generic_projects` | Project folder names that never decide a thread (default `["home"]`) |
+| `generic_projects` | Project folder names left out when choosing a thread (default `["home"]`) |
 | `repos` | Repository path to thread table, used for commit matching |
 | `aliases` | Alternative names used for mention edges |
 | `compile` | `daily_cap` (8): extraction runs a day |
@@ -181,11 +181,32 @@ passages, a few hundred thousand passages at most before it needs an index); `gr
 request with one FTS query per thread; the item index is rebuilt in memory whenever facts change. None of these has
 been measured beyond that size.
 
+## Scripts
+
+| Script | Usage |
+| --- | --- |
+| `skill/session-end.sh` | SessionEnd hook; reads the hook JSON (`session_id`) on stdin. In the background: `ingest`, `embed`, `extract.sh` on the session, `resolve.sh --limit 20`, `finish.sh --limit 15`. `BACKTRAIL_COMPILE_ON_END=0` skips the model calls; `BACKTRAIL_REVERSE_ON_END=1` adds `resolve.sh --reverses --limit 5` |
+| `skill/extract.sh [--entity NAME] [--limit N] [--session ID] [--no-cap] \| <session ref>...` | One single-shot model call per session; the answer goes through `bt import -` |
+| `skill/resolve.sh [--dry] [--reverses] [--limit N] \| [--dry] [--reverses] <item id>...` | One call per proposed item (`BACKTRAIL_RESOLVE_MODEL`, default sonnet). `--reverses` judges settled decisions, and a second model confirms each reversal |
+| `skill/finish.sh [--dry] [--limit N] [step id...]` | Backlog sweep over items older than a day and not judged in the last 7 days |
+| `skill/close-step.sh <step id> <source ref> <quote> [--dry]` | Checks the quote with `bt finish --dry`, asks a second model, then closes the item with `--verified` |
+| `skill/howto.sh [--dry] [--again] [--limit N] \| [--dry] <step id>...` | Writes the check text for steps waiting on the owner; `--again` includes steps judged to need none |
+| `install.sh` | Builds the app and binary and links `bt`; `BT_NO_AGENT=1` skips the login agent, `BT_NO_MAC_APP=1` the Mac app |
+| `mac/build.sh` | Builds the Mac app and its icon into `mac/Backtrail.app` |
+
+`--dry` prints each verdict as a JSON line and applies nothing. The model scripts set `BACKTRAIL_COMPILE=1`, so the
+hooks of the sessions they start exit at once, and run in an empty temporary folder, so no project `CLAUDE.md` is
+loaded.
+
 ## Source layout
 
 Rust code is formatted with `cargo fmt`. Tables are defined in `src/sql/schema.sql` and read through the views in
 `src/sql/views.sql`; a page or command filters a view instead of repeating its joins. Statements stay inline next to
 the code that runs them. A change to existing tables is a migration in `src/migrate.rs`.
+
+Source files carry no comments; `// SAFETY:` is the exception. Names and types say what code does, and the reasons
+behind non-obvious rules are in `architecture.md`, section "Rules in the code". `scripts/check` runs every check
+(format, Clippy, tests, TypeScript, ESLint, Swift build, docs and comment lint) and CI runs the same script.
 
 ## Other limits
 

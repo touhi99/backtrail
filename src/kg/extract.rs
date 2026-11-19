@@ -1,20 +1,15 @@
-//! Extraction: which sessions are worth reading with a model, and the text the model is given. The binary never calls
-//! a model: `skill/extract.sh` pipes `input` to one and sends its answer back through `bt import`.
 use super::{clip, entities, has_word};
 use crate::clock::now;
 use crate::db::norm;
 use anyhow::Context;
 use rusqlite::{Connection, params};
 
-/// Whether [`queue`] stops at the daily extraction cap from the config.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cap {
     Daily,
     Ignore,
 }
 
-/// Sessions to extract claims from: at least one owner turn, not automated probes, not yet extracted, newest first,
-/// within the daily cap. `entity` restricts to sessions whose owner turns mention that entity (tier 2, lazy).
 pub fn queue(
     c: &Connection,
     limit: usize,
@@ -34,12 +29,9 @@ pub fn queue(
         Cap::Ignore => usize::MAX,
         Cap::Daily => usize::try_from(crate::config::cfg().daily_cap - used).unwrap_or(0),
     };
-    // a full session id or any unique prefix of it
     let only = session_id.map(|s| {
         crate::db::resolve_ref(c, &format!("session:{}", s.trim_start_matches("session:")))
     });
-    // Unsorted sessions are left out of the general queue, but not when the hook names the session that just ended:
-    // work run from a parent folder lands in Unsorted, and it can still finish a step or settle a decision.
     let sorted = if only.is_some() {
         "1"
     } else {
@@ -86,7 +78,6 @@ pub fn queue(
 }
 
 fn unextracted_mentioning(c: &Connection, entity: &str) -> Vec<String> {
-    // like extract_queue but without the daily cap, to report the size of the backlog
     let Some((id, _)) = entities::find(c, entity) else {
         return vec![];
     };
@@ -116,7 +107,6 @@ fn unextracted_mentioning(c: &Connection, entity: &str) -> Vec<String> {
     .collect()
 }
 
-/// Average cost in USD of the logged extraction runs, 0.01 when none has been logged (16 logged runs averaged 0.009).
 pub fn usd_each(c: &Connection) -> f64 {
     let v: Vec<f64> = c
         .prepare("SELECT detail FROM log WHERE action='extract' AND detail LIKE 'usd=%'")
@@ -139,13 +129,10 @@ pub fn usd_each(c: &Connection) -> f64 {
     }
 }
 
-/// Sessions that mention the entity and would be extracted next: the same rules as `queue`, no daily cap.
 pub fn unread(c: &Connection, entity: &str) -> usize {
     queue(c, usize::MAX, Some(entity), None, Cap::Ignore).len()
 }
 
-/// Start `skill/extract.sh --entity E --limit N --no-cap` detached and return at once. The binary still calls no
-/// model itself; the script does. Output goes to the same log file as the `SessionEnd` run.
 pub fn start_in_background(
     c: &Connection,
     entity: &str,
@@ -180,13 +167,10 @@ pub fn start_in_background(
     Ok(serde_json::json!({"ok": true, "started": n}))
 }
 
-/// How many sessions that name the entity in an owner turn have no claims extracted yet (tier 2 backlog).
 pub fn backlog(c: &Connection, entity: &str) -> usize {
     unextracted_mentioning(c, entity).len()
 }
 
-/// The text a small model reads for one session: the thread's existing items (to avoid repeats), entity names, owner
-/// turns in full, assistant turns clipped.
 pub fn input(c: &Connection, r: &str) {
     let r = &crate::db::resolve_ref(c, r);
     let Ok((sid, thread, ts)) = c.query_row("SELECT id, ifnull(thread,''), ifnull(last_ts,'') FROM sources WHERE ref=?1 AND kind='session'", params![r], |x| Ok((x.get::<_, i64>(0)?, x.get::<_, String>(1)?, x.get::<_, String>(2)?))) else { eprintln!("no such session"); std::process::exit(1) };

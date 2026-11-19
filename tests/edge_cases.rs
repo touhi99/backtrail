@@ -1,6 +1,3 @@
-//! Edge cases for the data-dir and config fallbacks, per-folder threads and `hooks install|remove`.
-//! Each test runs the built `backtrail` binary with its own temporary HOME, so the real
-//! `~/.claude/settings.json` and data directory are never touched.
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -37,7 +34,6 @@ impl Sandbox {
         serde_json::from_str(&fs::read_to_string(self.settings()).expect("read settings.json"))
             .expect("settings.json is JSON")
     }
-    /// Run with HOME set to the sandbox; `BACKTRAIL_HOME` is set only when given.
     fn run(&self, data_dir: Option<&Path>, args: &[&str]) -> Output {
         let mut c = Command::new(env!("CARGO_BIN_EXE_backtrail"));
         c.args(args)
@@ -49,7 +45,6 @@ impl Sandbox {
         }
         c.output().expect("run the backtrail binary")
     }
-    /// A Claude Code session file with enough turns to be filed under its folder's thread.
     fn session(&self, folder: &str, id: &str, title: &str) {
         let dir = self.home().join(".claude/projects").join(folder);
         fs::create_dir_all(&dir).expect("create session dir");
@@ -81,7 +76,6 @@ fn out(o: &Output) -> String {
     )
 }
 
-/// The thread recorded for a session, read from the store's `sources` table.
 fn session_thread(_s: &Sandbox, data: &Path, id8: &str) -> String {
     let c = rusqlite::Connection::open(data.join("backtrail.db")).expect("open test store");
     c.query_row(
@@ -91,8 +85,6 @@ fn session_thread(_s: &Sandbox, data: &Path, id8: &str) -> String {
     )
     .unwrap_or_else(|e| format!("<no row: {e}>"))
 }
-
-// ---- data directory ---------------------------------------------------------------------------
 
 #[test]
 fn data_dir_follows_backtrail_home() {
@@ -158,8 +150,6 @@ fn unknown_command_prints_usage() {
     let o = s.run(Some(&s.root.join("data")), &["no-such-command"]);
     assert!(out(&o).contains("backtrail ingest"), "{}", out(&o));
 }
-
-// ---- config fallbacks -------------------------------------------------------------------------
 
 #[test]
 fn missing_config_uses_defaults() {
@@ -244,8 +234,6 @@ fn config_takes_priority_over_threads_json() {
     assert!(shown.contains("From config"), "{shown}");
     assert!(!shown.contains("From threads file"), "{shown}");
 }
-
-// ---- per-folder threads -----------------------------------------------------------------------
 
 #[test]
 fn each_project_folder_becomes_its_own_thread() {
@@ -361,8 +349,6 @@ fn second_ingest_leaves_unchanged_sessions_alone() {
     );
 }
 
-// ---- hooks install / remove -------------------------------------------------------------------
-
 fn commands_of(v: &serde_json::Value, event: &str) -> Vec<String> {
     v["hooks"][event]
         .as_array()
@@ -382,7 +368,6 @@ fn hooks_install_creates_settings_when_missing() {
     assert_eq!(commands_of(&v, "SessionStart").len(), 1);
     assert!(commands_of(&v, "SessionStart")[0].ends_with(" brief"));
     assert!(commands_of(&v, "SessionEnd")[0].ends_with("session-end.sh"));
-    // no previous file, so no backup
     assert!(
         !s.home()
             .join(".claude/settings.json.bak-backtrail")
