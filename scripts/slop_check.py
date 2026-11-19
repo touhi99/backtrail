@@ -109,13 +109,19 @@ def comment_start(line: str, ext: str) -> tuple[int, str] | None:
 
 
 def lint_code(lines: list[str], ext: str, first: int) -> list[tuple[int, str, str]]:
-    found, in_block, module_doc_lines = [], False, 0
+    found, in_block, module_doc_lines, in_triple = [], False, 0, False
     fix = "Delete the comment. Put meaning in names and types; put design reasons in docs/."
     for i, line in enumerate(lines):
         if in_block:
             if "*/" in line:
                 in_block = False
             continue
+        if ext == ".py":
+            was_in_triple = in_triple
+            if (line.count('"""') + line.count("'''")) % 2:
+                in_triple = not in_triple
+            if was_in_triple:
+                continue
         hit = comment_start(line, ext)
         if not hit:
             continue
