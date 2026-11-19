@@ -1,7 +1,6 @@
 import Charts
 import SwiftUI
 
-/// The project's history, built from /api/thread the same way the web app's Story does it.
 struct Story {
     struct Session { let day: String; let title: String; let id: Int }
     struct Made { let day: String; let title: String; let id: Int; let kind: String; let n: Int }
@@ -46,7 +45,6 @@ struct Story {
             .sorted { $0.day < $1.day }
         steps = live.filter { $0["type"].str == "step" }
 
-        // Milestones: steps grouped by a "K-12" style prefix or a "3 ·" numbered plan.
         var groups: [String: [J]] = [:]
         var order: [String] = []
         for s in steps {
@@ -117,7 +115,6 @@ private func clip(_ s: String, _ n: Int) -> String {
     return String(cut[..<(cut.lastIndex(of: " ") ?? cut.endIndex)]) + "…"
 }
 
-/// Sessions per day as an area, things made as diamonds, moments as dots; hover a day for its sessions.
 struct JourneyView: View {
     let s: Story
     let color: Color
@@ -259,7 +256,6 @@ extension ISO8601DateFormatter {
     }()
 }
 
-/// A ring with confirmed steps in the project colour and steps waiting for your check in yellow.
 struct ProgressRing: View {
     let done: Int, check: Int, total: Int
     var size: CGFloat = 44
@@ -461,7 +457,6 @@ struct SourcesView: View {
     }
 }
 
-/// Every Claude artifact link tied to the project; each row opens the real page in the browser.
 struct ArtifactsView: View {
     @Environment(\.openURL) private var openURL
     let artifacts: [J]

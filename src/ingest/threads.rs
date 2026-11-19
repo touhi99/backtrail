@@ -1,5 +1,3 @@
-//! Which thread a source belongs to. Threads come from `config.json`; without thread rules there, each Claude Code
-//! project folder is its own thread. Sources no rule matches go to `Unsorted`.
 use crate::clock::now;
 use crate::config::cfg;
 use crate::db::{logw, resolve_ref, thread_exists};
@@ -13,7 +11,6 @@ const UPSERT_THREAD: &str = "INSERT INTO threads(name,state,area,body,origin,cre
      ON CONFLICT(name) DO UPDATE SET area=?3";
 
 fn case_insensitive(pattern: &str) -> Regex {
-    // An empty pattern would match everything; `$^` matches nothing.
     Regex::new(&format!(
         "(?i){}",
         if pattern.is_empty() { "$^" } else { pattern }
@@ -21,8 +18,6 @@ fn case_insensitive(pattern: &str) -> Regex {
     .expect("config regexes are checked when the config loads")
 }
 
-/// Create the configured threads, a project entity for each build or plan thread, and `Unsorted`. An existing
-/// thread keeps its state and summary.
 pub fn seed(c: &Connection) {
     let ts = now();
     for t in &cfg().threads {
@@ -38,8 +33,6 @@ pub fn seed(c: &Connection) {
             )
             .ok();
         }
-        // A project thread needs its project entity: the extractor and resolver file an item under the thread of
-        // its main entity, so without one the items stay on the session's thread.
         if t.kind == "build" || t.kind == "plan" {
             crate::kg::entities::ensure(c, &t.name, "project", &ts);
         }
@@ -57,7 +50,6 @@ pub fn seed(c: &Connection) {
     .expect("write to database");
 }
 
-/// The configured thread rules, compiled once per scan.
 pub struct SessionRules(Vec<(&'static str, Regex)>);
 
 impl SessionRules {
@@ -79,8 +71,6 @@ impl SessionRules {
             .map(|(name, _)| name.to_string())
     }
 
-    /// Thread for a session: its title decides first, then its project folder. A short untitled session stays
-    /// unsorted.
     pub fn thread_for(&self, project: &str, title: &str, passages: i64) -> String {
         let untitled = title.is_empty() || title.starts_with("Untitled session");
         if untitled && passages <= 3 {
@@ -95,7 +85,6 @@ impl SessionRules {
         if let Some(name) = self.matching(project) {
             return name;
         }
-        // No thread rules configured: one thread per project folder.
         if self.0.is_empty() && !project.is_empty() {
             return project.into();
         }
@@ -103,8 +92,6 @@ impl SessionRules {
     }
 }
 
-/// Assign every session to its thread again, so a changed rule or a new title takes effect. A session pinned with
-/// `bt assign` keeps its thread.
 pub fn assign_sessions(c: &Connection) {
     let rules = SessionRules::load();
     let sessions = crate::db::rows(
@@ -147,8 +134,6 @@ pub fn assign_sessions(c: &Connection) {
     c.execute_batch("COMMIT").expect("write to database");
 }
 
-/// Thread for a note (by its path) or an artifact (by its title): the note or artifact rules when there are any,
-/// otherwise the thread rules.
 pub fn thread_for_document(kind: &str, key: &str) -> String {
     let key = key.to_lowercase();
     let config = cfg();
@@ -172,7 +157,6 @@ pub fn thread_for_document(kind: &str, key: &str) -> String {
     hit.unwrap_or_else(|| UNSORTED.into())
 }
 
-/// Pin a session to a thread (`bt assign`). `assign_sessions` honours the pin, so a rescan does not undo it.
 pub fn pin(c: &Connection, session_ref: &str, thread: &str) -> anyhow::Result<bool> {
     if !thread_exists(c, thread) {
         anyhow::bail!("no such thread");
@@ -196,9 +180,6 @@ pub fn pin(c: &Connection, session_ref: &str, thread: &str) -> anyhow::Result<bo
     Ok(found)
 }
 
-/// `bt suggest-threads`: for each project folder with sessions in `Unsorted`, the thread to assign them to. A thread
-/// is suggested when most sorted sessions of that folder are in it, or when its name is part of the folder name.
-/// Nothing is changed; each line is the `bt assign` command that applies it.
 pub fn suggest(c: &Connection) {
     let projects = crate::db::rows(
         c,

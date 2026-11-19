@@ -68,8 +68,9 @@ configured batch size.
 
 Hooks (diagram: README, "How it works"):
 
-- SessionStart runs `bt brief`, which rescans and prints open questions and threads in motion. It never embeds.
-  `bt brief --thread <name>` adds the project's latest settled decisions; proposed items are never listed.
+- SessionStart runs `bt brief`, which rescans and prints open questions and threads in motion; embedding is left
+  to the timer and the session end. `bt brief --thread <name>` adds the project's latest settled decisions, settled
+  ones only.
 - SessionEnd runs `skill/session-end.sh` in the background: `ingest`, `embed`, then extraction
   (`skill/extract.sh`, one small-model call per session) and resolution (`skill/resolve.sh`, one call per proposed
   item). `BACKTRAIL_COMPILE_ON_END=0` skips both.
@@ -119,3 +120,71 @@ and latest decisions); the Graph page reads `/api/kg/graph`, `/api/kg/claims`,
 `server.rs`, which call the same functions in `items.rs` and `kg/` as the command line.
 
 Limits: README, section "Limits", and `reference.md`, section "Scale limits".
+
+## Rules in the code
+
+The source carries no comments. The reasons behind rules that the code alone does not show are listed here, by module.
+
+- `db.rs`: the default data directory is made readable by its owner only (it holds session text); a folder named by
+  `BACKTRAIL_HOME` may hold other files and is left as it is. Entity ids and pre-version-1 fact ids are 32-bit FNV-1a;
+  new fact ids and passage hashes are 64-bit. A session can be named by a unique prefix of its ref, so short refs in
+  notes and old exports resolve. Every fact is filed through the quote lookup (`find_quote`), and `relink` uses it
+  to follow a quote when a source is read again.
+- `config.rs`: a pattern that does not compile prints a warning and becomes `$^`, which matches nothing (an empty
+  pattern would match everything). A `threads.json` array is read when there is no `config.json`.
+- `ingest/sessions.rs`: the first chunk of a turn is exactly the first `n` characters, so quotes filed under the older
+  cut still match; later cuts prefer a line break or a space. A last line without a newline counts only when it is
+  valid JSON. When one session id exists in two project folders, the larger file is read, so runs do not swap the
+  stored text and lose claim evidence. Modification times have whole-second resolution, so a file longer than the bytes
+  read is read again even when its mtime is unchanged. Secrets are redacted per turn as well as per chunk, so a token
+  cannot survive by straddling a chunk cut.
+- `ingest/mod.rs`: commit matching (`bt match`) is not part of the scan, because a shared two-word phrase marked
+  unrelated steps as done. The newest three daily backups are kept. Secret redaction is pattern based and misses
+  secrets with no fixed shape.
+- `ingest/threads.rs`: a project thread gets a project entity, because the extractor and resolver file an item under
+  the thread of its main entity. A short untitled session stays unsorted. A session pinned with `bt assign` keeps its
+  thread on every rescan.
+- `items.rs`: the thread follows the first named project entity; mentions alone move an item only off a topic thread,
+  so a passing mention leaves an item on its project. When the keep rule keeps a fact, a Claude flag of "live"
+  or "in effect" is dropped and a "superseded" flag stays.
+- `kg/claims.rs`: the speaker and date of a claim come from its passage, not from the caller. A relation between the
+  same two entities, in the same direction and of the same kind, is one claim however it is worded. A claim's id is a
+  hash of its entities, type and text; a pre-version-1 claim with the same content is the same claim, and a new id
+  taken by different content is refused. Relation entities are checked before any entity is created, so a refused
+  relation leaves nothing behind.
+- `kg/entities.rs`: a built-in topic becomes an entity only when owner turns in `TOPIC_MIN_SESSIONS` sessions mention
+  it; ambiguous words (go, swift, bun, node) are left out. Aliases match longest first, so "marvel rivals" does not
+  also count as "marvel". A suggested name is a word capitalised mid-sentence in assistant turns (the owner rarely
+  capitalises); ties sort by sessions, then name, so the cut at 150 is stable. A model may copy the "Name (kind)"
+  suffix from the packet; lookups strip it.
+- `kg/query.rs`: a claim is in force on a day when it was said by then and has not ended. It ends on the earliest of
+  its `valid_to`, the day its replacement was said, and its `retire` log entry; a superseded claim with none of these
+  ends on its last update or the resolver's `stale` check, the day the system noticed. Rejected suggestions with no end
+  count as not in force on any day. `BACKTRAIL_EXCLUDE_SESSION` hides one session's claims and passages, for evaluation. Neighbour
+  strength is shared claims relative to the size of the entity reached, so a hub does not win by volume.
+- `kg/extract.rs`: Unsorted sessions are left out of the general queue but kept when the hook names the session that
+  just ended, since work run from a parent folder lands in Unsorted. The cost estimate falls back to 0.01 USD when no
+  run is logged.
+- `finish.rs`: open steps of every thread are listed, since a session is often filed under another thread than the
+  step it finishes. A step closes only when a second model confirms the passage, because in a test run the first model
+  named a step for an unrelated line. Commit subjects were tried as corroboration and dropped: on a busy thread a commit
+  lands every day, and embeddings scored unrelated commits above the right one. An item judged by the sweep is skipped
+  for a week.
+- `resolve.sh` uses a larger model than extraction, because a small model left real matches unresolved.
+- `resolve.rs`: word stems are the first five letters, so "removed" and "remove" match; a shared word counts for more
+  when few items use it. Reversal candidates add the most specific shared entities, because word overlap misses a
+  reversal in other words and a broad entity has hundreds of claims.
+- `search.rs`: an FTS query with an alias group uses an explicit AND, since FTS5 rejects a bare space before a
+  parenthesised group. When no passage holds every word, passages holding some of them are ranked. Equal scores keep
+  passage order, so a query always returns the same list.
+- `views.rs`: the short brief prints one line per project, so a session in a folder with many projects is not handed
+  all their detail; questions the owner asked print in full, because Claude answers them. Mention edges cost one
+  full-text query per thread and are cached until the store changes.
+- `main.rs`: a closed stdout (`| head`) exits quietly instead of panicking. The headless extraction session gets no
+  brief.
+- `migrate.rs`: the keep rule reads tables only, because the views do not exist yet while a store is being opened.
+- Mac app: day strings are UTC midnights and the trail uses a UTC calendar, since a local calendar drifts at daylight
+  saving changes. Search shows the keyword answer first and replaces it when the embedding answer arrives.
+- Web app: the map page keeps the last map and the measured node sizes while the next one loads, since React Flow
+  hides an unmeasured node and that showed as flicker. Claims are written in the third person; the app speaks to the
+  user.

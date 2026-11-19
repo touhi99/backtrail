@@ -1,7 +1,4 @@
 #!/bin/bash
-# Backlog sweep: for each step open for more than a day, a model reads the passages most like it and says whether one
-# shows it finished; close-step.sh then checks the quote and decides done or "built, check it", as at session end.
-# Usage: finish.sh [--dry] [--limit N] [step id...]
 set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 TM="$DIR/../target/release/backtrail"
@@ -35,7 +32,7 @@ except Exception as e:
     print(f"{i}: unreadable answer ({type(e).__name__})"); raise SystemExit
 if not v.get("finished"):
     print(f"{i}: still open ({cost})"); raise SystemExit
-src = str(v.get("source", "")).strip("[] ").split(" | ")[0]   # the model may copy the whole passage header
+src = str(v.get("source", "")).strip("[] ").split(" | ")[0]
 args = [os.path.join(os.environ["DIR"], "close-step.sh"), i, src, str(v.get("quote", ""))] + (["--dry"] if dry else [])
 r = subprocess.run(args, capture_output=True, text=True)
 print(f"{i}: {(r.stdout or r.stderr).strip()} ({cost})")

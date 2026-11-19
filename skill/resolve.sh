@@ -1,16 +1,9 @@
 #!/bin/bash
-# Decide what proposed items are about and whether the store already settles them, one single-shot call per item.
-# Usage: resolve.sh [--dry] [--reverses] [--limit N] | resolve.sh [--dry] [--reverses] <item id>...
-# --dry prints each verdict as a JSON line and applies nothing.
-# --reverses judges settled decisions instead: whether a new one reverses older settled decisions on the same subject.
-# Each reversal a first model proposes must be confirmed by a second model before it is applied.
-# The backtrail binary never calls a model: `resolve-packet` is piped to a headless model and the answer goes back
-# through `resolve-apply`, which checks entities, thread and the resolving item against the store.
 set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 TM="$DIR/../target/release/backtrail"
-MODEL="${BACKTRAIL_RESOLVE_MODEL:-sonnet}"   # judgement, not extraction: a small model leaves real matches unresolved
-export BACKTRAIL_COMPILE=1   # the SessionStart and SessionEnd hooks exit at once while this is set
+MODEL="${BACKTRAIL_RESOLVE_MODEL:-sonnet}"
+export BACKTRAIL_COMPILE=1
 LIMIT=20; IDS=(); DRY=; REV=
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -24,7 +17,7 @@ if [ ${#IDS[@]} -eq 0 ]; then
   while IFS= read -r i; do [ -n "$i" ] && IDS+=("$i"); done < <("$TM" resolve-queue ${REV:+--reverses} --limit "$LIMIT")
 fi
 if [ -n "$REV" ]; then PROMPT="$DIR/reverse-prompt.md"; else PROMPT="$DIR/resolve-prompt.md"; fi
-cd "$(mktemp -d)" || exit 1  # no project CLAUDE.md or session history is loaded here
+cd "$(mktemp -d)" || exit 1
 for id in "${IDS[@]+"${IDS[@]}"}"; do
   packet="$("$TM" resolve-packet "$id" ${REV:+--reverses})" || { echo "$id: no packet"; continue; }
   raw="$(printf '%s' "$packet" | claude -p --model "$MODEL" --tools "" --no-session-persistence --output-format json \
@@ -52,7 +45,6 @@ def ask_verifier(ask, prompt_file):
     verdict = json.loads(re.sub(r"^```(?:json)?|```$", "", d2["result"].strip(), flags=re.M).strip())
     return verdict, d2.get("total_cost_usd", 0)
 if os.environ.get("REV"):
-    # a reversal hides a settled decision: each one the first model proposes needs the second model to agree
     proposed = [r for r in (v.get("replaces") or []) if isinstance(r, str)]
     kept = []
     for old in proposed:
@@ -70,7 +62,6 @@ if os.environ.get("REV"):
         print(json.dumps(dict(v, _cost=cost))); sys.exit(0)
     r = subprocess.run([tm, "resolve-apply", "-"], input=json.dumps(v), capture_output=True, text=True)
     print(f"{id_}: {cost} · {(r.stdout or r.stderr).strip()}"); sys.exit(0)
-# a second reader, on another model, must agree before an item is resolved
 if v.get("resolves_by"):
     ask = os.environ["PACKET"] + f"\n\nPROPOSED RESOLUTION\nCANDIDATE {v['resolves_by']}\nREASON {v.get('reason', '')}\n"
     try:

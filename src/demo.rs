@@ -1,8 +1,6 @@
-//! `bt demo`: a store of invented content, for screenshots and for trying the app.
 use crate::db::home;
 use rusqlite::{Connection, params};
 
-/// Write the demo store. Refuses to touch the default store.
 pub fn demo(c: &Connection) {
     if std::env::var("BACKTRAIL_HOME").is_err() {
         eprintln!(

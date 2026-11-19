@@ -6,16 +6,14 @@ import { Ring } from '@/components/Viz'
 import { TrailCard } from '@/pages/Trail'
 import '@/next.css'
 
-// Who confirmed a decision, shown next to each one.
 const HOW: Record<string, string> = { 'owner-stated': '#34d399', 'owner-accepted': '#60a5fa', 'from a note': '#8b8b95' }
 
-// Home: one card per project in motion, with its next step and the decisions made last. No review queue.
 export default function Home() {
   const { today } = useShell()
-  const threads: any[] = today?.threads ?? []
+  const threads = today?.threads ?? []
   const moving = threads.filter((t) => t.state === 'moving')
   const details = useDetails(moving.map((t) => t.name))
-  const asks: any[] = today?.asks ?? []
+  const asks = today?.asks ?? []
   const when = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
 
   return (
@@ -37,8 +35,8 @@ export default function Home() {
 
         <section className="nx-in grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
           {moving.map((t) => {
-            const c = STATE_HEX[t.state], tot = t.done_s + t.open_s, nx = nextStep(details[t.name])
-            const decided: any[] = (details[t.name]?.decided ?? []).slice(0, 3)
+            const c = STATE_HEX[t.state] ?? STATE_HEX.unsorted, tot = t.done_s + t.open_s, nx = nextStep(details[t.name])
+            const decided = (details[t.name]?.decided ?? []).slice(0, 3)
             return (
               <Link key={t.name} to={`/thread/${encodeURIComponent(t.name)}`} className="nx-panel flex flex-col gap-3 !rounded-2xl p-5 transition hover:-translate-y-px hover:border-[#34343c]">
                 <div className="flex items-center gap-3">

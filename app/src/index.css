@@ -25,7 +25,6 @@ a { color: inherit; text-decoration: none; }
 ::selection { background: #34d39944; }
 * { scrollbar-width: thin; scrollbar-color: #2a2a30 transparent; }
 
-/* controls: hover and press states on everything clickable */
 .btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--color-line2); background: var(--color-raised); color: var(--color-ink); font-size: 13px; font-weight: 500; cursor: pointer; transition: background .12s, transform .06s, border-color .12s; }
 .btn:hover { background: #222226; border-color: #3a3a42; }
 .btn:active { transform: scale(.97); background: #1c1c20; }
@@ -42,7 +41,6 @@ a { color: inherit; text-decoration: none; }
 .row-hover:hover { background: #17171a; }
 .row-hover:active { background: #1c1c20; }
 
-/* react flow polish */
 .react-flow { --xy-background-color: transparent; --xy-edge-stroke-default: #3a3a42; }
 .react-flow__attribution { display: none; }
 .react-flow__controls { box-shadow: none; border: 1px solid var(--color-line2); border-radius: 10px; overflow: hidden; }
@@ -53,7 +51,6 @@ a { color: inherit; text-decoration: none; }
 .node-card:hover { border-color: #4a4a54; transform: translateY(-1px); }
 .node-card.sel { border-color: var(--color-accent); box-shadow: 0 0 0 3px #34d39926; }
 
-/* rendered markdown */
 .md { font-size: 14.5px; line-height: 1.65; color: var(--color-soft); max-width: 76ch; }
 .md h1 { font-size: 24px; margin: 1.2em 0 .5em; color: var(--color-ink); font-weight: 650; letter-spacing: -.01em; }
 .md h2 { font-size: 19px; margin: 1.5em 0 .5em; color: var(--color-ink); font-weight: 630; }

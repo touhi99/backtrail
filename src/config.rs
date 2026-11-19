@@ -1,5 +1,3 @@
-//! `<data dir>/config.json`: everything that is specific to one machine. Every key is optional; without the file each
-//! Claude Code project folder is a thread and only memory notes are indexed. Keys are described in docs/reference.md.
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -7,7 +5,6 @@ use std::path::PathBuf;
 pub const DEFAULT_EMBED_MODEL: &str = "embeddinggemma-2:270m";
 const DEFAULT_EMBED_URL: &str = "http://127.0.0.1:11434";
 
-/// A thread defined in the config. `regex` is matched against session titles and project folder names.
 pub struct ThreadRule {
     pub name: String,
     pub area: String,
@@ -17,18 +14,15 @@ pub struct ThreadRule {
     pub regex: String,
 }
 
-/// The embedding server. An empty `url` means embeddings are off.
 #[derive(Default)]
 pub struct Embeddings {
     pub url: String,
     pub model: String,
     pub query_prefix: String,
     pub document_prefix: String,
-    /// Passages embedded per background run.
     pub batch_cap: usize,
 }
 
-/// An entity created from the config, with the spellings that count as a mention of it.
 pub struct EntitySeed {
     pub name: String,
     pub kind: String,
@@ -36,28 +30,21 @@ pub struct EntitySeed {
 }
 
 pub struct Config {
-    /// Root folder that note and repository paths are relative to.
     pub workspace: PathBuf,
     pub note_dirs: Vec<String>,
     pub screens_dir: String,
     pub threads: Vec<ThreadRule>,
-    /// `(thread name, regex)` pairs that assign notes and artifacts to threads.
     pub note_rules: Vec<(String, String)>,
     pub artifact_rules: Vec<(String, String)>,
-    /// `(repository path, thread name)` pairs.
     pub repos: Vec<(String, String)>,
-    /// Other names for a thread, used in search and for mention edges.
     pub aliases: HashMap<String, Vec<String>>,
-    /// Project folder names that never decide a thread.
     pub generic_projects: Vec<String>,
     pub entities: Vec<EntitySeed>,
     pub port: u16,
     pub embeddings: Embeddings,
-    /// Extraction runs allowed per day.
     pub daily_cap: i64,
 }
 
-/// Query and document prefixes each embedding model family expects; empty for unknown models.
 fn prefixes(model: &str) -> (&'static str, &'static str) {
     if model.contains("embeddinggemma") {
         ("task: search result | query: ", "title: none | text: ")
@@ -97,13 +84,10 @@ fn pairs(v: &Value) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-/// `pattern` when it compiles as a case-insensitive regex; otherwise a warning on stderr and an empty pattern, which
-/// matches nothing.
 fn checked_regex(owner: &str, pattern: String) -> String {
     match regex::Regex::new(&format!("(?i){pattern}")) {
         Ok(_) => pattern,
         Err(e) => {
-            // The parser's message spans several lines; its last line names the problem.
             let e = e.to_string();
             let reason = e
                 .lines()
@@ -116,7 +100,6 @@ fn checked_regex(owner: &str, pattern: String) -> String {
     }
 }
 
-/// [`pairs`] whose second element is a regex, checked with [`checked_regex`].
 fn regex_pairs(v: &Value, key: &str) -> Vec<(String, String)> {
     pairs(&v[key])
         .into_iter()
@@ -172,7 +155,6 @@ fn load() -> Config {
             .unwrap_or(Value::Null)
     };
     let v = read("config.json");
-    // An older `threads.json` (an array of threads) is still read when there is no config.json.
     let threads = if v.is_null() {
         read("threads.json")
     } else {
@@ -223,7 +205,6 @@ fn load() -> Config {
     }
 }
 
-/// The config, read once per process.
 pub fn cfg() -> &'static Config {
     static CONFIG: std::sync::OnceLock<Config> = std::sync::OnceLock::new();
     CONFIG.get_or_init(load)

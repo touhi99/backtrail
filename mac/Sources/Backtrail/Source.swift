@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// One source (conversation, note, artifact, commits): the cited passage first, then every passage.
 struct SourceView: View {
     @EnvironmentObject var store: Store
     @Environment(\.openURL) private var openURL
@@ -114,7 +113,6 @@ struct SourceView: View {
     }
 }
 
-/// Lays children out in rows, wrapping when a row is full.
 struct FlowLayout: Layout {
     var spacing: CGFloat = 6
 
@@ -152,7 +150,6 @@ struct FlowLayout: Layout {
     }
 }
 
-/// Inline Markdown (bold, code, links) with line breaks kept; plain text when it does not parse.
 func md(_ s: String) -> AttributedString {
     (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
 }

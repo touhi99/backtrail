@@ -1,5 +1,3 @@
-//! What the app's pages and the session-start brief show. Every function here only reads: it filters the `item`,
-//! `thread_stat`, `source_stat` and `fact` views (sql/views.sql) and shapes the result as JSON.
 use crate::clock::{days_ago, now};
 use crate::config::cfg;
 use crate::db::{rows, s};
@@ -10,7 +8,6 @@ use std::fmt::Write;
 
 const OPEN_QUESTIONS: &str = "SELECT * FROM item WHERE type='question' AND state='open'";
 
-/// Questions Claude asked that wait for the owner.
 fn waiting_on_owner(c: &Connection) -> Vec<Value> {
     rows(
         c,
@@ -19,7 +16,6 @@ fn waiting_on_owner(c: &Connection) -> Vec<Value> {
     )
 }
 
-/// Questions the owner typed that wait for Claude.
 fn waiting_on_claude(c: &Connection) -> Vec<Value> {
     rows(
         c,
@@ -28,8 +24,6 @@ fn waiting_on_claude(c: &Connection) -> Vec<Value> {
     )
 }
 
-/// Work that has gone quiet: steps in progress on a thread with no session for 7 days, and up to 8 open steps or
-/// questions older than 7 days.
 fn stale(c: &Connection) -> Vec<Value> {
     let mut out = rows(
         c,
@@ -59,7 +53,6 @@ fn threads(c: &Connection) -> Vec<Value> {
     rows(c, "SELECT * FROM thread_stat ORDER BY last DESC", &[])
 }
 
-/// The Home page.
 pub fn today(c: &Connection) -> Value {
     let suggested = rows(
         c,
@@ -71,7 +64,6 @@ pub fn today(c: &Connection) -> Value {
         "SELECT * FROM item WHERE type='step' AND state='looks_done'",
         &[],
     );
-    // Moved: the newest titled session of each thread, for up to six threads active in the last three days.
     let recent = rows(
         c,
         "SELECT id, ref, title, kind, thread, last_ts FROM sources
@@ -100,7 +92,6 @@ pub fn today(c: &Connection) -> Value {
                 (SELECT COUNT(*) FROM item) AS items",
         &[],
     );
-    // To do: steps noted on a live project that are open or in progress.
     let todo = rows(
         c,
         "SELECT i.* FROM item i JOIN threads t ON t.name=i.thread
@@ -108,7 +99,6 @@ pub fn today(c: &Connection) -> Value {
          ORDER BY i.created DESC LIMIT 60",
         &[],
     );
-    // Pending sessions: real sessions in the last 3 days that no item cites, so no decision came out of them.
     let pending: Vec<Value> = rows(
         c,
         "SELECT s.id, s.ref, s.title, s.thread, s.last_ts, s.nchunks FROM source_stat s
@@ -121,7 +111,6 @@ pub fn today(c: &Connection) -> Value {
     .collect::<Vec<_>>()
     .into_iter()
     .filter({
-        // a resumed session has several rows with one title; show it once
         let mut seen = HashSet::new();
         move |r| seen.insert((s(r, "title").to_string(), s(r, "thread").to_string()))
     })
@@ -133,9 +122,6 @@ pub fn today(c: &Connection) -> Value {
     })
 }
 
-/// The latest settled decisions of a project that are still in force: not marked superseded, not past their
-/// `valid_to`. Each carries who confirmed it (`how`): the owner's own typed words (the keep rule), the owner's
-/// accept in the app, or a note. The date falls back to the source's date when the claim has none.
 pub fn decided(c: &Connection, thread: &str, limit: i64) -> Vec<Value> {
     let today = now()[..10].to_string();
     let mut found = rows(
@@ -167,9 +153,6 @@ pub fn decided(c: &Connection, thread: &str, limit: i64) -> Vec<Value> {
     found
 }
 
-/// The short session-start brief (`bt brief` with no flag): one line per project in motion, so a session in a
-/// folder that holds many projects is not handed all of their detail. Questions the owner asked still print in
-/// full, because Claude has to answer them.
 fn brief_short(c: &Connection) {
     println!("Backtrail · {}", &now()[..10]);
     let waiting = waiting_on_owner(c);
@@ -199,7 +182,6 @@ fn brief_short(c: &Connection) {
         }
         println!("{line}");
     }
-    // Questions waiting on the owner in projects that are not in motion.
     let moving: HashSet<String> = threads(c)
         .iter()
         .filter(|t| s(t, "state") == "moving")
@@ -234,15 +216,12 @@ fn brief_short(c: &Connection) {
     }
 }
 
-/// How much `bt brief` prints when no project is named.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Detail {
     Short,
     Full,
 }
 
-/// The session-start brief (`bt brief`): the short form, or with `Detail::Full` (or a project) open questions, threads in
-/// motion and stale work, as text.
 pub fn brief(c: &Connection, only: Option<&str>, detail: Detail) {
     if only.is_none() && detail == Detail::Short {
         return brief_short(c);
@@ -307,7 +286,6 @@ pub fn brief(c: &Connection, only: Option<&str>, detail: Detail) {
             &[&name],
         );
         for q in &answered {
-            // A question the owner asked is answered by Claude; one Claude asked is answered by the owner.
             let who = if s(q, "origin") == "owner" {
                 "owner asked, Claude answered"
             } else {
@@ -350,7 +328,6 @@ pub fn brief(c: &Connection, only: Option<&str>, detail: Detail) {
     );
 }
 
-/// A project page: the thread, its items, its sources, and the facts about it that came from its own sources.
 pub fn thread(c: &Connection, name: &str) -> Value {
     let thread = rows(c, "SELECT * FROM thread_stat WHERE name=?1", &[&name]);
     let items = rows(
@@ -378,12 +355,9 @@ pub fn thread(c: &Connection, name: &str) -> Value {
            "artifacts": thread_artifacts(c, name)})
 }
 
-/// Every Claude artifact link tied to a thread: saved snapshots assigned to it, plus links named in its sessions and
-/// notes. Newest first; `source_id` is set when a snapshot exists.
 fn thread_artifacts(c: &Connection, name: &str) -> Vec<Value> {
     let link = regex::Regex::new(r"claude\.ai/artifact/([A-Za-z0-9]{20,24})")
         .expect("regex literal is valid");
-    // id -> (title, date, source_id)
     let mut found: HashMap<String, (String, String, Option<i64>)> = HashMap::new();
     for r in rows(
         c,
@@ -392,7 +366,11 @@ fn thread_artifacts(c: &Connection, name: &str) -> Vec<Value> {
     ) {
         found.insert(
             s(&r, "aid").to_string(),
-            (s(&r, "title").to_string(), s(&r, "last_ts").to_string(), r["id"].as_i64()),
+            (
+                s(&r, "title").to_string(),
+                s(&r, "last_ts").to_string(),
+                r["id"].as_i64(),
+            ),
         );
     }
     for r in rows(
@@ -413,23 +391,40 @@ fn thread_artifacts(c: &Connection, name: &str) -> Vec<Value> {
     let mut out: Vec<Value> = found
         .into_iter()
         .map(|(id, (title, ts, source_id))| {
-            let meta = rows(c, "SELECT title, updated FROM artifact_meta WHERE id=?1", &[&id]);
-            let (title, ts, source_id) = match source_id {
-                Some(_) => (title, ts, source_id),
-                None => {
-                    let copy = rows(
-                        c,
-                        "SELECT id, title, last_ts FROM sources WHERE kind='artifact' AND ref=?1",
-                        &[&format!("artifact:{id}")],
-                    );
-                    match copy.first() {
-                        Some(r) => (s(r, "title").to_string(), s(r, "last_ts").to_string(), r["id"].as_i64()),
-                        None => (title, ts, None),
-                    }
+            let meta = rows(
+                c,
+                "SELECT title, updated FROM artifact_meta WHERE id=?1",
+                &[&id],
+            );
+            let (title, ts, source_id) = if source_id.is_some() {
+                (title, ts, source_id)
+            } else {
+                let copy = rows(
+                    c,
+                    "SELECT id, title, last_ts FROM sources WHERE kind='artifact' AND ref=?1",
+                    &[&format!("artifact:{id}")],
+                );
+                match copy.first() {
+                    Some(r) => (
+                        s(r, "title").to_string(),
+                        s(r, "last_ts").to_string(),
+                        r["id"].as_i64(),
+                    ),
+                    None => (title, ts, None),
                 }
             };
-            let title = if !title.is_empty() { title } else { meta.first().map(|m| s(m, "title").to_string()).unwrap_or_default() };
-            let ts = meta.first().map(|m| s(m, "updated").to_string()).filter(|u| !u.is_empty()).unwrap_or(ts);
+            let title = if title.is_empty() {
+                meta.first()
+                    .map(|m| s(m, "title").to_string())
+                    .unwrap_or_default()
+            } else {
+                title
+            };
+            let ts = meta
+                .first()
+                .map(|m| s(m, "updated").to_string())
+                .filter(|u| !u.is_empty())
+                .unwrap_or(ts);
             let about = source_id
                 .map(|sid| {
                     crate::db::strings(
@@ -451,7 +446,6 @@ fn thread_artifacts(c: &Connection, name: &str) -> Vec<Value> {
     out
 }
 
-/// The Items page: every item, filtered by type, state, thread and thread kind (empty means any).
 pub fn items(c: &Connection, kind: &str, state: &str, thread: &str, thread_kind: &str) -> Value {
     json!(rows(
         c,
@@ -462,7 +456,6 @@ pub fn items(c: &Connection, kind: &str, state: &str, thread: &str, thread_kind:
     ))
 }
 
-/// The source reader: one source, its passages (the first 600) and the items that cite it.
 pub fn source(c: &Connection, id: i64) -> Value {
     let source = rows(c, "SELECT * FROM source_stat WHERE id=?1", &[&id]);
     let chunks = rows(
@@ -474,8 +467,6 @@ pub fn source(c: &Connection, id: i64) -> Value {
     json!({"source": source.first(), "chunks": chunks, "items": items})
 }
 
-/// The original file of a note (Markdown) or an artifact (HTML), for the formatted view. Sessions have no single
-/// file to show.
 pub fn source_file(c: &Connection, id: i64) -> Value {
     let found = rows(
         c,
@@ -493,7 +484,6 @@ pub fn source_file(c: &Connection, id: i64) -> Value {
     json!({"kind": kind, "text": text})
 }
 
-/// The trail: what happened on each thread, by day.
 pub fn trail(c: &Connection) -> Value {
     json!({
         "threads": rows(c, "SELECT name, state, summary FROM thread_stat WHERE state!='unsorted'", &[]),
@@ -522,14 +512,8 @@ pub fn trail(c: &Connection) -> Value {
     })
 }
 
-// ---- how threads connect
-
-/// Edges between threads: `mentions` when the sources of one thread name another often enough, and the lineage
-/// relations (built on, spun out of, ...) filed as claims. Counting mentions runs one full-text query per thread,
-/// so the result is kept until the store changes.
 fn thread_edges(c: &Connection) -> Vec<Value> {
     static CACHE: std::sync::Mutex<Option<(String, Vec<Value>)>> = std::sync::Mutex::new(None);
-    /// Mentions of another thread needed before it counts as an edge.
     const MIN_MENTIONS: i64 = 12;
     let version = format!(
         "{}-{}",
@@ -589,8 +573,6 @@ fn thread_edges(c: &Connection) -> Vec<Value> {
     edges
 }
 
-/// The context graph: threads, items and sources as nodes; mention, lineage, replaced-by, belongs-to and comes-from
-/// edges.
 pub fn graph(c: &Connection) -> Value {
     let mut nodes: Vec<Value> = vec![];
     let mut edges = thread_edges(c);
@@ -644,12 +626,8 @@ pub fn graph(c: &Connection) -> Value {
     json!({"nodes": nodes, "edges": edges})
 }
 
-// ---- the focus view of one thread
-
-/// How many notes and artifacts the focus view shows as cards.
 const FOCUS_NOTES: usize = 14;
 
-/// One readable line about a passage: the frontmatter description, else its first real sentence.
 fn gist(text: &str) -> String {
     let mut lines: Vec<&str> = text.lines().collect();
     if lines.first().map(|l| l.trim()) == Some("---") {
@@ -693,7 +671,6 @@ fn gist(text: &str) -> String {
         .collect()
 }
 
-/// Note-to-note links written as `[[wikilinks]]`: for each note, the notes and artifacts it names.
 fn wikilinks(c: &Connection) -> HashMap<i64, HashSet<i64>> {
     let by_title: HashMap<String, i64> = rows(
         c,
@@ -725,8 +702,6 @@ fn wikilinks(c: &Connection) -> HashMap<i64, HashSet<i64>> {
     links
 }
 
-/// The focus view: one thread with its notes and artifacts as cards (gist, outline, links), its items, its newest
-/// sessions and the threads it touches.
 pub fn focus(c: &Connection, name: &str) -> Value {
     let thread = rows(
         c,

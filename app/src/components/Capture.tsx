@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import { Bug, CircleHelp, ListTodo, Scale, X } from 'lucide-react'
 import { post } from '@/lib/api'
+import type { Done } from '@/lib/types'
 import '@/next.css'
 import { useShell } from '@/components/Shell'
+
+const HINT: Record<string, string> = { 'step|todo': 'A todo you own. Claude marks it built when it is, and you confirm.', 'step|bug': 'Something broken. Same flow as a todo.', 'question|': 'Claude answers this in its next session. It does not wait on you.', 'decision|': 'A choice you made, kept as standing.' }
 
 const KINDS = [
   { id: 'step|todo', label: 'Todo', icon: ListTodo },
@@ -13,7 +16,7 @@ const KINDS = [
 
 export default function Capture({ thread, onClose, onDone }: { thread?: string; onClose: () => void; onDone: () => void }) {
   const { today } = useShell()
-  const threads: any[] = (today?.threads ?? []).filter((t: any) => t.name !== 'Unsorted')
+  const threads = (today?.threads ?? []).filter((t) => t.name !== 'Unsorted')
   const [th, setTh] = useState(thread ?? threads.find((t) => t.state === 'moving')?.name ?? threads[0]?.name ?? '')
   const [kind, setKind] = useState('step|todo')
   const [text, setText] = useState('')
@@ -23,8 +26,8 @@ export default function Capture({ thread, onClose, onDone }: { thread?: string; 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     const [type, tag] = kind.split('|')
-    const r = await post('/api/add', { thread: th, type, tag, text, body })
-    if (r.ok) { onDone(); window.dispatchEvent(new Event('tm:changed')); onClose() } else setErr(r.error)
+    const r = await post<Done>('/api/add', { thread: th, type, tag, text, body })
+    if (r.ok) { onDone(); window.dispatchEvent(new Event('tm:changed')); onClose() } else setErr(r.error ?? 'Not added')
   }
 
   return (
@@ -42,7 +45,7 @@ export default function Capture({ thread, onClose, onDone }: { thread?: string; 
         </div>
         <input className="input relative mb-2 !h-11 !rounded-xl" autoFocus maxLength={110} placeholder={kind.endsWith('bug') ? 'What is broken?' : kind === 'question|' ? 'Your question for Claude' : 'One line'} value={text} onChange={(e) => setText(e.target.value)} />
         <textarea className="input relative !h-24 !rounded-xl py-2.5" maxLength={320} placeholder="Details (optional)" value={body} onChange={(e) => setBody(e.target.value)} />
-        <p className="relative mt-2 text-[12px] text-mut">{({ 'step|todo': 'A todo you own. Claude marks it built when it is, and you confirm.', 'step|bug': 'Something broken. Same flow as a todo.', 'question|': 'Claude answers this in its next session. It does not wait on you.', 'decision|': 'A choice you made, kept as standing.' } as any)[kind]}</p>
+        <p className="relative mt-2 text-[12px] text-mut">{HINT[kind]}</p>
         {err && <div className="mt-2 text-[12px] text-dropped">{err}</div>}
         <div className="relative mt-4 flex justify-end gap-2"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={!text.trim()}>Add</button></div>
       </form>

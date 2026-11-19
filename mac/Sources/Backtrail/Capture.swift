@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Add a todo, bug, question or decision to a thread (POST /api/add).
 struct CaptureSheet: View {
     @EnvironmentObject var store: Store
     @Environment(\.dismiss) private var dismiss

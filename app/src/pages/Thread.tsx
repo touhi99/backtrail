@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Bug, Check, CheckCheck, CircleHelp, Copy, FileText, Lightbulb, MessageCircleQuestion, MessagesSquare, Network, Pin, Plus, Sparkles } from 'lucide-react'
+import { Bug, Check, CheckCheck, CircleHelp, Copy, FileText, Lightbulb, MessagesSquare, Network, Plus, Sparkles } from 'lucide-react'
 import { dayFmt, post, STALE_LABEL, staleOf, useApi } from '@/lib/api'
 import { useShell } from '@/components/Shell'
 import { buildStory, JourneyRail, Made, Milestones, Settled, Thumb } from '@/components/Story'
@@ -9,13 +9,13 @@ import More from '@/components/More'
 import Paged from '@/components/Paged'
 import Fold from '@/components/Fold'
 import { SegRing } from '@/components/Viz'
-import { useLater, ts, WEEK } from '@/components/Focus'
+import { ts } from '@/components/Focus'
 import { STATE_HEX, STEP_STATUS } from '@/lib/next'
+import type { Item, ThreadDetail } from '@/lib/types'
 import '@/next.css'
 
 const SRC_COLOR: Record<string, string> = { session: '#60a5fa', note: '#8b8b95', artifact: '#c084fc', commit: '#34d399', owner: '#f4f4f5' }
 const DAY = 864e5
-// Who confirmed a decision: shown next to each one on the project page.
 const HOW: Record<string, string> = { 'owner-stated': '#34d399', 'owner-accepted': '#60a5fa', 'from a note': '#8b8b95' }
 
 function Panel({ title, count, children, className = '', id }: { title: string; count?: number | string; children: React.ReactNode; className?: string; id?: string }) {
@@ -27,37 +27,29 @@ function Panel({ title, count, children, className = '', id }: { title: string; 
   )
 }
 const Empty = ({ children }: { children: React.ReactNode }) => <div className="px-5 pb-5 text-[13px] text-mut">{children}</div>
-const Src = ({ i }: { i: any }) => i.source_id ? <Link to={`/source/${i.source_id}${i.chunk_id ? `?c=${i.chunk_id}` : ''}`} className="mt-1 inline-flex items-center gap-1.5 text-[12px] text-mut hover:text-ink" title={i.state === 'looks_done' ? 'Where the step was planned. It does not show the built result.' : undefined}><FileText size={12} />{i.state === 'looks_done' ? 'Planned in: ' : ''}{i.source_title}</Link> : null
+const Src = ({ i }: { i: Item }) => i.source_id ? <Link to={`/source/${i.source_id}${i.chunk_id ? `?c=${i.chunk_id}` : ''}`} className="mt-1 inline-flex items-center gap-1.5 text-[12px] text-mut hover:text-ink" title={i.state === 'looks_done' ? 'Where the step was planned. It does not show the built result.' : undefined}><FileText size={12} />{i.state === 'looks_done' ? 'Planned in: ' : ''}{i.source_title}</Link> : null
 
 type View = 'steps' | 'journey' | 'decisions' | 'made' | 'artifacts' | 'sources' | 'archive' | 'claude'
 const VIEWS: [View, string][] = [['steps', 'All steps'], ['journey', 'Journey'], ['decisions', 'Decisions'], ['made', 'Made'], ['artifacts', 'Artifacts'], ['sources', 'Sources'], ['archive', 'Archive'], ['claude', 'Claude Code']]
 
 export default function Thread() {
   const { name = '' } = useParams()
-  const { data: d, reload } = useApi(`/api/thread?name=${encodeURIComponent(name)}`)
+  const { data: d, reload } = useApi<ThreadDetail>(`/api/thread?name=${encodeURIComponent(name)}`)
   const { capture, reload: reloadShell } = useShell()
   const [sp] = useSearchParams()
   const nav = useNavigate()
   const focus = sp.get('item')
   const [view, setView] = useState<View | null>(null)
-  const { later, remove } = useLater()
   useEffect(() => { setView(null) }, [name])
   useEffect(() => { const h = () => reload(); window.addEventListener('tm:changed', h); return () => window.removeEventListener('tm:changed', h) }, [reload])
   const story = useMemo(() => (d?.thread ? buildStory(d) : null), [d])
 
-  const items: any[] = d?.items ?? []
+  const items = d?.items ?? []
   const now = Date.now()
-  const queue = useMemo(() => {
-    const checks = items.filter((i) => i.state === 'looks_done').sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? ''))
-    const asks = items.filter((i) => i.type === 'question' && i.state === 'open' && i.origin !== 'owner')
-    const rank: Record<string, number> = { step: 0, question: 1, decision: 2 }
-    const sugg = items.filter((i) => i.state === 'proposed' && !staleOf(i) && now - ts(i) < WEEK).sort((a, b) => (rank[a.type] ?? 3) - (rank[b.type] ?? 3) || ts(b) - ts(a))
-    return [...checks, ...asks, ...sugg].filter((i) => !later.includes(i.id))
-  }, [items, later])
 
   useEffect(() => {
     if (!focus || !d) return
-    const it = items.find((i) => i.id === focus)
+    const it = d.items.find((i) => i.id === focus)
     if (!it) return
     setView(it.type === 'step' && it.state !== 'proposed' ? 'steps' : it.state === 'proposed' || it.state === 'rejected' || it.state === 'parked' ? 'archive' : it.type === 'decision' ? 'decisions' : 'steps')
     setTimeout(() => document.getElementById(`item-${focus}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 200)
@@ -71,10 +63,10 @@ export default function Thread() {
   const doneN = steps.filter((s) => s.state === 'done').length
   const checkN = steps.filter((s) => s.state === 'looks_done').length
   const todo = steps.filter((s) => s.state === 'open' || s.state === 'doing').sort((a, b) => Number(b.state === 'doing') - Number(a.state === 'doing'))
-  const recent = (t?: string) => !!t && now - Date.parse(t) < DAY
+  const recent = (t?: string | null) => !!t && now - Date.parse(t) < DAY
   const since = [
     { n: steps.filter((s) => s.state === 'done' && recent(s.updated)).length, one: 'step finished', many: 'steps finished', icon: Check, col: '#34d399' },
-    { n: d.sources.filter((s: any) => s.kind === 'session' && recent(s.last_ts)).length, one: 'session', many: 'sessions', icon: MessagesSquare, col: '#c084fc' },
+    { n: d.sources.filter((s) => s.kind === 'session' && recent(s.last_ts)).length, one: 'session', many: 'sessions', icon: MessagesSquare, col: '#c084fc' },
     { n: items.filter((i) => i.type === 'decision' && i.state !== 'rejected' && recent(i.source_ts)).length, one: 'decision noted', many: 'decisions noted', icon: Lightbulb, col: '#60a5fa' },
   ].filter((x) => x.n > 0)
 
@@ -84,9 +76,9 @@ export default function Thread() {
   const asks = items.filter((i) => i.type === 'question' && i.state === 'open' && i.origin === 'owner')
   const copy = (t: string) => navigator.clipboard?.writeText(t)
   const hl = (id: string) => (id === focus ? { boxShadow: 'inset 0 0 0 1.5px #34d399', background: 'rgba(52,211,153,.07)' } : {})
-  const tick = async (url: string, body: any) => { await post(url, body); refresh() }
+  const tick = async (url: string, body: Record<string, unknown>) => { await post(url, body); refresh() }
 
-  const stepRow = (s: any) => (
+  const stepRow = (s: Item) => (
     <div key={s.id} id={`item-${s.id}`} className="nx-row" style={{ gridTemplateColumns: '24px minmax(0,1fr) auto', alignItems: 'start', cursor: 'default', ...hl(s.id) }}>
       <button type="button" aria-label="Done" onClick={() => tick('/api/tick', { id: s.id })} className="mt-0.5 grid size-5 place-items-center rounded-full border transition active:scale-90" style={{ borderColor: s.state === 'done' ? c : '#3a3a42', background: s.state === 'done' ? c : 'transparent' }}>
         {s.state === 'done' && <CheckCheck size={12} color="#04130c" strokeWidth={3} />}
@@ -107,7 +99,7 @@ export default function Thread() {
       </div>
     </div>
   )
-  const propRow = (i: any) => {
+  const propRow = (i: Item) => {
     const st = staleOf(i)
     return (
       <div key={i.id} id={`item-${i.id}`} className="nx-row" style={{ gridTemplateColumns: '32px minmax(0,1fr) auto', cursor: 'default', ...hl(i.id) }}>
@@ -139,8 +131,8 @@ export default function Thread() {
         <div className="flex flex-wrap items-stretch gap-5">
           <section className="nx-panel nx-in min-w-0 overflow-hidden !rounded-2xl" style={{ flex: '999 1 520px' }}>
             <div className="flex items-baseline justify-between px-5 pb-2 pt-4"><h3 className="text-[15px] font-semibold">Latest decisions</h3><button className="text-[13px] text-mut hover:text-ink" onClick={() => setView('decisions')}>All decisions</button></div>
-            {(d.decided ?? []).length === 0 && <Empty>No settled decisions yet.</Empty>}
-            {(d.decided ?? []).map((x: any) => (
+            {d.decided.length === 0 && <Empty>No settled decisions yet.</Empty>}
+            {d.decided.map((x) => (
               <Link key={x.id} to={x.source_id ? `/source/${x.source_id}${x.chunk_id ? `?c=${x.chunk_id}` : ''}` : '#'} className="nx-row" style={{ gridTemplateColumns: '78px minmax(0,1fr) auto' }} title="Open the source">
                 <span className="text-[12.5px] tabular-nums text-mut">{x.day}</span>
                 <span className="text-[14px]">{x.title}</span>
@@ -197,8 +189,8 @@ export default function Thread() {
             ))}
             <Panel title="Steps" count={`${doneN} of ${steps.length} done`}>
               {steps.length === 0 && <Empty>No steps.</Empty>}
-              {focus ? steps.filter((s) => s.state !== 'done').map(stepRow) : <Paged resetKey={name} items={steps.filter((s) => s.state !== 'done')} size={10}>{(rows: any[]) => rows.map(stepRow)}</Paged>}
-              <Fold key={focus ?? ''} label="Done" count={doneN} defaultOpen={!!focus && steps.some((s) => s.id === focus && s.state === 'done')}>{focus ? steps.filter((s) => s.state === 'done').map(stepRow) : <Paged resetKey={name} items={steps.filter((s) => s.state === 'done')} size={10}>{(rows: any[]) => rows.map(stepRow)}</Paged>}</Fold>
+              {focus ? steps.filter((s) => s.state !== 'done').map(stepRow) : <Paged resetKey={name} items={steps.filter((s) => s.state !== 'done')} size={10}>{(rows) => rows.map(stepRow)}</Paged>}
+              <Fold key={focus ?? ''} label="Done" count={doneN} defaultOpen={!!focus && steps.some((s) => s.id === focus && s.state === 'done')}>{focus ? steps.filter((s) => s.state === 'done').map(stepRow) : <Paged resetKey={name} items={steps.filter((s) => s.state === 'done')} size={10}>{(rows) => rows.map(stepRow)}</Paged>}</Fold>
             </Panel>
           </div>
         )}
@@ -206,11 +198,11 @@ export default function Thread() {
         {view === 'decisions' && <Settled s={story} done={refresh} />}
         {view === 'made' && <Made s={story} />}
         {view === 'artifacts' && (
-          <Panel title="Artifacts" count={(d.artifacts ?? []).length}>
-            {(d.artifacts ?? []).length === 0 ? <Empty>No artifact links found for this project.</Empty> : (
-              <Paged resetKey={name} items={d.artifacts} size={12}>{(rows: any[]) => (
+          <Panel title="Artifacts" count={d.artifacts.length}>
+            {d.artifacts.length === 0 ? <Empty>No artifact links found for this project.</Empty> : (
+              <Paged resetKey={name} items={d.artifacts} size={12}>{(rows) => (
                 <div className="grid gap-5 px-5 pb-5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-                  {rows.map((a: any) => a.source_id
+                  {rows.map((a) => a.source_id
                     ? <Thumb key={a.id} id={a.source_id} title={a.title || a.url} sub={a.ts ? dayFmt(a.ts) : undefined} href={a.url} about={a.about} />
                     : <a key={a.id} href={a.url} target="_blank" rel="noreferrer" className="rounded-xl border border-line p-3 text-[12.5px] text-mut">{a.title || a.url}</a>)}
                 </div>
@@ -220,7 +212,7 @@ export default function Thread() {
         )}
         {view === 'sources' && (
           <Panel title="Sources" count={d.sources.length}>
-            <Paged resetKey={name} items={d.sources} size={12}>{(rows: any[]) => rows.map((s: any) => <Link key={s.id} to={`/source/${s.id}`} className="nx-row" style={{ gridTemplateColumns: '10px minmax(0,1fr) auto', padding: '10px 18px' }}><span className="size-2 rounded-full" style={{ background: SRC_COLOR[s.kind] }} /><span className="truncate text-[13.5px]">{s.title}</span><span className="text-[12px] text-mut">{dayFmt(s.last_ts)}</span></Link>)}</Paged>
+            <Paged resetKey={name} items={d.sources} size={12}>{(rows) => rows.map((s) => <Link key={s.id} to={`/source/${s.id}`} className="nx-row" style={{ gridTemplateColumns: '10px minmax(0,1fr) auto', padding: '10px 18px' }}><span className="size-2 rounded-full" style={{ background: SRC_COLOR[s.kind] }} /><span className="truncate text-[13.5px]">{s.title}</span><span className="text-[12px] text-mut">{dayFmt(s.last_ts)}</span></Link>)}</Paged>
           </Panel>
         )}
         {view === 'archive' && (

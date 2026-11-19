@@ -1,7 +1,6 @@
 import SwiftUI
 import WebKit
 
-/// Renders a saved artifact page offscreen and keeps the picture, one page at a time.
 @MainActor
 final class ThumbMaker: NSObject, WKNavigationDelegate {
     static let shared = ThumbMaker()

@@ -14,7 +14,6 @@ private func shortName(_ s: String) -> String {
 
 private func nodeRadius(claims: Int) -> CGFloat { min(46, (9 + sqrt(Double(claims)) * 2.1) * 1.15) }
 
-/// The graph, parsed once into arrays and laid out once per app run. Pages reuse `shared`.
 final class GraphData {
     nonisolated(unsafe) static var shared: GraphData?
 
@@ -56,8 +55,6 @@ final class GraphData {
         pos = GraphData.layout(isTopic: kinds.map { $0 == "topic" }, edges: es)
     }
 
-    /// Fixed-seed force layout, the same as the web app: repulsion between nodes, springs along shared-claim edges,
-    /// a weak pull to the centre. Topics sit on an outer ring and take no springs.
     private static func layout(isTopic: [Bool], edges: [(a: Int, b: Int, w: CGFloat, topic: Bool)]) -> [CGPoint] {
         let SX = GW / 880, SY = GH / 700
         let n = isTopic.count
@@ -97,7 +94,6 @@ final class GraphData {
         return (0..<n).map { CGPoint(x: px[$0], y: py[$0]) }
     }
 
-    /// Shows the cached graph at once; fetches in the background and lays out again only if the graph changed.
     static func load() async -> GraphData? {
         guard let r = try? await API.get("/api/kg/graph") else { return shared }
         let fresh = await Task.detached { GraphData.quickSignature(r) }.value
@@ -115,7 +111,6 @@ final class GraphData {
     }
 }
 
-/// Things mentioned in the work, sized by claims, linked when claims name both. Select one to read its claims.
 struct GraphView: View {
     @EnvironmentObject var store: Store
     @State private var data: GraphData? = GraphData.shared
@@ -198,7 +193,6 @@ struct GraphView: View {
     }
 }
 
-/// Edges, nodes and labels drawn in one Canvas. Hover lives here, so moving the mouse redraws only this view.
 private struct GraphCanvas: View {
     let data: GraphData
     @Binding var sel: String
@@ -274,7 +268,6 @@ private struct GraphCanvas: View {
         }
     }
 
-    /// The node under a point, from the layout and the current zoom and pan.
     private func nodeAt(_ loc: CGPoint, scale: CGFloat) -> Int {
         let gx = (loc.x - pan.width - size.width / 2) / scale + GW / 2
         let gy = (loc.y - pan.height - size.height / 2) / scale + GH / 2
@@ -287,7 +280,6 @@ private struct GraphCanvas: View {
     }
 }
 
-/// The right-hand panel: the selected thing, its neighbours, and its claims or lineage.
 private struct ClaimsPanel: View {
     @EnvironmentObject var store: Store
     @Environment(\.openURL) private var openURL

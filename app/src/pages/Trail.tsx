@@ -2,39 +2,42 @@ import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'reac
 import { Link, useNavigate } from 'react-router-dom'
 import { dayFmt, useApi } from '@/lib/api'
 import { STATE_HEX, STATE_NAME } from '@/lib/next'
+import type { Trail as TrailData } from '@/lib/types'
 import '@/next.css'
 
-/** Every thread on one time axis: when it was worked on, what came out of it, how it ended, and what grew out of what. */
+type TrailSource = TrailData['sources'][number]
+type TrailItem = TrailData['items'][number]
+type Lane = TrailData['threads'][number] & { s: TrailSource[]; made: TrailSource[]; i: TrailItem[]; first: string; last: string }
+type LaneLink = { from: string; to: string; kind: string; d: string }
 
 const DAY = 864e5
 const ts = (d: string) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10))
 const iso = (t: number) => new Date(t).toISOString().slice(0, 10)
 const ORDER = ['built', 'moving', 'parked', 'dropped'] as const
 
-/** Lanes for every thread with a session; with `days`, only the last `days` days and the threads active in them. */
 function useTrail(days?: number) {
-  const { data } = useApi('/api/trail') as { data: any }
+  const { data } = useApi<TrailData>('/api/trail')
   return useMemo(() => {
     if (!data) return null
-    const per = new Map<string, any>()
-    for (const t of data.threads) per.set(t.name, { ...t, s: [] as any[], made: [] as any[], i: [] as any[] })
+    const per = new Map<string, Lane>()
+    for (const t of data.threads) per.set(t.name, { ...t, s: [], made: [], i: [], first: '', last: '' })
     for (const s of data.sources) { const p = per.get(s.thread); if (p && s.d > '2000') (s.kind === 'session' ? p.s : p.made).push(s) }
     for (const i of data.items) per.get(i.thread)?.i.push(i)
     const now = new Date(), today = iso(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
     const from = days ? iso(ts(today) - (days - 1) * DAY) : ''
-    if (from) for (const p of per.values()) { p.s = p.s.filter((x: any) => x.d >= from); p.made = p.made.filter((x: any) => x.d >= from); p.i = p.i.filter((x: any) => x.d >= from) }
+    if (from) for (const p of per.values()) { p.s = p.s.filter((x) => x.d >= from); p.made = p.made.filter((x) => x.d >= from); p.i = p.i.filter((x) => x.d >= from) }
     const ps = [...per.values()].filter((p) => p.s.length)
-    if (!ps.length) return { ps, links: [], d0: from || today, days: days ?? 1 }
-    const all = ps.flatMap((p) => [...p.s, ...p.made, ...p.i].map((s: any) => s.d)).sort()
+    if (!ps.length) return { ps, links: [] as LaneLink[], d0: from || today, days: days ?? 1 }
+    const all = ps.flatMap((p) => [...p.s, ...p.made, ...p.i].map((s) => s.d)).sort()
     const d0 = from || all[0], d1 = iso(Math.max(ts(all[all.length - 1]), ts(today)))
     for (const p of ps) {
       for (const x of [...p.made, ...p.i]) if (x.d < d0) x.d = d0
-      const ds = [...p.s, ...p.made].map((x: any) => x.d).sort()
+      const ds = [...p.s, ...p.made].map((x) => x.d).sort()
       p.first = ds[0]; p.last = ds[ds.length - 1]
     }
     ps.sort((a, b) => a.first.localeCompare(b.first))
     const names = new Set(ps.map((p) => p.name))
-    const links: any[] = []
+    const links: LaneLink[] = []
     for (const l of data.links) {
       const mm = l.text.match(/^(.+?) (built on|spun out of|forked from) (.+)$/)
       if (mm && names.has(mm[1]) && names.has(mm[3]) && !links.some((x) => x.from === mm[3] && x.to === mm[1])) links.push({ from: mm[3], to: mm[1], kind: mm[2], d: l.d })
@@ -43,7 +46,6 @@ function useTrail(days?: number) {
   }, [data, days])
 }
 
-/** The lane chart. Compact: shorter rows, no lineage arrows, for the Today page. */
 export function TrailLanes({ m, compact = false }: { m: NonNullable<ReturnType<typeof useTrail>>; compact?: boolean }) {
   const nav = useNavigate()
   const [hover, setHover] = useState<string | null>(null)
@@ -65,9 +67,9 @@ export function TrailLanes({ m, compact = false }: { m: NonNullable<ReturnType<t
             {Array.from({ length: Math.ceil(days / tick) }, (_, k) => iso(ts(d0) + k * tick * DAY)).map((d) => <g key={d}><line x1={x(d) - dw / 2} x2={x(d) - dw / 2} y1={TOP - 8} y2={H} stroke="#222226" /><text x={x(d) - dw / 2 + 4} y={TOP - 14} fill="#6b6b75" fontSize={11}>{dayFmt(d)}</text></g>)}
             {ps.map((p, i) => {
               const c = STATE_HEX[p.state] ?? '#8b8b95', yy = y(i), x0 = x(p.first) - 7, x1 = x(p.last) + 7
-              const byDay: Record<string, any[]> = {}; p.s.forEach((s: any) => (byDay[s.d] ??= []).push(s))
-              const madeDay: Record<string, any[]> = {}; p.made.forEach((s: any) => (madeDay[s.d] ??= []).push(s))
-              const doneDay: Record<string, any[]> = {}; p.i.forEach((s: any) => (doneDay[s.d] ??= []).push(s))
+              const byDay: Record<string, TrailSource[]> = {}; p.s.forEach((s) => (byDay[s.d] ??= []).push(s))
+              const madeDay: Record<string, TrailSource[]> = {}; p.made.forEach((s) => (madeDay[s.d] ??= []).push(s))
+              const doneDay: Record<string, TrailItem[]> = {}; p.i.forEach((s) => (doneDay[s.d] ??= []).push(s))
               const dim = hover && hover !== p.name && !links.some((l) => (l.from === hover && l.to === p.name) || (l.to === hover && l.from === p.name))
               return (
                 <g key={p.name} className="cursor-pointer" opacity={dim ? 0.45 : 1} onClick={() => nav(`/thread/${encodeURIComponent(p.name)}`)} onMouseEnter={() => setHover(p.name)} onMouseLeave={() => setHover(null)}>
@@ -95,7 +97,7 @@ export function TrailCard() {
   if (!full || !m || !m.ps.length) return null
   const more = full.ps.length - m.ps.length
   return (
-    <section className="nx-panel nx-in mt-5 px-5 pb-3 pt-4" style={{ ['--d' as any]: '280ms' }}>
+    <section className="nx-panel nx-in mt-5 px-5 pb-3 pt-4" style={{ '--d': '280ms' }}>
       <div className="mb-1 flex items-baseline justify-between gap-3">
         <h3 className="text-[15px] font-semibold">Last two weeks <span className="ml-2 text-[12.5px] font-normal text-mut">{full.ps.length} threads worked on{more > 0 ? `, the ${m.ps.length} most recent shown` : ''}</span></h3>
         <Link to="/graph?view=trail" className="text-[12.5px] font-medium text-accent hover:underline">Full trail</Link>
@@ -126,14 +128,14 @@ export default function Trail({ tabs }: { tabs: ReactNode }) {
 
       <div className="mt-5 grid grid-cols-5 gap-3 max-[1100px]:grid-cols-3">
         {ORDER.map((st, k) => { const g = ps.filter((p) => p.state === st); return (
-          <button key={st} type="button" title={only === st ? 'Show all threads' : `Show only ${STATE_NAME[st]}`} onClick={() => setOnly(only === st ? null : st)} className="nx-tile nx-in text-left" style={{ ['--d' as any]: `${40 + k * 40}ms`, opacity: only && only !== st ? 0.5 : 1, outline: only === st ? `1px solid ${STATE_HEX[st]}` : undefined }}>
+          <button key={st} type="button" title={only === st ? 'Show all threads' : `Show only ${STATE_NAME[st]}`} onClick={() => setOnly(only === st ? null : st)} className="nx-tile nx-in text-left" style={{ '--d': `${40 + k * 40}ms`, opacity: only && only !== st ? 0.5 : 1, outline: only === st ? `1px solid ${STATE_HEX[st]}` : undefined }}>
             <div className="nx-big" style={{ color: STATE_HEX[st] }}>{g.length}</div><div className="mt-1 text-[13px] text-soft">{STATE_NAME[st]}</div>
             <div className="mt-1.5 text-[12px] leading-snug text-mut">{g.map((p) => p.name).join(', ')}</div>
           </button>) })}
-        <div className="nx-tile nx-in" style={{ ['--d' as any]: '200ms' }}><div className="nx-big text-[#c084fc]">{made}</div><div className="mt-1 text-[13px] text-soft">Things made</div><div className="mt-1.5 text-[12px] text-mut">artifacts and commit runs</div></div>
+        <div className="nx-tile nx-in" style={{ '--d': '200ms' }}><div className="nx-big text-[#c084fc]">{made}</div><div className="mt-1 text-[13px] text-soft">Things made</div><div className="mt-1.5 text-[12px] text-mut">artifacts and commit runs</div></div>
       </div>
 
-      <section className="nx-panel nx-in mt-5 px-5 pb-3 pt-4" style={{ ['--d' as any]: '240ms' }}>
+      <section className="nx-panel nx-in mt-5 px-5 pb-3 pt-4" style={{ '--d': '240ms' }}>
         <div className="mb-2 flex flex-wrap items-baseline justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
             <h3 className="text-[15px] font-semibold">Trail <span className="ml-2 text-[12.5px] font-normal text-mut">{only ? `${m.ps.length} ${STATE_NAME[only].toLowerCase()}, ` : ''}click a thread to open its story</span></h3>

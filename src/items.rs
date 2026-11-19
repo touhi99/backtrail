@@ -1,6 +1,3 @@
-//! Work items: decisions, steps, questions and turns. This module holds the write rule that files them, the keep
-//! rule that settles what the owner said directly, and every change the app or the command line can make to one.
-//! Items are rows of `claims`; the `item` view (sql/views.sql) is how they are read.
 use crate::clock::now;
 use crate::db::{count, find_quote, id64, logw, rows, source_id, thread_exists};
 use anyhow::Context;
@@ -11,13 +8,11 @@ pub const TYPES: &[&str] = &["decision", "step", "question", "turn"];
 pub const MAX_TITLE: usize = 110;
 pub const MAX_BODY: usize = 320;
 
-/// Words too common in item titles to count as shared content.
 pub const COMMON_WORDS: &[&str] = &[
     "about", "after", "before", "their", "there", "which", "would", "first", "later", "again",
     "build", "built", "write", "files", "check", "start",
 ];
 
-/// The content words of a title: five letters or more, common words left out.
 pub fn content_words(title: &str) -> HashSet<String> {
     title
         .to_lowercase()
@@ -35,8 +30,6 @@ fn update(c: &Connection, sql: &str, args: &[&dyn rusqlite::ToSql]) -> bool {
     c.execute(sql, args).unwrap_or(0) == 1
 }
 
-// ---- filing
-
 #[derive(Clone)]
 pub struct NewItem {
     pub kind: String,
@@ -48,16 +41,11 @@ pub struct NewItem {
     pub state: Option<String>,
     pub origin: String,
     pub date: Option<String>,
-    /// Names or aliases of the entities the item is about; mentions in the title and body are added.
     pub entities: Vec<String>,
-    /// The day a time-bound item stops applying (`YYYY-MM-DD`).
     pub valid_to: Option<String>,
-    /// For a step the owner must confirm: where to look (screen, URL, file or command) and what a good result is.
     pub check_how: Option<String>,
 }
 
-/// The write rule: an item names a known thread, cites an indexed source, quotes text found in that source and
-/// respects the length limits. Filing the same thread, type and title again updates the item. Returns its id.
 pub fn add(c: &Connection, it: &NewItem) -> anyhow::Result<String> {
     if !TYPES.contains(&it.kind.as_str()) {
         anyhow::bail!(
@@ -152,10 +140,6 @@ pub fn add(c: &Connection, it: &NewItem) -> anyhow::Result<String> {
     Ok(id)
 }
 
-/// The entities an item is about, and its thread. Entities named by the filer come first, then those whose name or
-/// alias is a whole word in the title or body. The thread is kept when it belongs to one of them; otherwise it
-/// follows the first named project entity that has a thread of its own. Mentions alone move the thread only when the
-/// given one is a topic thread (no project of that name), so a passing mention never pulls an item off its project.
 fn subjects(c: &Connection, it: &NewItem) -> (Vec<(String, String)>, String) {
     let named: Vec<(String, String)> = it
         .entities
@@ -201,8 +185,6 @@ fn default_state(kind: &str) -> &'static str {
     }
 }
 
-/// Something the owner typed in the app on a thread page: a todo, bug, question or decision. The typed text is
-/// stored as its own source, so the item cites it like any other.
 pub fn capture(
     c: &Connection,
     thread: &str,
@@ -235,8 +217,6 @@ pub fn capture(
     Ok(id)
 }
 
-/// An idea typed in the app becomes an open thread of its own, with the typed line as its source. Returns the
-/// thread's name, which gets the date added when the name is taken.
 pub fn idea(c: &Connection, text: &str) -> anyhow::Result<String> {
     if text.is_empty() || text.chars().count() > MAX_TITLE {
         anyhow::bail!("idea must be 1..{MAX_TITLE} chars");
@@ -257,7 +237,6 @@ pub fn idea(c: &Connection, text: &str) -> anyhow::Result<String> {
     Ok(name)
 }
 
-/// Store text the owner typed as a one-passage source. Returns (source id, chunk id).
 fn typed_source(c: &Connection, thread: &str, text: &str, ts: &str) -> (i64, i64) {
     let source_ref = format!("owner:{ts}");
     c.execute(
@@ -271,13 +250,8 @@ fn typed_source(c: &Connection, thread: &str, text: &str, ts: &str) -> (i64, i64
     (source, chunk)
 }
 
-// ---- the keep rule
-
-/// Kinds of fact the keep rule may keep without review.
 const KEEP_TYPES: &[&str] = &["decision", "rationale", "state"];
 
-/// Turns stored with the user role that the owner did not type: the summary written when a session is continued,
-/// command output and notifications that Claude Code inserts as user turns.
 fn inserted_turn(text: &str) -> bool {
     let t = text.trim_start();
     t.starts_with("This session is being continued")
@@ -285,11 +259,6 @@ fn inserted_turn(text: &str) -> bool {
         || t.starts_with("[Request interrupted")
 }
 
-/// The keep rule. A proposed fact is kept (`state='settled'`, `review='auto'`) when the owner said it in so many
-/// words: it is a decision, rationale or state claim, its quote comes from a turn the owner typed, and it is marked
-/// `stated`. It stays proposed with `review='held|<reason>'` when an earlier fact of the same type on the same
-/// thread shares three or more content words with it, since it may repeat or change that fact. Steps, questions,
-/// relations and the assistant's words always wait for the owner. Returns true when the fact was kept.
 pub fn keep(c: &Connection, id: &str) -> bool {
     let fact = rows(
         c,
@@ -334,8 +303,6 @@ pub fn keep(c: &Connection, id: &str) -> bool {
         .ok();
         return false;
     }
-    // A Claude flag that only said "still live" or "already in effect" no longer matters once the fact is kept;
-    // a "superseded" flag stays, so the kept fact shows as replaced.
     let stale = Some(get("stale")).filter(|s| s.starts_with("superseded"));
     let kept = update(
         c,
@@ -348,7 +315,6 @@ pub fn keep(c: &Connection, id: &str) -> bool {
     kept
 }
 
-/// Run the keep rule over every proposed fact, oldest first, so a fact is only compared with facts said before it.
 pub fn keep_all(c: &Connection) -> usize {
     let ids = crate::db::strings(
         c,
@@ -358,9 +324,6 @@ pub fn keep_all(c: &Connection) -> usize {
     ids.iter().filter(|id| keep(c, id)).count()
 }
 
-// ---- changes by the owner (the app)
-
-/// Tick a step done, or untick it.
 pub fn tick(c: &Connection, id: &str) -> bool {
     let ok = update(
         c,
@@ -372,7 +335,6 @@ pub fn tick(c: &Connection, id: &str) -> bool {
     ok
 }
 
-/// Mark a step in progress, or back to open.
 pub fn toggle_doing(c: &Connection, id: &str) -> bool {
     let ok = update(
         c,
@@ -386,8 +348,6 @@ pub fn toggle_doing(c: &Connection, id: &str) -> bool {
     ok
 }
 
-/// A session that holds nothing to file: it leaves the pending list. Resumed sessions share a title and thread
-/// with the one named, so they leave with it.
 pub fn skip_session(c: &Connection, source: i64, actor: &str) -> bool {
     let ok = c
         .execute(
@@ -411,7 +371,6 @@ pub fn skip_session(c: &Connection, source: i64, actor: &str) -> bool {
     ok
 }
 
-/// The owner says a step marked "looks done?" is not done.
 pub fn not_yet(c: &Connection, id: &str) -> bool {
     let ok = update(
         c,
@@ -441,11 +400,9 @@ pub fn answer(c: &Connection, id: &str, text: &str) -> anyhow::Result<bool> {
 pub enum Verdict {
     Accept,
     Reject,
-    /// True once, no longer applies.
     Park,
 }
 
-/// The owner's verdict on a proposed item. A fact the keep rule kept (`review='auto'`) can still be rejected.
 pub fn review(c: &Connection, id: &str, verdict: Verdict, reason: &str) -> bool {
     let reason = clip(reason, MAX_BODY);
     let ts = now();
@@ -480,14 +437,12 @@ pub fn review(c: &Connection, id: &str, verdict: Verdict, reason: &str) -> bool 
     ok
 }
 
-/// The owner's answer to a proposed relation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RelationVerdict {
     Accept,
     Reject,
 }
 
-/// Accept or reject a proposed relation between two threads.
 pub fn review_relation(
     c: &Connection,
     a: &str,
@@ -525,7 +480,6 @@ pub fn review_relation(
     ok
 }
 
-/// Move an item to another thread (it was typed in the wrong one).
 pub fn move_to(c: &Connection, id: &str, thread: &str) -> bool {
     if !thread_exists(c, thread) {
         return false;
@@ -546,7 +500,6 @@ pub fn move_to(c: &Connection, id: &str, thread: &str) -> bool {
     ok
 }
 
-/// A kept decision that no longer holds: it stays on file and drops out of the live list.
 pub fn supersede(c: &Connection, id: &str, reason: &str) -> bool {
     let reason = clip(reason, 200);
     let why = if reason.trim().is_empty() {
@@ -565,9 +518,6 @@ pub fn supersede(c: &Connection, id: &str, reason: &str) -> bool {
     ok
 }
 
-// ---- changes by Claude (the command line)
-
-/// Close a step. `by` is owner, claude or evidence; the last two need proof.
 pub fn done(c: &Connection, id: &str, by: &str, proof: &str) -> anyhow::Result<bool> {
     if by != "owner" && proof.trim().is_empty() {
         anyhow::bail!("a step closed by Claude or evidence needs --proof");
@@ -581,7 +531,6 @@ pub fn done(c: &Connection, id: &str, by: &str, proof: &str) -> anyhow::Result<b
     Ok(ok)
 }
 
-/// Claude says a step is built; it shows as "looks done?" until the owner confirms.
 pub fn built(
     c: &Connection,
     id: &str,
@@ -604,7 +553,6 @@ pub fn built(
     Ok(ok)
 }
 
-/// Label a proposed item after checking it against later items and the code: live, `in_effect`, superseded or done.
 pub fn flag(c: &Connection, id: &str, label: &str, reason: &str) -> anyhow::Result<bool> {
     if !["live", "in_effect", "superseded", "done"].contains(&label) {
         anyhow::bail!("--as must be live, in_effect, superseded or done");
@@ -624,7 +572,6 @@ pub fn flag(c: &Connection, id: &str, label: &str, reason: &str) -> anyhow::Resu
     Ok(ok)
 }
 
-/// Claude answers a question the owner typed in the app.
 pub fn reply(c: &Connection, id: &str, text: &str) -> anyhow::Result<bool> {
     let text = clip(text, 600);
     if text.trim().is_empty() {
@@ -642,7 +589,6 @@ pub fn reply(c: &Connection, id: &str, text: &str) -> anyhow::Result<bool> {
     Ok(ok)
 }
 
-/// Retire an item: it stays on file as rejected with the reason; `replaced_by` names the item that replaced it.
 pub fn retire(c: &Connection, id: &str, replaced_by: Option<&str>, reason: &str) -> bool {
     let ok = update(
         c,

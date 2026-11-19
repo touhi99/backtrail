@@ -1,6 +1,5 @@
 import Foundation
 
-/// A loose view of a JSON value. The API returns nulls and mixed shapes, so every read has a default.
 struct J {
     let v: Any?
     subscript(_ k: String) -> J { J(v: (v as? [String: Any])?[k]) }
@@ -16,7 +15,6 @@ extension J: Identifiable {
     var id: String { self["id"].s ?? String(self["id"].int) }
 }
 
-/// Client for the `bt serve` JSON API on loopback.
 enum API {
     static let base = "http://127.0.0.1:8799"
     private static let allowed: CharacterSet = {
@@ -33,7 +31,6 @@ enum API {
         return j
     }
 
-    /// The last answer for a path, so a page can show it at once while it fetches a fresh one.
     private static let lock = NSLock()
     nonisolated(unsafe) private static var memo: [String: J] = [:]
     static func cached(_ path: String) -> J? {
@@ -50,7 +47,6 @@ enum API {
         return J(v: try JSONSerialization.jsonObject(with: data))
     }
 
-    /// The same page in the web app, for screens this app does not have.
     static func web(_ path: String) -> URL { URL(string: base + path)! }
 }
 
@@ -79,8 +75,7 @@ final class Store: ObservableObject {
     func goBack() {
         if let p = back.popLast() { page = p }
     }
-    @Published var capture: String?? = nil   // .some(thread or nil) shows the sheet
-    /// Bumped after a change so open pages reload.
+    @Published var capture: String?? = nil
     @Published var tick = 0
 
     func reload() async {
@@ -94,7 +89,6 @@ final class Store: ObservableObject {
         }
     }
 
-    /// Warms the cache for the pages opened most: every thread in progress, and the graph with its layout.
     private func prefetch() {
         let names = moving.map { $0["name"].str }
         Task.detached(priority: .utility) {
@@ -114,7 +108,6 @@ final class Store: ObservableObject {
     var moving: [J] { threads.filter { $0["state"].str == "moving" } }
 }
 
-/// "2026-11-15T..." -> "15 Nov".
 func dayFmt(_ t: String?) -> String {
     guard let t, t.count >= 10 else { return t ?? "" }
     let f = DateFormatter()

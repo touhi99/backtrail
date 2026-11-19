@@ -1,5 +1,3 @@
-//! Health reports and housekeeping for the command line: `check`, `check --pairs`, `pending`, `match`, `artifacts`,
-//! `show` and `log`.
 use crate::clock::{days_ago, now};
 use crate::db::{count, logw, rows, s};
 use crate::items::{COMMON_WORDS, content_words};
@@ -7,8 +5,6 @@ use rusqlite::{Connection, params};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 
-/// `bt check`: facts that lost their quote, sessions not indexed yet, open work in dropped threads, old questions,
-/// threads without items, uncited notes, and the graph checks.
 pub fn check(c: &Connection) {
     let (traced, lost) = crate::ingest::relink(c);
     println!("claims traced to their quote: {traced}; quote no longer in source: {lost}");
@@ -106,8 +102,6 @@ pub fn check(c: &Connection) {
     crate::kg::lint::lint(c);
 }
 
-/// `bt check --pairs`: items of one thread that share two or more content words but differ in state or type.
-/// A Claude session judges whether one contradicts or replaces the other.
 pub fn pairs(c: &Connection) {
     let items = rows(
         c,
@@ -143,7 +137,6 @@ pub fn pairs(c: &Connection) {
     );
 }
 
-/// `bt pending`: recent sessions in live threads that no item cites yet.
 pub fn pending(c: &Connection, days: i64) {
     let sessions = rows(
         c,
@@ -175,7 +168,6 @@ pub fn pending(c: &Connection, days: i64) {
     );
 }
 
-/// `bt show`: the passages of one source.
 pub fn show(c: &Connection, source_ref: &str) {
     let source_ref = crate::db::resolve_ref(c, source_ref);
     let passages = rows(
@@ -194,7 +186,6 @@ pub fn show(c: &Connection, source_ref: &str) {
     }
 }
 
-/// `bt log`: the newest `n` entries of the change log, oldest first.
 pub fn log(c: &Connection, n: i64) {
     for r in rows(
         c,
@@ -215,9 +206,6 @@ pub fn log(c: &Connection, n: i64) {
     }
 }
 
-/// Mark open steps that a later commit of the thread's repository seems to finish as "looks done?": an ordered
-/// two-word phrase from the step's title must appear in the commit subject. A word-overlap heuristic; the owner
-/// confirms each one. Steps the owner already answered "not yet" are skipped. Prints what it did.
 pub fn match_commits(c: &Connection) {
     let steps = rows(
         c,
@@ -273,8 +261,6 @@ pub fn match_commits(c: &Connection) {
     );
 }
 
-/// `bt artifacts`: Claude artifact links found in sessions and notes that have no saved snapshot yet. With a
-/// manifest, also records publish dates and reports snapshots older than the published version.
 pub fn artifacts(c: &Connection, manifest: Option<&str>) {
     if let Some(file) = manifest {
         read_manifest(c, file);
@@ -313,8 +299,6 @@ pub fn artifacts(c: &Connection, manifest: Option<&str>) {
     }
 }
 
-/// Reads a listing `[{id,title,updated}]` (from the Artifact tool's list action), records each publish date, and
-/// reports which artifacts have no snapshot or a snapshot older than the published version.
 fn read_manifest(c: &Connection, file: &str) {
     let listing: Value = std::fs::read_to_string(file)
         .ok()

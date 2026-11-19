@@ -1,5 +1,3 @@
-//! The `backtrail` command. Each command parses its arguments and calls one function; the work happens in the
-//! modules below.
 mod check;
 mod clock;
 mod config;
@@ -31,11 +29,9 @@ assign <ref> <thread> | suggest-threads | extract-input <ref> | finish <step> --
 extract-log <ref> [--failed 1] [--detail D] | kg [state|export|restore|lint|suggest|merge|entity|page|trace|why|neighbors|path|passage|find] | \
 brief [--thread T | --all] | backup | serve [--port N] | hooks";
 
-/// The command-line arguments after the command name.
 struct Args(Vec<String>);
 
 impl Args {
-    /// The value after `--name`.
     fn opt(&self, name: &str) -> Option<String> {
         self.0
             .iter()
@@ -54,14 +50,12 @@ impl Args {
     fn has(&self, name: &str) -> bool {
         self.0.iter().any(|a| a == name)
     }
-    /// The n-th positional argument (0 is the command); exits with a message when it is missing.
     fn at(&self, n: usize, what: &str) -> String {
         self.0
             .get(n)
             .cloned()
             .unwrap_or_else(|| fail(format!("missing {what}")))
     }
-    /// Every argument from position `n` on, joined by spaces.
     fn rest(&self, n: usize) -> String {
         self.0.get(n..).unwrap_or_default().join(" ")
     }
@@ -72,7 +66,6 @@ fn fail(message: impl std::fmt::Display) -> ! {
     std::process::exit(1)
 }
 
-/// Print `ok`, or `missing` when the change matched nothing.
 #[expect(
     clippy::fn_params_excessive_bools,
     reason = "private helper; every call passes another function's result"
@@ -81,7 +74,6 @@ fn report(changed: bool, missing: &str) {
     println!("{}", if changed { "ok" } else { missing });
 }
 
-/// Print the result of a change that can be refused; a refusal exits with status 1.
 fn report_or_fail(result: anyhow::Result<bool>, missing: &str) {
     match result {
         Ok(changed) => report(changed, missing),
@@ -114,8 +106,6 @@ fn ingest(c: &Connection) {
     );
 }
 
-/// `bt import`: a JSON array of facts. Decisions, steps, questions and turns are filed as items; state, rationale
-/// and relation facts as claims about entities.
 fn import(c: &Connection, file: &str) {
     let raw = if file == "-" {
         let mut s = String::new();
@@ -139,7 +129,6 @@ fn import(c: &Connection, file: &str) {
             get("title")
         };
         let result = if items::TYPES.contains(&kind.as_str()) {
-            // Without a thread, the item goes to the thread of its source.
             let thread = if get("thread").is_empty() {
                 let source = db::resolve_ref(c, &get("source"));
                 c.query_row("SELECT thread FROM sources WHERE ref=?1", [source], |r| {
@@ -220,7 +209,6 @@ fn import(c: &Connection, file: &str) {
     println!("imported {ok}, rejected {bad}");
 }
 
-/// Log one history query (`kg-query`, target = its kind) so use can be counted after a few weeks.
 fn kg_query_log(c: &Connection, a: &Args, detail: &str) {
     let kind = a.0.get(1).map_or("", String::as_str);
     let detail = match a.opt("--as-of") {
@@ -231,7 +219,6 @@ fn kg_query_log(c: &Connection, a: &Args, detail: &str) {
 }
 
 fn kg_command(c: &Connection, a: &Args) {
-    // `--as-of DATE` applies to find, page, trace and neighbors; it is not part of a question's words
     if !kg::query::set_as_of(a.opt("--as-of").as_deref()) {
         fail("--as-of needs a date like 2026-11-05");
     }
@@ -320,8 +307,6 @@ fn kg_command(c: &Connection, a: &Args) {
     }
 }
 
-/// Exits quietly when stdout is closed early (`| head`) instead of printing a panic. Other panics, and broken
-/// sockets, keep the default behavior.
 fn exit_quietly_on_closed_stdout() {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -346,15 +331,12 @@ fn main() {
         return hooks::run(&a.0);
     }
     if cmd == "brief" && std::env::var("BACKTRAIL_COMPILE").is_ok() {
-        // the headless extraction model starts a session too; it gets no brief
         return;
     }
     let c = db::open();
     match cmd {
         "ingest" => {
             if a.has("--force") {
-                // Read every session again, for example after the chunking rule changed. Sources whose file is gone
-                // are kept.
                 c.execute(
                     "UPDATE sources SET mtime=0, bytes=0 WHERE kind='session'",
                     [],
@@ -366,7 +348,6 @@ fn main() {
             ingest(&c);
         }
         "build" => {
-            // a fresh machine: index every source, create the configured entities, then embed
             ingest(&c);
             println!("entities: {}", kg::entities::sync_configured(&c));
             match embed::run(&c, usize::MAX) {
@@ -377,7 +358,6 @@ fn main() {
                     config::DEFAULT_EMBED_MODEL
                 ),
             }
-            // the hook reads one session per session end, so earlier history stays unread until asked for
             let unread =
                 kg::extract::queue(&c, usize::MAX, None, None, kg::extract::Cap::Ignore).len();
             if unread > 0 {
@@ -618,7 +598,6 @@ fn main() {
         "log" => check::log(&c, a.num("--n", 25)),
         "embed" => embed::run_cli(&c, a.num("--limit", usize::MAX)),
         "search" => {
-            // every argument that is not a flag or a flag's value is a search word
             let mut words = vec![];
             let mut i = 1;
             while i < a.0.len() {

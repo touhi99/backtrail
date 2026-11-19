@@ -2,7 +2,6 @@ import { useMemo } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
-// Renders a note's markdown: frontmatter removed, [[wikilinks]] turned into search links, output sanitised.
 export default function Markdown({ text }: { text: string }) {
   const html = useMemo(() => {
     const body = text.replace(/^---\n[\s\S]*?\n---\n/, '')

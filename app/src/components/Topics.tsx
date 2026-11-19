@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Check, ExternalLink, Search as SearchIcon, X } from 'lucide-react'
 import { post } from '@/lib/api'
+import type { Done, EntityAdded, KgSuggest } from '@/lib/types'
 
 export const KIND_C: Record<string, string> = { project: '#60a5fa', service: '#c084fc', tool: '#fbbf24', model: '#f87171', site: '#34d399', topic: '#f472b6' }
 export const KINDS: [string, string][] = [
@@ -13,37 +14,34 @@ export const KINDS: [string, string][] = [
   ['site', 'a website or company, like Google or Rivalsmeta'],
 ]
 
-/** The term in bold inside a quote. */
 function Marked({ text, term }: { text: string; term: string }) {
   const parts = text.split(new RegExp(`(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'i'))
   return <>{parts.map((p, i) => (p.toLowerCase() === term.toLowerCase() ? <b key={i} className="font-semibold text-ink">{p}</b> : <span key={i}>{p}</span>))}</>
 }
 
-/** Mentions as a thin bar, scaled to the most-mentioned suggestion. */
 function Bar({ n, max, color = '#8b8b95' }: { n: number; max: number; color?: string }) {
   return <span className="block h-1.5 w-full overflow-hidden rounded-full bg-white/[.06]"><span className="block h-full rounded-full" style={{ width: `${Math.max(6, (n / max) * 100)}%`, background: color }} /></span>
 }
 
 type Added = { entity: string; linked: number; unread: number; usdEach: number; started?: number }
 
-/** Suggested names, one at a time: a big card with the owner's own quotes and one clear way to add it or dismiss it. */
-export default function Topics({ sug, onChanged }: { sug: any; onChanged: () => void }) {
-  const terms: any[] = sug?.entities ?? []
-  const aliases: any[] = sug?.aliases ?? []
+export default function Topics({ sug, onChanged }: { sug: KgSuggest | null; onChanged: () => void }) {
+  const terms = sug?.entities ?? []
+  const aliases = sug?.aliases ?? []
   const [pick, setPick] = useState('')
   const [kind, setKind] = useState('topic')
   const [more, setMore] = useState(false)
   const [added, setAdded] = useState<Added | null>(null)
   const [hid, setHid] = useState('')
-  const hidden: string[] = sug?.hidden ?? []
+  const hidden = sug?.hidden ?? []
   const top = useRef<HTMLDivElement>(null)
   const cur = terms.find((t) => t.term === pick) ?? terms[0]
   const max = Math.max(1, ...terms.map((t) => t.turns))
   useEffect(() => { setMore(false); setKind('topic') }, [cur?.term])
 
   const send = async (name: string, k: string, aliasOf = '') => {
-    const r: any = await post('/api/kg/entity', { name, kind: k, alias_of: aliasOf })
-    if (r?.entity) { setAdded({ entity: r.entity, linked: r.linked, unread: r.unread, usdEach: r.usd_each ?? 0.02 }); setHid('') }
+    const r = await post<EntityAdded>('/api/kg/entity', { name, kind: k, alias_of: aliasOf })
+    if (r?.entity) { setAdded({ entity: r.entity, linked: r.linked ?? 0, unread: r.unread ?? 0, usdEach: r.usd_each ?? 0.02 }); setHid('') }
     if (k === 'ignore') { setHid(name); setAdded(null) }
     setPick('')
     onChanged()
@@ -58,11 +56,11 @@ export default function Topics({ sug, onChanged }: { sug: any; onChanged: () => 
   }
   const read = async () => {
     if (!added) return
-    const r: any = await post('/api/kg/extract', { entity: added.entity, limit: 30 })
+    const r = await post<Done & { started?: number }>('/api/kg/extract', { entity: added.entity, limit: 30 })
     if (r?.ok) setAdded({ ...added, started: r.started })
   }
 
-  const examples: any[] = cur?.examples ?? []
+  const examples = cur?.examples ?? []
   const shown = more ? examples : examples.slice(0, 2)
   const rest = terms.filter((t) => t.term !== cur?.term)
 

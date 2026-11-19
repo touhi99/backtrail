@@ -1,6 +1,3 @@
-//! Search over passages and items. Passages are ranked by keyword (BM25) and, when the embedding server answers,
-//! by vector similarity; the two rankings are merged by reciprocal rank fusion and then adjusted by what the store
-//! knows about each passage. Items are searched in their own index over title and body.
 use crate::config::cfg;
 use crate::db::{rows, s};
 use rusqlite::{Connection, ToSql};
@@ -10,28 +7,21 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub struct Filters {
     pub thread: String,
-    /// Source kind: session, note, artifact or commit.
     pub kind: String,
-    /// Keep passages whose source has a filed item in this state.
     pub state: String,
     pub from: String,
     pub to: String,
 }
 
-/// Candidates taken from each ranking, and results returned.
 const CANDIDATES: usize = 200;
 const RESULTS: usize = 40;
-/// Reciprocal rank fusion constant.
 const RRF_K: f64 = 60.0;
 
-/// Passage columns, and the filter every passage query shares: ?2 thread, ?3 kind, ?4 from, ?5 to, ?6 item state.
 const PASSAGE: &str = "ch.id AS chunk_id, s.id AS source_id, s.ref, s.kind, s.title, s.thread, s.last_ts, ch.locator, ch.text AS body";
 const PASSAGE_FILTER: &str = "(?2='' OR s.thread=?2) AND (?3='' OR s.kind=?3)
     AND (?4='' OR substr(s.last_ts,1,10)>=?4) AND (?5='' OR substr(s.last_ts,1,10)<=?5)
     AND (?6='' OR EXISTS(SELECT 1 FROM item i WHERE i.source_id=s.id AND i.state=?6))";
 
-/// FTS expression for a query: every word as a prefix. A word that is a thread name or alias in `config.json` also
-/// matches the other names of that thread.
 fn fts_query(q: &str) -> String {
     let groups: Vec<Vec<String>> = cfg()
         .aliases
@@ -63,10 +53,9 @@ fn fts_query(q: &str) -> String {
             }
         })
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" AND ")
 }
 
-/// Index of items over title and body, in a temp table of this connection. Rebuilt when the items changed.
 fn refresh_item_index(c: &Connection) {
     static BUILT_FOR: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
     let version: String = c
@@ -101,7 +90,6 @@ fn escape_html(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// A snippet as plain text, with matches in [brackets].
 pub fn plain_snippet(html: &str) -> String {
     html.replace("<mark>", "[")
         .replace("</mark>", "]")
@@ -110,21 +98,15 @@ pub fn plain_snippet(html: &str) -> String {
         .replace("&gt;", ">")
 }
 
-/// Item states that mean the owner kept the item.
 const KEPT: &[&str] = &["settled", "done", "open", "answered", "looks_done", "doing"];
 
-/// An item that cites a passage or its source.
 struct Citing<'a> {
     item: &'a Value,
-    /// Rejected, or marked replaced.
     dead: bool,
-    /// The owner kept it: it is not dead and its state is one of `KEPT`.
     kept: bool,
-    /// It cites this passage, not only the same source.
     direct: bool,
 }
 
-/// How much the store trusts a passage, as a factor on its rank, with the reasons.
 fn weigh(passage: &Value, thread_state: &str, citing: &[Citing<'_>]) -> (f64, Vec<&'static str>) {
     let mut factor = 1.0;
     let mut why = vec![];
@@ -153,7 +135,6 @@ fn weigh(passage: &Value, thread_state: &str, citing: &[Citing<'_>]) -> (f64, Ve
     (factor, why)
 }
 
-/// Whether a search may use embeddings or only the keyword index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Semantic,
@@ -171,7 +152,6 @@ pub fn search(c: &Connection, q: &str, f: &Filters, mode: Mode) -> Value {
         return res;
     }
 
-    // 1. Candidates by keyword. Each passage's fused score starts with its keyword rank.
     let keyword_sql = format!(
         "SELECT {PASSAGE}, snippet(fts, 0, char(1), char(2), '…', 28) AS snip, bm25(fts) AS score
          FROM fts JOIN chunks ch ON ch.id=fts.rowid JOIN sources s ON s.id=ch.source_id
@@ -179,7 +159,6 @@ pub fn search(c: &Connection, q: &str, f: &Filters, mode: Mode) -> Value {
     );
     let mut by_keyword = rows(c, &keyword_sql, &filters(&fts, f));
     if by_keyword.is_empty() && fts.contains(' ') {
-        // No passage holds every word (a question typed as a sentence): rank passages that hold some of them.
         let any_word = q
             .split(|ch: char| !ch.is_alphanumeric())
             .filter(|word| word.chars().count() >= 3)
@@ -200,7 +179,6 @@ pub fn search(c: &Connection, q: &str, f: &Filters, mode: Mode) -> Value {
         candidates.insert(id, row);
     }
 
-    // 2. Candidates by meaning, when the embedding server answers.
     if mode == Mode::Text {
         res["note"] = json!("keyword search only (requested)");
     } else if !crate::embed::enabled() {
@@ -248,7 +226,6 @@ pub fn search(c: &Connection, q: &str, f: &Filters, mode: Mode) -> Value {
         }
     }
 
-    // 3. Adjust each candidate by its thread's state and by the items that cite it or its source.
     let thread_state: HashMap<String, String> = rows(c, "SELECT name, state FROM threads", &[])
         .iter()
         .map(|r| (s(r, "name").to_string(), s(r, "state").to_string()))
@@ -307,11 +284,9 @@ pub fn search(c: &Connection, q: &str, f: &Filters, mode: Mode) -> Value {
             .remove("body");
         ranked.push((fused[&id] * factor, id, row));
     }
-    // Best score first; equal scores in passage order, so the same query always gives the same list.
     ranked.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
     res["results"] = ranked.into_iter().take(RESULTS).map(|x| x.2).collect();
 
-    // 4. Filed items, searched in their own index.
     refresh_item_index(c);
     res["items"] = json!(rows(
         c,
@@ -329,7 +304,6 @@ pub fn search(c: &Connection, q: &str, f: &Filters, mode: Mode) -> Value {
     res
 }
 
-/// `bt search`: the mode, matching items, and the ten best passages with the reasons for their rank.
 pub fn print(c: &Connection, q: &str, f: &Filters, mode: Mode) {
     let r = search(c, q, f, mode);
     let note = Some(s(&r, "note"))
@@ -342,7 +316,11 @@ pub fn print(c: &Connection, q: &str, f: &Filters, mode: Mode) {
             "ITEM [{}] {} {}: {}",
             s(i, "thread"),
             s(i, "type"),
-            s(i, "state"),
+            if s(i, "stale").starts_with("done|") {
+                "done"
+            } else {
+                s(i, "state")
+            },
             s(i, "title")
         );
     }

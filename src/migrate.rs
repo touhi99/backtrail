@@ -1,5 +1,3 @@
-//! Schema and migrations. `PRAGMA user_version` holds the store version. Each migration copies the store to a
-//! `backtrail.pre-*.db` file first and runs in one transaction.
 use crate::clock::now;
 use crate::db::{count, logw, private};
 use rusqlite::{Connection, params};
@@ -34,7 +32,6 @@ fn backup(c: &Connection, dir: &Path, name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Run `body` between BEGIN and COMMIT; roll back when it fails.
 fn transaction<T>(c: &Connection, body: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
     sql(c, "BEGIN")?;
     match body() {
@@ -47,8 +44,6 @@ fn transaction<T>(c: &Connection, body: impl FnOnce() -> anyhow::Result<T>) -> a
 }
 
 pub fn run(c: &Connection, dir: &Path) -> anyhow::Result<()> {
-    // A store from before items and claims were merged still has `nodes`. Its claims table is renamed so the
-    // current schema can be created beside it; `unify` copies everything across.
     let old_layout = has_table(c, "nodes");
     if old_layout {
         backup(c, dir, "backtrail.pre-unify.db")?;
@@ -72,10 +67,6 @@ pub fn run(c: &Connection, dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// One-time move from the old layout (items in `nodes`, graph in `claims` and `claim_evidence`, relations in
-/// `links`) to one `claims` table plus `threads`. Item ids are kept, an item and the claim copied from it become
-/// one row, and thread relations without a quote become relation claims by the owner. The row count is checked
-/// before the change is committed.
 fn unify(c: &Connection) -> anyhow::Result<()> {
     let n = |q: &str| count(c, q, &[]);
     let items = n("SELECT COUNT(*) FROM nodes WHERE type!='thread'");
@@ -128,12 +119,6 @@ fn unify(c: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Store version 1:
-/// - columns for append-only session reading (`sources.bytes`, `tail`, `nturns`) and for the keep rule
-///   (`claims.review`);
-/// - session refs carry the whole session id (`session:<uuid>`) instead of its first 8 characters, in `sources`,
-///   `overrides` and the log;
-/// - the keep rule runs once over every proposed fact.
 fn version_1(c: &Connection, dir: &Path) -> anyhow::Result<()> {
     if count(c, "SELECT COUNT(*) FROM sources", &[]) > 0 {
         backup(c, dir, "backtrail.pre-v1.db")?;
@@ -168,7 +153,6 @@ fn version_1(c: &Connection, dir: &Path) -> anyhow::Result<()> {
                 params![old, new],
             )?;
         }
-        // The views are not defined yet while a store is being opened; the keep rule reads tables only.
         let kept = crate::items::keep_all(c);
         sql(c, "PRAGMA user_version=1")?;
         Ok(kept)

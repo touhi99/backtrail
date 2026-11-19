@@ -1,16 +1,12 @@
-//! History questions over the facts: an entity's page, its lineage, claims found by their own words, neighbours, and
-//! `find`, which routes a question to one of them and falls back to the passage search.
 use super::{clip, day, entities};
 use rusqlite::{Connection, params};
 use std::cell::RefCell;
 use std::fmt::Write;
 
 thread_local! {
-    /// `--as-of DATE` (YYYY-MM-DD): answer from the claims in force on that day.
     static AS_OF: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
-/// Set the day to answer as of; false when it is not a YYYY-MM-DD date.
 pub fn set_as_of(d: Option<&str>) -> bool {
     let Some(d) = d else { return true };
     let ok = d.len() == 10
@@ -31,12 +27,6 @@ fn as_of() -> Option<String> {
     AS_OF.with(|a| a.borrow().clone())
 }
 
-/// SQL on a claims row `c` for "in force on the day": said by then and not ended yet. A claim ends on the earliest of its
-/// `valid_to`, the day the claim that replaced it (`superseded_by`) was said, and its `retire` log entry (`retire` sets
-/// no `valid_to`, and a clean-up can retire a claim long after it was replaced). A claim marked superseded with none of
-/// those ends on the day it was last updated (proposals parked after 14 days) or, when only the resolver's `stale` verdict
-/// says so, on the day of that check: both are the day the system noticed, not the day the world changed. Rejected suggestions with no end were
-/// never in force. Without `--as-of` this is the usual "not retracted".
 pub(super) fn in_force() -> String {
     match as_of() {
         None => "c.status!='retracted'".to_string(),
@@ -65,7 +55,6 @@ pub fn stats(c: &Connection) {
     );
 }
 
-/// Thread state suggested by session activity alone (no model). Prints suggestions; changes nothing.
 pub fn state(c: &Connection) {
     let days = |ts: &str| -> i64 { crate::clock::days_ago(ts) };
     let mut st = c.prepare("SELECT t.name, t.state, ( SELECT MAX(last_ts) FROM sources s WHERE s.thread=t.name AND s.kind='session' ), ( SELECT COUNT(*) FROM sources s WHERE s.thread=t.name AND s.kind='session' AND s.last_ts >= date('now','-3 day') ) FROM threads t WHERE t.name!='Unsorted'").expect("prepare query");
@@ -112,8 +101,6 @@ struct Row {
     ents: String,
 }
 
-/// Evaluation only: `BACKTRAIL_EXCLUDE_SESSION=session:xxxxxxxx` hides claims and passages from that session, to ask a
-/// question as if it were put in a fresh session.
 fn excl() -> String {
     match std::env::var("BACKTRAIL_EXCLUDE_SESSION") {
         Ok(r)
@@ -121,7 +108,6 @@ fn excl() -> String {
                 .all(|ch| ch.is_ascii_alphanumeric() || ch == ':' || ch == '-')
                 && !r.is_empty() =>
         {
-            // a prefix is enough: `session:xxxxxxxx` matches the stored full id
             format!(
                 " AND NOT EXISTS (SELECT 1 FROM sources xs WHERE xs.id=c.source_id AND substr(xs.ref,1,{})='{r}')",
                 r.len()
@@ -142,7 +128,7 @@ fn claim_rows(
         where_.replace("c.status!='retracted'", &in_force()),
         excl()
     );
-    let sql = "SELECT c.text, c.type, ifnull(c.speaker,''), ifnull(c.asserted_at,c.created), c.status, ifnull(c.quote,''), c.stated, ifnull((SELECT group_concat(o.name, ', ') FROM claim_about x JOIN entities o ON o.id=x.entity_id WHERE x.claim_id=c.id),'') FROM claims c WHERE (c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%') AND {where} ORDER BY c.asserted_at DESC LIMIT {limit}"
+    let sql = "SELECT c.text, c.type, ifnull(c.speaker,''), ifnull(c.asserted_at,c.created), CASE WHEN c.stale LIKE 'done|%' THEN 'done' ELSE c.status END, ifnull(c.quote,''), c.stated, ifnull((SELECT group_concat(o.name, ', ') FROM claim_about x JOIN entities o ON o.id=x.entity_id WHERE x.claim_id=c.id),'') FROM claims c WHERE (c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%') AND {where} ORDER BY c.asserted_at DESC LIMIT {limit}"
         .replace("{where}", where_)
         .replace("{limit}", &limit.to_string());
     let mut st = c.prepare(&sql).expect("prepare query");
@@ -200,7 +186,6 @@ fn tokens(s: &str) -> usize {
     s.chars().count() / 4
 }
 
-/// Entity page: header, newest claims in full, older claims rolled up by month, within a token budget.
 pub fn page(c: &Connection, name: &str, budget: usize) {
     let Some((id, ename)) = entities::find(c, name) else {
         println!("no record: no entity named '{name}'");
@@ -262,7 +247,6 @@ pub fn page(c: &Connection, name: &str, budget: usize) {
     println!("[{} tokens, budget {budget}]", tokens(&out));
 }
 
-/// Dated lineage and decisions for one entity, oldest first, each with speaker and quote.
 pub fn trace(c: &Connection, name: &str) {
     let Some((id, ename)) = entities::find(c, name) else {
         println!("no record: no entity named '{name}'");
@@ -303,8 +287,6 @@ const STOP: &[&str] = &[
     "isnt", "yourself", "yes", "okay",
 ];
 
-/// Claims that hold the query's content words (stemmed) in their text, body or quote, best match first, newest first.
-/// At least two words must match (all of them when the query has fewer than three); "no record" otherwise.
 pub fn why(c: &Connection, q: &str) -> bool {
     let mut ws: Vec<String> = q
         .split(|ch: char| !ch.is_alphanumeric())
@@ -359,14 +341,12 @@ pub fn why(c: &Connection, q: &str) -> bool {
     true
 }
 
-/// Print claims, then one line per entity they are about when newer claims about that entity exist than any shown.
-/// Wording alone cannot tell a changed mind from a restatement, so this only reports dates.
 fn print_with_notes(c: &Connection, rows: &[Row]) {
     for r in rows {
         println!("{}\n    about: {}", line(r, 160), r.ents);
     }
     if as_of().is_some() {
-        return; // "newer claims exist" is the point of view of today, not of that day
+        return;
     }
     let mut names: Vec<&str> = rows
         .iter()
@@ -405,7 +385,6 @@ fn print_with_notes(c: &Connection, rows: &[Row]) {
     }
 }
 
-/// Entities linked to `fid` by at least one claim in force (a claim naming both): (id, name, shared claims, entity size).
 fn links(c: &Connection, fid: &str) -> Vec<(String, String, i64, i64)> {
     let mut st = c
         .prepare(
@@ -425,14 +404,10 @@ fn links(c: &Connection, fid: &str) -> Vec<(String, String, i64, i64)> {
     .collect()
 }
 
-/// Strength of a link: shared claims relative to the size of the entity reached, so a hub does not win by volume.
 fn strength(n: &(String, String, i64, i64)) -> f64 {
     n.2 as f64 / (n.3.max(1) as f64).sqrt()
 }
 
-/// Entities within `depth` links of this one. Two entities are linked when a claim names both. Each hop keeps the
-/// entities with the most shared claims relative to their size (so a hub such as GitHub does not crowd out specific
-/// ones), at most `FANOUT[hop]` per entity; what was cut is counted. Each line carries the newest claim behind the link.
 const FANOUT: [usize; 3] = [12, 5, 3];
 const NEIGHBOR_BUDGET: usize = 2500;
 
@@ -503,10 +478,6 @@ pub fn neighbors(c: &Connection, name: &str, depth: usize) {
     println!("[{} tokens]", tokens(&out));
 }
 
-/// Full-text passages, prefiltered to the entity's sessions or a time window when given.
-/// The last route of `find`: the same hybrid search that `/search` and `bt search` use (keyword and vectors,
-/// merged). Claims that cite the best passages are printed first, with date, speaker and quote. When no claim
-/// cites them, the passages themselves are printed. Returns false when nothing matched.
 pub fn ask(c: &Connection, q: &str) -> bool {
     let r = crate::search::search(
         c,
@@ -591,8 +562,6 @@ pub fn ask(c: &Connection, q: &str) -> bool {
     true
 }
 
-/// Router for a history question: lineage questions trace the entity; questions about an entity's state or contents
-/// show its page; everything else looks up claims by their own words, then searches passages by meaning and keyword.
 pub fn find(c: &Connection, q: &str) {
     let low = q.to_lowercase();
     let ents = entities::mentions(c, q);
@@ -674,8 +643,6 @@ pub fn find(c: &Connection, q: &str) {
 
 const PATH_MAX_HOPS: usize = 5;
 
-/// Shortest chain of claims between two entities: breadth-first over "a claim names both", the strongest link first
-/// when several chains are equally short. Each link is printed with its newest claim (date, speaker, quote).
 pub fn path(c: &Connection, a: &str, b: &str) {
     let (Some((aid, aname)), Some((bid, bname))) = (entities::find(c, a), entities::find(c, b))
     else {
@@ -689,7 +656,6 @@ pub fn path(c: &Connection, a: &str, b: &str) {
         println!("{aname} and {bname} are the same entity");
         return;
     }
-    // id -> (parent id, shared claims on the link, name, path strength so far)
     let mut seen: std::collections::HashMap<String, (String, i64, String, f64)> =
         std::collections::HashMap::default();
     seen.insert(aid.clone(), (String::new(), 0, aname.clone(), 0.0));

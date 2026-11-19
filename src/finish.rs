@@ -1,14 +1,7 @@
-//! Closing open steps from evidence. A model reads a session (at session end) or the passages most like a step (the
-//! backlog sweep) and names a step it saw finished, with a quote. `finish` checks the quote against the source and
-//! closes it only when a second model confirmed that the passage shows this step finished (`--verified`). Unconfirmed,
-//! nothing changes: in a test run the first model named a step for an unrelated line. Commit subjects were tried as
-//! corroboration and dropped: on a busy thread some commit always lands within a day, and their embeddings score
-//! unrelated commits above the right one.
 use crate::db::{Passage, find_quote, logw, rows, s, source_id};
 use crate::items;
 use rusqlite::{Connection, params};
 
-/// Open and in-progress steps, every thread: a session is often filed under another thread than the step it finishes.
 pub fn open_steps(c: &Connection, before: &str) -> Vec<(String, String, String)> {
     rows(
         c,
@@ -21,7 +14,6 @@ pub fn open_steps(c: &Connection, before: &str) -> Vec<(String, String, String)>
     .collect()
 }
 
-/// The packet section that lists open steps with their ids (`extract-input`).
 pub fn print_open_steps(c: &Connection, before: &str) {
     let steps = open_steps(c, before);
     if steps.is_empty() {
@@ -44,22 +36,18 @@ fn clip(t: &str, n: usize) -> String {
     }
 }
 
-/// Whether a second model confirmed that the passage shows the step finished (`--verified`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Evidence {
     Confirmed,
     Unconfirmed,
 }
 
-/// Whether [`finish`] writes the result or only reports it (`--dry`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Run {
     Apply,
     Dry,
 }
 
-/// `bt finish <step> --source REF --quote Q [--verified] [--dry]`: what the evidence supports, then (unless dry) the
-/// change.
 pub fn finish(
     c: &Connection,
     id: &str,
@@ -70,13 +58,19 @@ pub fn finish(
 ) -> anyhow::Result<String> {
     let step = rows(
         c,
-        "SELECT id, ifnull(thread,'') AS thread, title, created, state FROM claims WHERE id=?1 AND type='step'",
+        "SELECT id, type, ifnull(thread,'') AS thread, title, created, state FROM claims
+          WHERE id=?1 AND type IN ('step','question','decision')",
         &[&id],
     );
     let Some(step) = step.first() else {
-        anyhow::bail!("{id}: no such step");
+        anyhow::bail!("{id}: no such step, question or decision");
     };
-    if !["open", "doing", "proposed"].contains(&s(step, "state")) {
+    let open_states: &[&str] = match s(step, "type") {
+        "question" => &["answered"],
+        "decision" => &["proposed"],
+        _ => &["open", "doing", "proposed"],
+    };
+    if !open_states.contains(&s(step, "state")) {
         anyhow::bail!("{id}: not open (state {})", s(step, "state"));
     }
     if quote.trim().len() < 12 {
@@ -107,8 +101,29 @@ pub fn finish(
     );
     let verdict = "done";
     if run == Run::Apply {
-        items::done(c, id, "evidence", &clip(&proof, 300))?;
-        logw(c, "check", "finish", id, &format!("done: {source}"));
+        match s(step, "type") {
+            "question" => {
+                c.execute(
+                    "UPDATE claims SET state='done', updated=?2 WHERE id=?1",
+                    params![id, crate::clock::now()],
+                )?;
+                logw(
+                    c,
+                    "check",
+                    "finish",
+                    id,
+                    &format!("done: {source}: {}", clip(&proof, 240)),
+                );
+            }
+            "decision" => {
+                items::flag(c, id, "done", &clip(&proof, 200))?;
+                logw(c, "check", "finish", id, &format!("done: {source}"));
+            }
+            _ => {
+                items::done(c, id, "evidence", &clip(&proof, 300))?;
+                logw(c, "check", "finish", id, &format!("done: {source}"));
+            }
+        }
     }
     Ok(format!(
         "{verdict}: [{}] {}  <-  {proof}",
@@ -117,29 +132,35 @@ pub fn finish(
     ))
 }
 
-/// Steps the backlog sweep looks at: open, in progress or suggested, filed more than a day ago.
 pub fn queue(c: &Connection) -> Vec<String> {
     crate::db::strings(
         c,
-        "SELECT id FROM claims WHERE type='step' AND state IN ('open','doing','proposed') AND julianday('now') - julianday(created) > 1
+        "SELECT id FROM claims WHERE julianday('now') - julianday(created) > 1
+           AND ((type='step' AND state IN ('open','doing','proposed'))
+             OR (type='question' AND state='answered')
+             OR (type='decision' AND state='proposed'))
+           AND NOT EXISTS (SELECT 1 FROM log l WHERE l.target=claims.id AND l.action='finish-checked'
+                           AND julianday('now') - julianday(l.ts) < 7)
          ORDER BY created",
         &[],
     )
 }
 
-/// `bt finish-input <step>`: the step and the passages written after it that are most like it, for a model to judge.
 pub fn input(c: &Connection, id: &str) {
     let step = rows(
         c,
-        "SELECT id, ifnull(thread,'') AS thread, title, ifnull(body,'') AS body, created FROM claims WHERE id=?1 AND type='step'",
+        "SELECT id, type, ifnull(thread,'') AS thread, title, ifnull(body,'') AS body, ifnull(answer,'') AS answer, created
+         FROM claims WHERE id=?1 AND type IN ('step','question','decision')",
         &[&id],
     );
     let Some(step) = step.first() else {
-        eprintln!("no such step");
+        eprintln!("no such step, question or decision");
         std::process::exit(1)
     };
+    logw(c, "check", "finish-checked", id, "");
     println!(
-        "BACKTRAIL-FINISH\nSTEP {} [{}] {}\nCREATED {}",
+        "BACKTRAIL-FINISH\n{} {} [{}] {}\nCREATED {}",
+        s(step, "type").to_uppercase(),
         s(step, "id"),
         s(step, "thread"),
         s(step, "title"),
@@ -148,9 +169,17 @@ pub fn input(c: &Connection, id: &str) {
     if !s(step, "body").is_empty() {
         println!("DETAIL {}", s(step, "body"));
     }
-    println!("\nPASSAGES (written after the step was filed, most similar first):");
+    if s(step, "type") == "question" && !s(step, "answer").is_empty() {
+        println!("ANSWER GIVEN {}", s(step, "answer"));
+    }
+    println!("\nPASSAGES (written after the item was filed, most similar first):");
     let created = s(step, "created").to_string();
-    let query = format!("{} {}", s(step, "title"), s(step, "body"));
+    let query = format!(
+        "{} {} {}",
+        s(step, "title"),
+        s(step, "body"),
+        s(step, "answer")
+    );
     let ids: Vec<i64> = match crate::embed::nearest(c, &query, 400) {
         Ok(hits) => hits.into_iter().map(|(id, _)| id).collect(),
         Err(_) => crate::db::strings(
@@ -201,16 +230,15 @@ fn fts_words(q: &str) -> String {
         .join(" OR ")
 }
 
-/// `bt finish-evidence <step> --source REF --quote Q`: the step and the whole passage that holds the quote, for the
-/// second model that confirms an assistant's report.
 pub fn evidence(c: &Connection, id: &str, source: &str, quote: &str) {
     let step = rows(
         c,
-        "SELECT title, ifnull(body,'') AS body FROM claims WHERE id=?1 AND type='step'",
+        "SELECT type, title, ifnull(body,'') AS body, ifnull(answer,'') AS answer FROM claims
+          WHERE id=?1 AND type IN ('step','question','decision')",
         &[&id],
     );
     let Some(step) = step.first() else {
-        eprintln!("no such step");
+        eprintln!("no such step, question or decision");
         std::process::exit(1)
     };
     let passage = source_id(c, source)
@@ -228,9 +256,11 @@ pub fn evidence(c: &Connection, id: &str, source: &str, quote: &str) {
         std::process::exit(1)
     };
     println!(
-        "STEP {}\nDETAIL {}\n\nQUOTE {}\n\nPASSAGE\n{}",
+        "{} {}\nDETAIL {}\nANSWER GIVEN {}\n\nQUOTE {}\n\nPASSAGE\n{}",
+        s(step, "type").to_uppercase(),
         s(step, "title"),
         s(step, "body"),
+        s(step, "answer"),
         quote,
         clip(&text, 3000)
     );

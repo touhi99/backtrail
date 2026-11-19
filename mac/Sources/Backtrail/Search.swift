@@ -7,7 +7,6 @@ let ITEM_STATE_COLOR: [String: Color] = [
 let SOURCE_KIND_NAME: [String: String] = ["session": "Conversation", "note": "Note", "artifact": "Artifact", "commit": "Commits", "owner": "Typed in the app"]
 let SOURCE_KIND_COLOR: [String: Color] = ["session": .moving, "note": .mut, "artifact": .purple, "commit": .accent, "owner": .ink]
 
-/// Turns a snippet with <mark>…</mark> into text with the matches highlighted.
 func marked(_ html: String) -> AttributedString {
     var out = AttributedString()
     var rest = Substring(html)
@@ -177,8 +176,6 @@ struct SearchView: View {
         shown = 10
         let started = path
         pending = started
-        // Keyword matches come back in a few ms; meaning matches wait on the local embedding model.
-        // Show the keyword answer first and replace it when the full one arrives.
         if !keywords {
             Task {
                 let quick = try? await API.get(path + "&mode=text")
@@ -194,7 +191,6 @@ struct SearchView: View {
     }
 }
 
-/// A full-width list row with hover and press states.
 struct RowButton<L: View>: View {
     var action: () -> Void
     @ViewBuilder var label: () -> L

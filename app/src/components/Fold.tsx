@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { ChevronRight } from 'lucide-react'
 
-/** A closed-by-default section: one line with a count, opened on click. */
 export default function Fold({ label, count, children, defaultOpen = false }: { label: string; count: number; children: ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen)
   if (count === 0) return null

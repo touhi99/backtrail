@@ -1,12 +1,10 @@
 #!/bin/zsh
-# Builds the SwiftUI app and bundles it into Backtrail.app. It reads the store through `bt serve` on 127.0.0.1:8799.
 set -e
 cd "$(dirname "$0")"
 swift build -c release
 APP=Backtrail.app
 rm -rf $APP && mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
 cp .build/release/Backtrail $APP/Contents/MacOS/Backtrail
-# App icon: the binary renders the artwork, iconutil packs the sizes.
 ICON=.build/AppIcon.iconset
 rm -rf $ICON && mkdir -p $ICON
 BACKTRAIL_ICON=.build/icon-1024.png .build/release/Backtrail

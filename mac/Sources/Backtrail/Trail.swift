@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// One thread's lane over the last two weeks: sessions, things made and items done or decided, by day.
 struct TrailLane: Identifiable {
     let name: String
     let state: String
@@ -13,11 +12,9 @@ struct TrailLane: Identifiable {
     var id: String { name }
 }
 
-/// Lanes for threads with a session, most recently worked on first. With `days`, only the last `days` days;
-/// without, the whole history. Mirrors `useTrail` in app/src/pages/Trail.tsx.
 func trailLanes(_ data: J?, days: Int? = 14) -> (lanes: [TrailLane], days: [String]) {
     var cal = Calendar(identifier: .gregorian)
-    cal.timeZone = TimeZone(identifier: "UTC")!   // day strings are UTC midnights; a local calendar drifts at DST
+    cal.timeZone = TimeZone(identifier: "UTC")!
     let f = DateFormatter()
     f.calendar = cal
     f.timeZone = TimeZone(identifier: "UTC")
@@ -48,7 +45,6 @@ func trailLanes(_ data: J?, days: Int? = 14) -> (lanes: [TrailLane], days: [Stri
     var lanes = per.values.filter { !$0.sessions.isEmpty }
     if from.isEmpty { from = lanes.flatMap { Array($0.sessions.keys) + Array($0.made.keys) }.min() ?? today }
     for k in lanes.indices {
-        // items dated before the axis start sit on its first day
         for (d, v) in lanes[k].done where d < from { lanes[k].done[d] = nil; lanes[k].done[from, default: []] += v }
         let ds = (Array(lanes[k].sessions.keys) + Array(lanes[k].made.keys)).sorted()
         lanes[k].first = ds.first ?? from
@@ -61,7 +57,6 @@ func trailLanes(_ data: J?, days: Int? = 14) -> (lanes: [TrailLane], days: [Stri
     return (lanes, axis)
 }
 
-/// Home's "Last two weeks" card: one lane per recently worked thread, as on the web Home.
 struct TrailCard: View {
     @EnvironmentObject var store: Store
     @State private var data: J? = API.cached("/api/trail")
@@ -85,15 +80,13 @@ struct TrailCard: View {
                 .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 10)
                 .panel(radius: 16)
             } else {
-                Color.clear.frame(height: 0) // a real view, so the fetch below runs before there is data
+                Color.clear.frame(height: 0)
             }
         }
         .task(id: store.tick) { if let d = try? await API.get("/api/trail") { data = d } }
     }
 }
 
-/// One row per thread over the given days: a span from first to last activity, a dot per session day,
-/// a diamond for things made and a check for items done or decided. Tap a row to open the thread.
 struct TrailChart: View {
     @EnvironmentObject var store: Store
     let lanes: [TrailLane]
@@ -115,7 +108,6 @@ struct TrailChart: View {
         let col = Dictionary(uniqueKeysWithValues: m.days.enumerated().map { ($1, $0) })
         func x(_ d: String) -> CGFloat { labelW + (CGFloat(col[d] ?? 0) + 0.5) * dw }
         return ZStack(alignment: .topLeading) {
-            // day grid with labels
             ForEach(Array(m.days.enumerated()).filter { $0.offset % tick == 0 }, id: \.offset) { k, d in
                 Rectangle().fill(Color(hex: 0x222226)).frame(width: 1, height: CGFloat(m.lanes.count) * rowH + 16)
                     .position(x: labelW + CGFloat(k) * dw, y: top - 8 + (CGFloat(m.lanes.count) * rowH + 16) / 2)
@@ -135,7 +127,6 @@ struct TrailChart: View {
                     }
                     .frame(width: labelW - 12, alignment: .leading).position(x: (labelW - 12) / 2 + 6, y: y)
                     .help(p.summary)
-                    // span from first to last activity
                     let x0 = x(p.first) - 7, x1 = x(p.last) + 7
                     Capsule().fill(c.opacity(0.12)).overlay(Capsule().strokeBorder(c.opacity(0.35), lineWidth: 1))
                         .frame(width: max(14, x1 - x0), height: 14).position(x: (x0 + x1) / 2, y: y)
@@ -174,8 +165,6 @@ struct TrailChart: View {
     }
 }
 
-/// Every thread on one timeline, as on the web Graph's Trail tab. Sorted by latest work or by start,
-/// and filtered to one state by clicking its tile.
 struct TrailPage: View {
     @EnvironmentObject var store: Store
     @State private var data: J? = API.cached("/api/trail")
