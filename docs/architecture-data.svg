@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" role="img" aria-label="Tables: indexed text (sources, chunks, fts, vec), facts (claims, threads) and entities (entities, entity_aliases, claim_about), with the keys that join them.">
+<style>
+  svg { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .bg { fill: #ffffff; }
+  .s { fill: #e0f2e8; stroke: #23804f; stroke-width: 1.4; }
+  .n { fill: #e3edfa; stroke: #1d5fb8; stroke-width: 1.4; }
+  .k { fill: #fbefd6; stroke: #a86a08; stroke-width: 1.4; }
+  .hd { fill: #1b1f26; font-size: 12.5px; font-weight: 600; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .c { fill: #4b5260; font-size: 11px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .grp { fill: #626a77; font-size: 10.5px; font-weight: 600; letter-spacing: .08em; }
+  .r { fill: #626a77; font-size: 10.5px; font-style: italic; }
+  .rule { stroke: #8f98a6; stroke-width: 1; opacity: .5; }
+  .ln { stroke: #8f98a6; stroke-width: 1.5; fill: none; marker-end: url(#ah); }
+  .ah { fill: #8f98a6; }
+  @media (prefers-color-scheme: dark) {
+    .bg { fill: #0d1117; }
+    .s { fill: #1a3226; stroke: #5dbf8a; }
+    .n { fill: #1b2d45; stroke: #6aa8f5; }
+    .k { fill: #3a2e16; stroke: #e0a64a; }
+    .hd { fill: #e6edf3; } .c { fill: #b4bcc8; } .grp, .r { fill: #9aa2ae; }
+    .rule, .ln { stroke: #6a7380; } .ah { fill: #6a7380; }
+  }
+</style>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="bg" width="900" height="520"/>
+<text class="grp" x="30" y="28">INDEXED TEXT</text>
+<text class="grp" x="345" y="28">FACTS</text>
+<rect class="s" x="30" y="50" width="210" height="141" rx="8"/>
+<text class="hd" x="42" y="69">sources</text><line class="rule" x1="30" y1="77" x2="240" y2="77"/>
+<text class="c" x="42" y="94">id</text>
+<text class="c" x="42" y="109">ref (unique)</text>
+<text class="c" x="42" y="124">kind</text>
+<text class="c" x="42" y="139">title</text>
+<text class="c" x="42" y="154">project, thread</text>
+<text class="c" x="42" y="169">first_ts, last_ts</text>
+<text class="c" x="42" y="184">mtime, path</text>
+<rect class="s" x="30" y="250" width="210" height="111" rx="8"/>
+<text class="hd" x="42" y="269">chunks</text><line class="rule" x1="30" y1="277" x2="240" y2="277"/>
+<text class="c" x="42" y="294">id</text>
+<text class="c" x="42" y="309">source_id</text>
+<text class="c" x="42" y="324">seq, locator</text>
+<text class="c" x="42" y="339">role, ts</text>
+<text class="c" x="42" y="354">text</text>
+<rect class="s" x="30" y="430" width="95" height="66" rx="8"/>
+<text class="hd" x="42" y="449">fts</text><line class="rule" x1="30" y1="457" x2="125" y2="457"/>
+<text class="c" x="42" y="474">FTS5 over</text>
+<text class="c" x="42" y="489">chunks.text</text>
+<rect class="s" x="145" y="430" width="95" height="66" rx="8"/>
+<text class="hd" x="157" y="449">vec</text><line class="rule" x1="145" y1="457" x2="240" y2="457"/>
+<text class="c" x="157" y="474">hash, model</text>
+<text class="c" x="157" y="489">embedding</text>
+<rect class="n" x="345" y="50" width="210" height="198" rx="8"/>
+<text class="hd" x="357" y="69">claims</text><line class="rule" x1="345" y1="77" x2="555" y2="77"/>
+<text class="c" x="357" y="94">id</text>
+<text class="c" x="357" y="109">type, thread</text>
+<text class="c" x="357" y="124">title, body</text>
+<text class="c" x="357" y="139">state, origin</text>
+<text class="c" x="357" y="154">speaker, asserted_at</text>
+<text class="c" x="357" y="169">valid_to, superseded_by</text>
+<text class="c" x="357" y="184">done_by, answer, tag, stale</text>
+<text class="c" x="357" y="199">source_id, chunk_id</text>
+<text class="c" x="357" y="214">quote, stated</text>
+<text class="c" x="357" y="229">created, updated</text>
+<rect class="n" x="345" y="290" width="210" height="81" rx="8"/>
+<text class="hd" x="357" y="309">threads</text><line class="rule" x1="345" y1="317" x2="555" y2="317"/>
+<text class="c" x="357" y="334">name</text>
+<text class="c" x="357" y="349">state, area, kind</text>
+<text class="c" x="357" y="364">body, origin</text>
+<rect class="k" x="660" y="30" width="210" height="66" rx="8"/>
+<text class="hd" x="672" y="49">entity_aliases</text><line class="rule" x1="660" y1="57" x2="870" y2="57"/>
+<text class="c" x="672" y="74">alias</text>
+<text class="c" x="672" y="89">entity_id</text>
+<rect class="k" x="660" y="110" width="210" height="66" rx="8"/>
+<text class="hd" x="672" y="129">entities</text><line class="rule" x1="660" y1="137" x2="870" y2="137"/>
+<text class="c" x="672" y="154">id</text>
+<text class="c" x="672" y="169">name, kind</text>
+<rect class="k" x="660" y="215" width="210" height="66" rx="8"/>
+<text class="hd" x="672" y="234">claim_about</text><line class="rule" x1="660" y1="242" x2="870" y2="242"/>
+<text class="c" x="672" y="259">claim_id, entity_id</text>
+<text class="c" x="672" y="274">role</text>
+<path class="ln" d="M135,250 L135,191"/>
+<text class="r" x="143" y="236">source_id</text>
+<path class="ln" d="M60,361 L60,430"/>
+<path class="ln" d="M345,95 L240,95"/>
+<text class="r" x="250" y="86">cites source and quote</text>
+<path class="ln" d="M345,215 L240,310"/>
+<text class="r" x="262" y="248">chunk_id</text>
+<path class="ln" d="M450,248 L450,290"/>
+<text class="r" x="460" y="276">thread (name)</text>
+<path class="ln" d="M660,248 L555,200"/>
+<text class="r" x="580" y="240">claim_id</text>
+<path class="ln" d="M765,215 L765,176"/>
+<path class="ln" d="M765,110 L765,96"/>
+<text class="grp" x="660" y="18">ENTITIES</text>
+<text class="r" x="345" y="505">a fact cites one passage by id and a verbatim quote; the entity tables say what it is about</text>
+</svg>
