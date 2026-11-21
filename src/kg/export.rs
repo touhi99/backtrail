@@ -26,7 +26,7 @@ pub fn export(c: &Connection, path: &str) -> std::io::Result<()> {
         .map(|row| row.expect("decode query row"))
         .collect()
     };
-    let sets: [(&str, &str, &[&str]); 5] = [
+    let sets: [(&str, &str, &[&str]); 6] = [
         (
             "entity",
             "SELECT id,name,kind,created FROM entities",
@@ -67,6 +67,11 @@ pub fn export(c: &Connection, path: &str) -> std::io::Result<()> {
             "about",
             "SELECT claim_id,entity_id,role FROM claim_about",
             &["claim_id", "entity_id", "role"],
+        ),
+        (
+            "link",
+            "SELECT a,b,kind,reason,actor,created FROM claim_links",
+            &["a", "b", "kind", "reason", "actor", "created"],
         ),
         (
             "override",
@@ -159,6 +164,14 @@ pub fn restore(c: &Connection, path: &str) -> (usize, usize) {
                 c.execute(
                     "INSERT OR IGNORE INTO claim_about(claim_id,entity_id,role) VALUES(?1,?2,?3)",
                     params![g("claim_id"), g("entity_id"), g("role")],
+                )
+                .expect("write to database");
+                n += 1;
+            }
+            "link" => {
+                c.execute(
+                    "INSERT OR IGNORE INTO claim_links(a,b,kind,reason,actor,created) VALUES(?1,?2,?3,?4,?5,?6)",
+                    params![g("a"), g("b"), g("kind"), g("reason"), g("actor"), g("created")],
                 )
                 .expect("write to database");
                 n += 1;

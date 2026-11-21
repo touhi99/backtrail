@@ -1,4 +1,5 @@
 pub mod claims;
+pub mod decisions;
 pub mod entities;
 pub mod export;
 pub mod extract;

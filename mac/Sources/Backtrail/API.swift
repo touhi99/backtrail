@@ -53,6 +53,7 @@ enum API {
 enum Page: Hashable {
     case home
     case graph
+    case decisions(String)
     case trail
     case thread(String)
     case search(String)

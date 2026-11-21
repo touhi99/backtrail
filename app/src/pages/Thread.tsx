@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Bug, Check, CheckCheck, CircleHelp, Copy, FileText, Lightbulb, MessagesSquare, Network, Plus, Sparkles } from 'lucide-react'
-import { dayFmt, post, STALE_LABEL, staleOf, useApi } from '@/lib/api'
+import { Bug, Check, CheckCheck, CircleHelp, Copy, FileText, Lightbulb, Network, Plus, Sparkles } from 'lucide-react'
+import { agoFmt, dayFmt, post, STALE_LABEL, staleOf, useApi } from '@/lib/api'
 import { useShell } from '@/components/Shell'
 import { buildStory, JourneyRail, Made, Milestones, Settled, Thumb } from '@/components/Story'
 import ItemActions, { Who } from '@/components/ItemActions'
@@ -11,11 +11,10 @@ import Fold from '@/components/Fold'
 import { SegRing } from '@/components/Viz'
 import { ts } from '@/components/Focus'
 import { STATE_HEX, STEP_STATUS } from '@/lib/next'
-import type { Item, ThreadDetail } from '@/lib/types'
+import type { Item, SourceStat, ThreadDetail } from '@/lib/types'
 import '@/next.css'
 
 const SRC_COLOR: Record<string, string> = { session: '#60a5fa', note: '#8b8b95', artifact: '#c084fc', commit: '#34d399', owner: '#f4f4f5' }
-const DAY = 864e5
 const HOW: Record<string, string> = { 'owner-stated': '#34d399', 'owner-accepted': '#60a5fa', 'from a note': '#8b8b95' }
 
 function Panel({ title, count, children, className = '', id }: { title: string; count?: number | string; children: React.ReactNode; className?: string; id?: string }) {
@@ -28,6 +27,57 @@ function Panel({ title, count, children, className = '', id }: { title: string; 
 }
 const Empty = ({ children }: { children: React.ReactNode }) => <div className="px-5 pb-5 text-[13px] text-mut">{children}</div>
 const Src = ({ i }: { i: Item }) => i.source_id ? <Link to={`/source/${i.source_id}${i.chunk_id ? `?c=${i.chunk_id}` : ''}`} className="mt-1 inline-flex items-center gap-1.5 text-[12px] text-mut hover:text-ink" title={i.state === 'looks_done' ? 'Where the step was planned. It does not show the built result.' : undefined}><FileText size={12} />{i.state === 'looks_done' ? 'Planned in: ' : ''}{i.source_title}</Link> : null
+
+const OUTCOME = {
+  finished: { label: 'Finished', icon: Check, col: '#34d399' },
+  decided: { label: 'Decided', icon: Lightbulb, col: '#60a5fa' },
+} as const
+type Outcome = keyof typeof OUTCOME
+const outcomeOf = (i: Item): Outcome | null =>
+  i.type === 'decision' && i.state === 'settled' ? 'decided'
+    : i.type === 'step' && (i.state === 'done' || i.state === 'looks_done') ? 'finished' : null
+const when = (i: Item) => (outcomeOf(i) === 'finished' ? i.updated : i.source_ts) || i.created
+
+function lastGains(items: Item[]) {
+  const gained = items.filter((i) => outcomeOf(i))
+  const day = gained.map((i) => when(i).slice(0, 10)).sort().pop()
+  const shown = gained
+    .filter((i) => when(i).slice(0, 10) === day)
+    .sort((a, b) => Number(outcomeOf(a) === 'decided') - Number(outcomeOf(b) === 'decided') || when(b).localeCompare(when(a)))
+    .slice(0, 3)
+  return { day, shown }
+}
+
+function LeftOff({ sources, gains, next, onNext }: { sources: SourceStat[]; gains: ReturnType<typeof lastGains>; next?: Item; onNext: (i: Item) => void }) {
+  const last = sources.filter((x) => x.kind === 'session').sort((a, b) => b.last_ts.localeCompare(a.last_ts))[0]
+  if (!last) return null
+  const ago = agoFmt(last.last_ts)
+  return (
+    <section className="nx-panel nx-in grid grid-cols-[210px_minmax(0,1fr)_280px] gap-0 overflow-hidden !rounded-2xl max-[900px]:grid-cols-1" style={{ background: 'linear-gradient(135deg, rgba(52,211,153,.07), transparent 55%)' }}>
+      <div className="flex flex-col justify-center gap-1 border-r border-[#232329] px-6 py-5 max-[900px]:border-b max-[900px]:border-r-0">
+        <span className="text-[12.5px] text-mut">Where you left off</span>
+        <span className="text-[26px] font-semibold leading-tight tracking-tight">{ago.charAt(0).toUpperCase() + ago.slice(1)}</span>
+        <Link to={`/source/${last.id}`} className="line-clamp-2 text-[13px] text-soft hover:text-ink">{last.title}</Link>
+      </div>
+      <div className="flex flex-col justify-center gap-3 px-6 py-5">
+        <span className="text-[12.5px] text-mut">{gains.day ? `What moved forward on ${dayFmt(gains.day)}` : 'Nothing decided or finished yet'}</span>
+        {gains.shown.map((i) => {
+          const o = OUTCOME[outcomeOf(i) ?? 'decided']
+          return (
+            <Link key={i.id} to={`/source/${i.source_id}${i.chunk_id ? `?c=${i.chunk_id}` : ''}`} className="flex items-start gap-3 transition hover:opacity-80">
+              <span className="mt-[1px] inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-medium" style={{ background: o.col + '22', color: o.col }}><o.icon size={11} strokeWidth={2.6} />{o.label}</span>
+              <span className="line-clamp-2 text-[15px] font-medium leading-snug">{i.title}</span>
+            </Link>
+          )
+        })}
+      </div>
+      <button type="button" disabled={!next} onClick={() => next && onNext(next)} className="flex flex-col justify-center gap-2.5 border-l border-[#232329] px-6 py-5 text-left transition hover:bg-white/[.02] max-[900px]:border-l-0 max-[900px]:border-t">
+        <span className="flex items-center gap-2 text-[12.5px] text-mut"><span className="size-2 rounded-full" style={{ background: next ? '#34d399' : '#3f3f46', boxShadow: next ? '0 0 10px #34d399' : 'none' }} />Next</span>
+        <span className="line-clamp-3 text-[16px] font-semibold leading-snug">{next ? next.title : 'No open step'}</span>
+      </button>
+    </section>
+  )
+}
 
 type View = 'steps' | 'journey' | 'decisions' | 'made' | 'artifacts' | 'sources' | 'archive' | 'claude'
 const VIEWS: [View, string][] = [['steps', 'All steps'], ['journey', 'Journey'], ['decisions', 'Decisions'], ['made', 'Made'], ['artifacts', 'Artifacts'], ['sources', 'Sources'], ['archive', 'Archive'], ['claude', 'Claude Code']]
@@ -45,7 +95,6 @@ export default function Thread() {
   const story = useMemo(() => (d?.thread ? buildStory(d) : null), [d])
 
   const items = d?.items ?? []
-  const now = Date.now()
 
   useEffect(() => {
     if (!focus || !d) return
@@ -62,14 +111,11 @@ export default function Thread() {
   const steps = items.filter((i) => i.type === 'step' && !['proposed', 'rejected', 'parked', 'superseded'].includes(i.state))
   const doneN = steps.filter((s) => s.state === 'done').length
   const checkN = steps.filter((s) => s.state === 'looks_done').length
-  const todo = steps.filter((s) => s.state === 'open' || s.state === 'doing').sort((a, b) => Number(b.state === 'doing') - Number(a.state === 'doing'))
-  const recent = (t?: string | null) => !!t && now - Date.parse(t) < DAY
-  const since = [
-    { n: steps.filter((s) => s.state === 'done' && recent(s.updated)).length, one: 'step finished', many: 'steps finished', icon: Check, col: '#34d399' },
-    { n: d.sources.filter((s) => s.kind === 'session' && recent(s.last_ts)).length, one: 'session', many: 'sessions', icon: MessagesSquare, col: '#c084fc' },
-    { n: items.filter((i) => i.type === 'decision' && i.state !== 'rejected' && recent(i.source_ts)).length, one: 'decision noted', many: 'decisions noted', icon: Lightbulb, col: '#60a5fa' },
-  ].filter((x) => x.n > 0)
+  const todo = steps.filter((s) => s.state === 'open' || s.state === 'doing').sort((a, b) => Number(b.state === 'doing') - Number(a.state === 'doing') || b.created.localeCompare(a.created))
 
+  const gains = lastGains(items)
+  const inCard = new Set(gains.shown.map((i) => i.id))
+  const decidedRest = d.decided.filter((x) => !inCard.has(x.id))
   const prop = items.filter((i) => i.state === 'proposed')
   const archived = prop.slice().sort((a, b) => ts(b) - ts(a))
   const rej = items.filter((i) => i.state === 'rejected' || i.state === 'parked' || (i.state === 'superseded' && i.type !== 'decision'))
@@ -124,19 +170,22 @@ export default function Thread() {
           <form className="order-last w-full md:order-none md:w-64" onSubmit={(e) => { e.preventDefault(); const q = String(new FormData(e.currentTarget).get('q') ?? '').trim(); if (q) nav(`/search?q=${encodeURIComponent(q)}&thread=${encodeURIComponent(th.name)}`) }}>
             <input name="q" className="input" placeholder={`Search ${th.name}`} aria-label="Search this project" />
           </form>
-          <Link className="btn ghost" to={`/map?thread=${encodeURIComponent(th.name)}`}><Network size={14} />Map</Link>
+          <Link className="btn ghost" to={`/graph?p=${encodeURIComponent(th.name)}`}><Network size={14} />Decisions</Link>
+          <Link className="btn ghost" to={`/map?thread=${encodeURIComponent(th.name)}`}>Map</Link>
           <button className="btn" onClick={() => capture(th.name)}><Plus size={14} />Add</button>
         </header>
 
+        <LeftOff sources={d.sources} gains={gains} next={todo[0]} onNext={(s) => { setView('steps'); setTimeout(() => document.getElementById(`item-${s.id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 120) }} />
+
         <div className="flex flex-wrap items-stretch gap-5">
           <section className="nx-panel nx-in min-w-0 overflow-hidden !rounded-2xl" style={{ flex: '999 1 520px' }}>
-            <div className="flex items-baseline justify-between px-5 pb-2 pt-4"><h3 className="text-[15px] font-semibold">Latest decisions</h3><button className="text-[13px] text-mut hover:text-ink" onClick={() => setView('decisions')}>All decisions</button></div>
-            {d.decided.length === 0 && <Empty>No settled decisions yet.</Empty>}
-            {d.decided.map((x) => (
-              <Link key={x.id} to={x.source_id ? `/source/${x.source_id}${x.chunk_id ? `?c=${x.chunk_id}` : ''}` : '#'} className="nx-row" style={{ gridTemplateColumns: '78px minmax(0,1fr) auto' }} title="Open the source">
-                <span className="text-[12.5px] tabular-nums text-mut">{x.day}</span>
+            <div className="flex items-baseline justify-between px-5 pb-2 pt-4"><h3 className="text-[15px] font-semibold">Earlier decisions</h3><button className="text-[13px] text-mut hover:text-ink" onClick={() => setView('decisions')}>All decisions</button></div>
+            {decidedRest.length === 0 && <Empty>No other settled decisions.</Empty>}
+            {decidedRest.map((x) => (
+              <Link key={x.id} to={x.source_id ? `/source/${x.source_id}${x.chunk_id ? `?c=${x.chunk_id}` : ''}` : '#'} className="nx-row" style={{ gridTemplateColumns: '60px minmax(0,1fr) auto' }} title="Open the source">
+                <span className="text-[12.5px] tabular-nums text-mut">{x.day === 'undated' ? '' : dayFmt(x.day)}</span>
                 <span className="text-[14px]">{x.title}</span>
-                <span className="nx-chip" style={{ background: (HOW[x.how] ?? '#8b8b95') + '22', color: HOW[x.how] ?? '#8b8b95' }}>{x.how}</span>
+                <span className="size-2 rounded-full" title={x.how === 'owner-stated' ? 'You said it' : x.how === 'owner-accepted' ? 'You confirmed it' : 'From a note'} style={{ background: HOW[x.how] ?? '#8b8b95' }} />
               </Link>
             ))}
           </section>
@@ -149,14 +198,6 @@ export default function Thread() {
               </div>
               <div><div className="text-[26px] font-semibold tracking-tight tabular-nums">{doneN + checkN}<span className="text-[18px] text-mut">/{steps.length}</span></div><div className="text-[13px] text-mut">steps built</div></div>
             </div>
-            <div className="px-1 pt-1.5 text-[12.5px] text-mut">Since yesterday</div>
-            {since.length === 0 && <div className="nx-panel !rounded-2xl px-4 py-3.5 text-[14px] text-soft">Quiet</div>}
-            {since.map((x) => (
-              <div key={x.one} className="nx-panel nx-in flex items-center gap-3 !rounded-2xl px-4 py-3">
-                <span className="grid size-[34px] place-items-center rounded-[10px]" style={{ background: x.col + '24', color: x.col }}><x.icon size={17} strokeWidth={2.2} /></span>
-                <div className="text-[15px] font-semibold">{x.n} {x.n === 1 ? x.one : x.many}</div>
-              </div>
-            ))}
           </aside>
         </div>
 

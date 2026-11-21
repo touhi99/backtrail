@@ -111,7 +111,8 @@ final class GraphData {
     }
 }
 
-struct GraphView: View {
+struct MentionsGraph: View {
+    let tabs: AnyView
     @EnvironmentObject var store: Store
     @State private var data: GraphData? = GraphData.shared
     @State private var sel = ""
@@ -162,8 +163,8 @@ struct GraphView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Things mentioned in the work and what was said about them").font(.system(size: 13)).foregroundStyle(Color.mut)
-            Text("Graph").font(.system(size: 28, weight: .semibold)).tracking(-0.4)
+            Text("Things mentioned in the work and what was said about them").font(.system(size: 13)).foregroundStyle(Color.mut).allowsHitTesting(false)
+            HStack(spacing: 16) { Text("Graph").font(.system(size: 28, weight: .semibold)).tracking(-0.4).allowsHitTesting(false); tabs }
             HStack(spacing: 12) {
                 ForEach(["project", "service", "tool", "model", "site", "topic"], id: \.self) { kd in
                     HStack(spacing: 5) { Circle().fill(KIND_COLOR[kd]!).frame(width: 7, height: 7); Text(kd) }
@@ -171,8 +172,8 @@ struct GraphView: View {
                 Text("Size is claims; a line means claims name both").foregroundStyle(Color.mut.opacity(0.8))
             }
             .font(.system(size: 11.5)).foregroundStyle(Color.mut)
+            .allowsHitTesting(false)
         }
-        .allowsHitTesting(false)
     }
 
     private var zoomButtons: some View {

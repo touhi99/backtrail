@@ -10,6 +10,7 @@ enum Snapshot {
         if p == "graph" { return .graph }
         if p == "trail" { return .trail }
         if p.hasPrefix("thread:") { return .thread(String(p.dropFirst(7))) }
+        if p.hasPrefix("decisions:") { return .decisions(String(p.dropFirst(10))) }
         if p.hasPrefix("search:") { return .search(String(p.dropFirst(7))) }
         if p.hasPrefix("source:") {
             let n = p.dropFirst(7).split(separator: ":").compactMap { Int($0) }

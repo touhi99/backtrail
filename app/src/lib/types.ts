@@ -305,3 +305,25 @@ export type Done = {
   id?: string
   thread?: string
 }
+
+export type DReason = { id: string; title: string; quote: string; source_id: number | null; chunk_id: number | null }
+export type DDecision = {
+  id: string
+  title: string
+  thread: string
+  state: string
+  quote: string
+  source_id: number | null
+  chunk_id: number | null
+  superseded_by: string
+  day: string
+  subjects: string[]
+  outside?: boolean
+  because: DReason[]
+}
+export type DLink = { a: string; b: string; kind: 'changed' | 'restates'; reason: string }
+export type DProject = { name: string; state: string; area: string | null; last: string | null; headline: { id: string; title: string; day: string }; turns: number; n: number }
+export type DEdge = { a: string; b: string; kind: 'shared' | 'relation' | 'changed'; label: string; w: number; was?: string }
+export type DOverview = { projects: DProject[]; edges: DEdge[] }
+export type DProjectView = { name: string; decisions: DDecision[]; links: DLink[] }
+export type DChain = { focus: string; decisions: DDecision[]; links: DLink[] }
