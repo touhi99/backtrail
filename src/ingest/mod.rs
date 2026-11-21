@@ -28,6 +28,7 @@ pub fn scan(c: &Connection) -> Report {
     };
     threads::assign_sessions(c);
     crate::items::rehome(c);
+    crate::resolve::label_replaced(c);
     Report {
         quotes: relink(c),
         ..report

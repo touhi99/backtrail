@@ -8,27 +8,33 @@ use std::collections::{BTreeMap, HashSet};
 fn accuracy(c: &Connection) {
     let r = rows(
         c,
-        "WITH sug AS (SELECT DISTINCT target FROM log WHERE actor='claude-suggest' AND action='add'),
-              rev AS (SELECT target, action FROM log WHERE actor='owner' AND target IN sug
-                      AND action IN ('accept','reject','move'))
-         SELECT (SELECT COUNT(DISTINCT target) FROM rev) AS reviewed,
-                (SELECT COUNT(DISTINCT target) FROM rev WHERE action='accept') AS kept,
-                (SELECT COUNT(DISTINCT target) FROM rev WHERE action='reject') AS rejected,
-                (SELECT COUNT(DISTINCT target) FROM rev WHERE action='move') AS moved",
+        "WITH filed AS (SELECT DISTINCT l.target FROM log l JOIN claims c ON c.id=l.target
+                        WHERE l.actor='claude-suggest' AND l.action='add'
+                          AND c.type IN ('decision','step','question','turn')
+                          AND l.ts >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-7 days'))
+         SELECT (SELECT COUNT(*) FROM filed) AS filed,
+                (SELECT COUNT(DISTINCT target) FROM log WHERE actor='owner' AND action='move' AND target IN filed) AS moved,
+                (SELECT COUNT(DISTINCT target) FROM log WHERE actor='owner' AND action='retire' AND target IN filed) AS retired,
+                (SELECT COUNT(DISTINCT target) FROM log WHERE action='rehome' AND target IN filed) AS rehomed",
         &[],
     );
     let Some(r) = r.first() else { return };
     let n = |k: &str| r[k].as_i64().unwrap_or(0);
-    let pct = |a: i64, b: i64| if b > 0 { a * 100 / b } else { 0 };
-    if n("reviewed") == 0 {
-        println!("accuracy: no suggested item reviewed in the app yet");
-        return;
-    }
+    let pct = |a: i64| {
+        if n("filed") > 0 {
+            a * 100 / n("filed")
+        } else {
+            0
+        }
+    };
     println!(
-        "accuracy from owner reviews: {} items reviewed; kept {}% of kept or rejected; moved to another project {}%",
-        n("reviewed"),
-        pct(n("kept"), n("kept") + n("rejected")),
-        pct(n("moved"), n("reviewed"))
+        "last 7 days: {} items filed; you moved {} ({}%) and retired {} ({}%); {} moved to their project automatically",
+        n("filed"),
+        n("moved"),
+        pct(n("moved")),
+        n("retired"),
+        pct(n("retired")),
+        n("rehomed")
     );
 }
 

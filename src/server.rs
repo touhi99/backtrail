@@ -164,6 +164,9 @@ fn get(c: &Connection, path: &str, q: &Query) -> Option<Value> {
         "/api/kg" => kg::screen::entities(c),
         "/api/kg/graph" => kg::screen::graph(c),
         "/api/kg/lineage" => kg::screen::lineage(c),
+        "/api/kg/decisions" if q.get("project").is_empty() => kg::decisions::overview(c),
+        "/api/kg/decisions" => kg::decisions::project(c, &q.get("project")),
+        "/api/kg/chain" => kg::decisions::chain(c, &q.get("id")),
         "/api/kg/suggest" => kg::screen::suggestions(c),
         "/api/kg/claims" => kg::screen::claims(
             c,

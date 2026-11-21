@@ -27,6 +27,7 @@ func marked(_ html: String) -> AttributedString {
 struct SearchView: View {
     @EnvironmentObject var store: Store
     let initial: String
+    var scope = ""
     @State private var text = ""
     @State private var r: J?
     @State private var loading = false
@@ -86,6 +87,7 @@ struct SearchView: View {
         .background(PageGlow())
         .onAppear {
             text = initial
+            thread = scope
             focused = initial.isEmpty
             if !initial.isEmpty { run() }
         }

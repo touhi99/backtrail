@@ -11,6 +11,7 @@ mod ingest;
 mod items;
 mod kg;
 mod migrate;
+mod recall;
 mod resolve;
 mod search;
 mod server;
@@ -27,7 +28,7 @@ set-thread NAME [--state S] [--summary X] | done <step> [--by B] [--proof P] | b
 flag <id> --as live|in_effect|superseded|done --reason R | reply <q> --text TEXT | retire <id> [--by ID] --reason R | \
 assign <ref> <thread> | suggest-threads | extract-input <ref> | finish <step> --source REF --quote Q [--verified] [--dry] | finish-input <step> | finish-evidence <step> --source REF --quote Q | finish-queue | extract-queue [--limit N] [--session ID] [--entity NAME] | \
 extract-log <ref> [--failed 1] [--detail D] | kg [state|export|restore|lint|suggest|merge|entity|page|trace|why|neighbors|path|passage|find] | \
-brief [--thread T | --all] | backup | serve [--port N] | hooks";
+brief [--thread T | --all] | recall [--text PROMPT [--thread T]] | backup | serve [--port N] | hooks";
 
 const HELP: &str = "Backtrail: the trail of work done with Claude Code.
 
@@ -597,6 +598,12 @@ fn main() {
             );
             println!("ok");
         }
+        "recall" if a.has("--text") => {
+            for h in recall::matches(&c, &a.text("--text"), a.opt("--thread").as_deref()) {
+                println!("{:5.1}  {}  {}  ({})", h.score, h.day, h.title, h.id);
+            }
+        }
+        "recall" => recall::hook(&c),
         "brief" => {
             if !db::is_demo() {
                 ingest::rescan(&c);

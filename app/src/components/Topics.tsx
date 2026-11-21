@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Check, ExternalLink, Search as SearchIcon, X } from 'lucide-react'
 import { post } from '@/lib/api'
+import { useShell } from '@/components/Shell'
 import type { Done, EntityAdded, KgSuggest } from '@/lib/types'
 
 export const KIND_C: Record<string, string> = { project: '#60a5fa', service: '#c084fc', tool: '#fbbf24', model: '#f87171', site: '#34d399', topic: '#f472b6' }
@@ -35,6 +36,7 @@ export default function Topics({ sug, onChanged }: { sug: KgSuggest | null; onCh
   const [hid, setHid] = useState('')
   const hidden = sug?.hidden ?? []
   const top = useRef<HTMLDivElement>(null)
+  const { search } = useShell()
   const cur = terms.find((t) => t.term === pick) ?? terms[0]
   const max = Math.max(1, ...terms.map((t) => t.turns))
   useEffect(() => { setMore(false); setKind('topic') }, [cur?.term])
@@ -111,7 +113,7 @@ export default function Topics({ sug, onChanged }: { sug: KgSuggest | null; onCh
           <div className="text-[12px] text-mut">Should this be in the graph?</div>
           <div className="mt-0.5 flex items-baseline gap-2">
             <div className="truncate text-[26px] font-semibold leading-tight tracking-tight">{cur.term}</div>
-            <Link to={`/search?q=${encodeURIComponent(cur.term)}`} className="inline-flex items-center gap-1 text-[12px] text-mut hover:text-ink" title="Search every mention"><SearchIcon size={12} />all mentions</Link>
+            <button type="button" onClick={() => search(cur.term)} className="inline-flex items-center gap-1 text-[12px] text-mut hover:text-ink" title="Search every mention"><SearchIcon size={12} />all mentions</button>
           </div>
           <div className="mt-2.5 flex items-center gap-3">
             <div className="w-32 shrink-0"><Bar n={cur.turns} max={max} color="#34d399" /></div>

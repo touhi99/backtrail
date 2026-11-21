@@ -12,6 +12,7 @@ Commands run as `bt <command>`.
 | `ingest [--force]` | Read new or changed sources (new lines only, for a session file that grew) and re-link facts whose passage changed. `--force` reads every session again in full (after a change to the chunking rule); sessions whose file is gone are kept |
 | `serve [--port N]` | Run the app |
 | `brief [--thread T \| --all]` | Rescan, then print. With no flag: one line per thread in motion (open and done steps, what waits on the owner, the next step) and the questions the owner asked. `--thread T`: open questions, next step, recent answers, the latest five settled decisions still in force (each with its date and who confirmed it: `owner-stated`, `owner-accepted` or `from a note`) of one thread. `--all`: the same detail for every thread. A question the owner asked and Claude answered is labelled "owner asked, Claude answered" |
+| `recall [--text PROMPT [--thread T]]` | Without `--text`: the UserPromptSubmit hook; reads the hook JSON on stdin and prints up to two settled decisions that bear on the prompt. With `--text`: list every match and its score, for checking |
 | `add <type> --thread --title --entities A,B --source --quote [--body --state --origin --valid-to]` | File one decision, step, question or turn. At least one entity is required; the thread follows the entity. Lists existing items that may already settle it |
 | `resolve <id> --by <id> --reason T` | Settle an item with an existing one: a question becomes `answered`, a step or decision `superseded`, `superseded_by` names the settling item |
 | `unresolve <id>` | Put a resolved or expired item back to `proposed`; a settled decision that a reversal replaced goes back to `settled` |
@@ -29,7 +30,7 @@ Commands run as `bt <command>`.
 | `search <words> [--thread T] [--kind session\|note\|artifact\|commit] [--state S] [--from DATE] [--to DATE] [--text]` | Search with filters. `--state` keeps passages whose source has a filed item in that state. `--text` forces keyword-only |
 | `embed [--limit N]` | Embed passages that have no vector yet (needs the embedding server; see the `embeddings` key) |
 | `show <ref>` | Print a source's passages |
-| `check [--pairs]` | Report accuracy from owner reviews (share of suggestions kept, share moved to another project), lost quotes, session files not indexed yet, orphan threads, stale work; `--pairs` lists candidate contradictions |
+| `check [--pairs]` | Report the last 7 days of filing (items filed, how many the owner moved to another project or retired, how many `rehome` moved), lost quotes, session files not indexed yet, orphan threads, stale work; `--pairs` lists candidate contradictions |
 | `match` | Mark open steps that a later commit seems to complete as `looks done?` (word-overlap heuristic; it marks unrelated steps that share a phrase, so it runs only when called) |
 | `pending [--days N]` | List recent sessions that no item cites |
 | `artifacts [--manifest list.json]` | Record publish dates and report missing or stale snapshots |
@@ -38,7 +39,7 @@ Commands run as `bt <command>`.
 | `finish-input <step>` | Print a step and the ten passages written after it that are most like it, for `skill/finish.sh` |
 | `finish-evidence <step> --source REF --quote Q` | Print a step and the passage holding the quote, for the confirming model |
 | `finish-queue` | List steps open for more than a day |
-| `extract-queue [--session ID] [--limit N] [--entity E] [--no-cap]` | List sessions worth extracting (at most `daily_cap` a day unless `--no-cap`) |
+| `extract-queue [--session ID] [--limit N] [--entity E] [--no-cap]` | List sessions worth extracting (at most `daily_cap` a day when set, unless `--no-cap`) |
 | `extract-log <ref> [--failed 1] --detail "..."` | Record one extraction run and its cost |
 | `log [--n N]` | Print the append-only change log |
 | `backup` | Copy the store to `<data dir>/backups` (also daily on rescan, newest 3 kept) |
@@ -98,7 +99,7 @@ indexed. It holds custom thread rules, note folders and repositories:
 | `generic_projects` | Project folder names left out when choosing a thread (default `["home"]`) |
 | `repos` | Repository path to thread table, used for commit matching |
 | `aliases` | Alternative names used for mention edges |
-| `compile` | `daily_cap` (8): extraction runs a day |
+| `compile` | `daily_cap`: extraction runs a day; unset means no limit |
 | `port` | Server port (8799) |
 | `embeddings` | On by default with `url` `http://127.0.0.1:11434` and `model` `embeddinggemma-2:270m`. Keys: `url` (an Ollama-compatible server, `http://` only), `model`, and optionally `query_prefix`, `document_prefix` (default to `task: search result | query: ` and `title: none | text: ` for `embeddinggemma` models, `search_query: ` and `search_document: ` for `nomic` models, empty otherwise) and `batch_cap` (passages per background run, default 2000). `false` turns embeddings off. Changing `model` discards stored vectors and re-embeds. |
 
@@ -139,8 +140,9 @@ Titles were written by a model from the cited passage, so the queries are not ty
 - `SessionEnd`: `<path>/skill/session-end.sh` runs `ingest` and `embed` in the background when a session closes, then
   `skill/extract.sh` on the session and `skill/resolve.sh` on the unjudged proposed items. Both make model calls.
   Extraction also names open steps the session finished; `skill/close-step.sh` closes each one (see `finish`).
-  `BACKTRAIL_COMPILE_ON_END=0` in the hook's environment skips them. `BACKTRAIL_REVERSE_ON_END=1` also runs
-  `skill/resolve.sh --reverses --limit 5` on the newest settled decisions not yet checked.
+  `BACKTRAIL_COMPILE_ON_END=0` in the hook's environment skips them. It then runs `skill/resolve.sh --reverses
+  --limit 10`, which links the newest settled decisions not yet checked to older ones (changed, restates) and to the
+  reasons from their session (because); `BACKTRAIL_LINK_ON_END=0` skips it.
 
 ## First run on a machine with existing sessions
 
@@ -186,7 +188,7 @@ been measured beyond that size.
 
 | Script | Usage |
 | --- | --- |
-| `skill/session-end.sh` | SessionEnd hook; reads the hook JSON (`session_id`) on stdin. In the background: `ingest`, `embed`, `extract.sh` on the session, `resolve.sh --limit 20`, `finish.sh --limit 15`. `BACKTRAIL_COMPILE_ON_END=0` skips the model calls; `BACKTRAIL_REVERSE_ON_END=1` adds `resolve.sh --reverses --limit 5` |
+| `skill/session-end.sh` | SessionEnd hook; reads the hook JSON (`session_id`) on stdin. In the background: `ingest`, `embed`, `extract.sh` on the session, `resolve.sh --limit 20`, `finish.sh --limit 15`. `BACKTRAIL_COMPILE_ON_END=0` skips the model calls; `resolve.sh --reverses --limit 10` links decisions unless `BACKTRAIL_LINK_ON_END=0` |
 | `skill/extract.sh [--entity NAME] [--limit N] [--session ID] [--no-cap] \| <session ref>...` | One single-shot model call per session; the answer goes through `bt import -` |
 | `skill/resolve.sh [--dry] [--reverses] [--limit N] \| [--dry] [--reverses] <item id>...` | One call per proposed item (`BACKTRAIL_RESOLVE_MODEL`, default sonnet). `--reverses` judges settled decisions, and a second model confirms each reversal |
 | `skill/finish.sh [--dry] [--limit N] [step id...]` | Backlog sweep over items older than a day and not judged in the last 7 days |

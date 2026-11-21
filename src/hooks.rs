@@ -2,7 +2,7 @@ use anyhow::Context;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
-fn commands() -> anyhow::Result<[(&'static str, String, Value); 2]> {
+fn commands() -> anyhow::Result<[(&'static str, String, Value); 3]> {
     let exe = std::env::current_exe()
         .and_then(|p| p.canonicalize())
         .map_err(|e| anyhow::anyhow!("cannot find this program: {e}"))?;
@@ -18,6 +18,11 @@ fn commands() -> anyhow::Result<[(&'static str, String, Value); 2]> {
             "SessionStart",
             format!("{} brief", exe.display()),
             json!({"timeout": 10, "statusMessage": "Backtrail brief"}),
+        ),
+        (
+            "UserPromptSubmit",
+            format!("{} recall", exe.display()),
+            json!({"timeout": 5}),
         ),
         (
             "SessionEnd",

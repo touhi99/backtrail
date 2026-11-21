@@ -4,9 +4,6 @@ import Today from '@/pages/Today'
 import MapPage from '@/pages/MapPage'
 import Thread from '@/pages/Thread'
 import Source from '@/pages/Source'
-import Search from '@/pages/Search'
-import Items from '@/pages/Items'
-import Log from '@/pages/Log'
 import Graph from '@/pages/Graph'
 
 function MapRoute() {
@@ -22,9 +19,6 @@ export default function App() {
         <Route path="/map" element={<MapRoute />} />
         <Route path="/thread/:name" element={<Thread />} />
         <Route path="/source/:id" element={<Source />} />
-        <Route path="/search" element={<Search />} />
-        <Route path="/items" element={<Items />} />
-        <Route path="/log" element={<Log />} />
         <Route path="/graph" element={<Graph />} />
         <Route path="*" element={<Today />} />
       </Routes>

@@ -21,8 +21,9 @@ struct ThreadView: View {
     @State private var shown = 10
     @State private var tab = Tab(rawValue: Snapshot.env["BACKTRAIL_TAB"] ?? "") ?? .steps
     @State private var story: Story?
+    @State private var showRejected = false
 
-    enum Tab: String, CaseIterable { case steps = "Steps", journey = "Journey", decisions = "Decisions", made = "Made", artifacts = "Artifacts", sources = "Sources" }
+    enum Tab: String, CaseIterable { case steps = "Steps", journey = "Journey", decisions = "Decisions", made = "Made", artifacts = "Artifacts", sources = "Sources", archive = "Archive", claude = "Claude Code" }
 
     var body: some View {
         ScrollView {
@@ -45,11 +46,15 @@ struct ThreadView: View {
         let doneN = steps.filter { $0["state"].str == "done" }.count
         let checkN = steps.filter { $0["state"].str == "looks_done" }.count
         let todo = steps.filter { ["open", "doing"].contains($0["state"].str) }
-            .sorted { ($0["state"].str == "doing" ? 0 : 1) < ($1["state"].str == "doing" ? 0 : 1) }
+            .sorted { a, b in
+                let da = a["state"].str == "doing" ? 0 : 1, db = b["state"].str == "doing" ? 0 : 1
+                return da != db ? da < db : a["created"].str > b["created"].str
+            }
+        let gains = lastGains(items)
+        let inCard = Set(gains.shown.map(\.id))
         let openSteps = steps.filter { $0["state"].str != "done" }
             .sorted { ($0["state"].str == "looks_done" ? 0 : $0["state"].str == "doing" ? 1 : 2) < ($1["state"].str == "looks_done" ? 0 : $1["state"].str == "doing" ? 1 : 2) }
         let doneSteps = steps.filter { $0["state"].str == "done" }.sorted { $0["updated"].str > $1["updated"].str }
-        let since = sinceYesterday(d, steps: steps, items: items)
 
         return VStack(alignment: .leading, spacing: 26) {
             HStack(spacing: 14) {
@@ -59,17 +64,23 @@ struct ThreadView: View {
                     if let s = th["summary"].s { Text(s).font(.system(size: 13.5)).foregroundStyle(Color.mut).lineLimit(1) }
                 }
                 Spacer()
-                Button { store.go(.search("")) } label: { Label("Search", systemImage: "magnifyingglass") }
+                Button { store.go(.decisions(name)) } label: { Label("Decisions", systemImage: "point.3.connected.trianglepath.dotted") }
+                    .buttonStyle(BtnStyle(kind: .ghost))
+                Button { store.go(.map(name)) } label: { Text("Map") }
                     .buttonStyle(BtnStyle(kind: .ghost))
                 Button { store.capture = .some(name) } label: { Label("Add", systemImage: "plus") }
                     .buttonStyle(BtnStyle())
             }
 
+            LeftOffCard(sources: d["sources"].arr, gains: gains, next: todo.first) { s in
+                if let sid = Optional(s["source_id"].int), sid > 0 { store.go(.source(sid, chunk: s["chunk_id"].int > 0 ? s["chunk_id"].int : nil)) }
+            }
+
             HStack(alignment: .top, spacing: 20) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Latest decisions").font(.system(size: 15, weight: .semibold))
+                    Text("Earlier decisions").font(.system(size: 15, weight: .semibold))
                         .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 8)
-                    let decided = d["decided"].arr
+                    let decided = d["decided"].arr.filter { !inCard.contains($0["id"].str) }
                     if decided.isEmpty {
                         Text("No settled decisions yet.").font(.system(size: 13)).foregroundStyle(Color.mut).padding(.horizontal, 20).padding(.bottom, 18)
                     }
@@ -97,19 +108,6 @@ struct ThreadView: View {
                     }
                     .padding(18).frame(maxWidth: .infinity, alignment: .leading).panel(radius: 18)
 
-                    Text("Since yesterday").font(.system(size: 12.5)).foregroundStyle(Color.mut).padding(.horizontal, 4).padding(.top, 4)
-                    if since.isEmpty {
-                        Text("Quiet").font(.system(size: 14)).foregroundStyle(Color.soft)
-                            .padding(.horizontal, 16).padding(.vertical, 13).frame(maxWidth: .infinity, alignment: .leading).panel(radius: 16)
-                    }
-                    ForEach(since, id: \.label) { x in
-                        HStack(spacing: 12) {
-                            Image(systemName: x.icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(x.color)
-                                .frame(width: 34, height: 34).background(x.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            Text("\(x.n) \(x.label)").font(.system(size: 15, weight: .semibold))
-                        }
-                        .padding(.horizontal, 16).padding(.vertical, 11).frame(maxWidth: .infinity, alignment: .leading).panel(radius: 16)
-                    }
                 }
                 .frame(width: 290)
             }
@@ -155,6 +153,19 @@ struct ThreadView: View {
 
             switch tab {
             case .steps:
+                ForEach(items.filter { $0["type"].str == "question" && $0["state"].str == "open" && $0["origin"].str == "owner" }) { q in
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "questionmark.circle").font(.system(size: 17)).foregroundStyle(Color.soft)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) { WhoChip(i: q); Text("your question · \(dayFmt(q["created"].s))") }
+                                .font(.system(size: 12)).foregroundStyle(Color.mut)
+                            Text(q["title"].str).font(.system(size: 16, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                            if let b = q["body"].s, !b.isEmpty { Text(b).font(.system(size: 13)).foregroundStyle(Color.soft) }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 20).padding(.vertical, 16).panel(radius: 18)
+                }
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         Text("Steps").font(.system(size: 15, weight: .semibold))
@@ -208,6 +219,10 @@ struct ThreadView: View {
                 ArtifactsView(artifacts: d["artifacts"].arr)
             case .sources:
                 SourcesView(sources: d["sources"].arr)
+            case .archive:
+                archive(items)
+            case .claude:
+                claudeCode
             }
         }
         .padding(.horizontal, 32).padding(.top, 30).padding(.bottom, 44)
@@ -215,20 +230,100 @@ struct ThreadView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private struct Since { let n: Int; let label: String; let icon: String; let color: Color }
+    private func itemTime(_ i: J) -> String { i["source_ts"].s ?? i["created"].str }
 
-    private func sinceYesterday(_ d: J, steps: [J], items: [J]) -> [Since] {
-        let cut = Date.now.addingTimeInterval(-86400)
-        let recent = { (t: String?) in (parseTS(t) ?? .distantPast) > cut }
-        let a = steps.filter { $0["state"].str == "done" && recent($0["updated"].s) }.count
-        let b = d["sources"].arr.filter { $0["kind"].str == "session" && recent($0["last_ts"].s) }.count
-        let c = items.filter { $0["type"].str == "decision" && $0["state"].str != "rejected" && recent($0["source_ts"].s) }.count
-        return [
-            Since(n: a, label: a == 1 ? "step finished" : "steps finished", icon: "checkmark", color: .accent),
-            Since(n: b, label: b == 1 ? "session" : "sessions", icon: "bubble.left.and.bubble.right", color: .purple),
-            Since(n: c, label: c == 1 ? "decision noted" : "decisions noted", icon: "lightbulb", color: .moving),
-        ].filter { $0.n > 0 }
+    @ViewBuilder private func archive(_ items: [J]) -> some View {
+        let prop = items.filter { $0["state"].str == "proposed" }.sorted { itemTime($0) > itemTime($1) }
+        let rej = items.filter { ["rejected", "parked"].contains($0["state"].str) || ($0["state"].str == "superseded" && $0["type"].str != "decision") }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Unconfirmed suggestions").font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Text("\(prop.count)").font(.system(size: 12.5)).monospacedDigit().foregroundStyle(Color.mut)
+            }
+            .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 8)
+            if prop.isEmpty { Text("Nothing here.").font(.system(size: 13)).foregroundStyle(Color.mut).padding(.horizontal, 20).padding(.bottom, 16) }
+            ForEach(prop) { i in
+                Divider().overlay(Color.line)
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: "sparkles").font(.system(size: 14)).foregroundStyle(Color.moving)
+                        .frame(width: 32, height: 32).background(Color.moving.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(i["title"].str).font(.system(size: 14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 4) {
+                            Text(dayFmt(itemTime(i)))
+                            if let st = staleOf(i) { Text("·"); Text(st.label).foregroundStyle(Color.open).help(st.reason) }
+                        }
+                        .font(.system(size: 12)).foregroundStyle(Color.mut)
+                        if let b = i["body"].s, !b.isEmpty { Text(b).font(.system(size: 12.5)).foregroundStyle(Color.mut).lineLimit(3) }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    ItemActions(i: i)
+                }
+                .padding(.horizontal, 20).padding(.vertical, 12)
+            }
+        }
+        .panel(radius: 18)
+        if !rej.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Button { withAnimation(.easeOut(duration: 0.15)) { showRejected.toggle() } } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).rotationEffect(.degrees(showRejected ? 90 : 0))
+                        Text("Rejected or not valid now")
+                        Text("\(rej.count)").monospacedDigit().foregroundStyle(Color.mut)
+                    }
+                    .font(.system(size: 13.5)).foregroundStyle(Color.soft)
+                    .padding(.horizontal, 20).padding(.vertical, 12).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if showRejected {
+                    ForEach(rej) { i in
+                        Divider().overlay(Color.line)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(i["title"].str).font(.system(size: 14)).foregroundStyle(Color.mut).strikethrough(color: .mut)
+                            (Text(i["state"].str == "parked" ? "Why not valid: " : "Why rejected: ") + Text(i["answer"].s.flatMap { $0.isEmpty ? nil : $0 } ?? "No reason given."))
+                                .font(.system(size: 12.5)).foregroundStyle(Color.mut)
+                        }
+                        .padding(.horizontal, 20).padding(.vertical, 10)
+                    }
+                }
+            }
+            .panel(radius: 18)
+        }
     }
+
+    private var claudeCode: some View {
+        let cmd = "claude \"$(backtrail brief --thread '\(name)')\""
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Work on it in Claude Code").font(.system(size: 15, weight: .semibold))
+            HStack(spacing: 8) {
+                Text(cmd).font(.system(size: 12, design: .monospaced)).foregroundStyle(Color.soft).lineLimit(1).truncationMode(.middle)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 14).frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                    .background(Color(hex: 0x0c0c0e), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.line, lineWidth: 1))
+                Button { copy(cmd) } label: { Label("Copy", systemImage: "doc.on.doc") }.buttonStyle(BtnStyle())
+                ForEach(["Review", "Extend", "Explore"], id: \.self) { v in
+                    Button(v) { copy("\(v) the Backtrail thread \"\(name)\". Use backtrail brief, search and show; file proposed items with a source and a verbatim quote (skill/SKILL.md).") }
+                        .buttonStyle(BtnStyle())
+                }
+            }
+        }
+        .padding(20).panel(radius: 18)
+    }
+
+    private func copy(_ t: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(t, forType: .string)
+    }
+}
+
+let STALE_LABEL = ["in_effect": "Already in effect", "superseded": "Replaced later", "done": "Already done"]
+
+func staleOf(_ i: J) -> (label: String, reason: String)? {
+    let parts = (i["stale"].s ?? "").split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+    guard let k = parts.first, let l = STALE_LABEL[k] else { return nil }
+    return (l, parts.dropFirst().joined(separator: "|"))
 }
 
 struct DecisionRow: View {
@@ -247,7 +342,7 @@ struct DecisionRow: View {
                 Text(x["title"].str).font(.system(size: 14)).frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
                 let how = x["how"].str
-                Chip(text: HOW_NAME[how] ?? how, color: HOW_COLOR[how] ?? .mut)
+                Circle().fill(HOW_COLOR[how] ?? .mut).frame(width: 8, height: 8).help(HOW_NAME[how] ?? how)
             }
             .padding(.horizontal, 20).padding(.vertical, 12)
             .background(hover ? Color.white.opacity(0.025) : .clear)
@@ -265,6 +360,7 @@ struct StepRow: View {
     let s: J
     let color: Color
     @State private var busy = false
+    @State private var ask: ReasonAsk?
 
     var body: some View {
         let state = s["state"].str
@@ -303,6 +399,7 @@ struct StepRow: View {
                     }
                     .buttonStyle(.plain)
                 }
+                if s["origin"].str == "owner" && !done { ItemActions(i: s).padding(.top, 2) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -315,20 +412,114 @@ struct StepRow: View {
                             .buttonStyle(BtnStyle(kind: .ghost))
                     }
                     Button("Done") { act("/api/tick") }.buttonStyle(BtnStyle())
+                    Button("Ignore") {
+                        ask = ReasonAsk(title: "Why ignore it?") { act("/api/review", ["accept": false, "park": true, "reason": $0]) }
+                    }
+                    .buttonStyle(BtnStyle(kind: .ghost)).help("Not a problem or not needed any more. Kept on file, out of the list.")
                 }
                 .disabled(busy)
             }
         }
         .padding(.horizontal, 20).padding(.vertical, 13)
         .opacity(busy ? 0.5 : 1)
+        .reasonPrompt($ask)
     }
 
-    private func act(_ path: String) {
+    private func act(_ path: String, _ extra: [String: Any] = [:]) {
         busy = true
         Task {
-            _ = try? await API.post(path, ["id": s.id])
+            _ = try? await API.post(path, extra.merging(["id": s.id]) { a, _ in a })
             busy = false
             store.changed()
+        }
+    }
+}
+
+struct Gains {
+    let day: String?
+    let shown: [J]
+}
+
+private func outcome(_ i: J) -> String? {
+    let t = i["type"].str, st = i["state"].str
+    if t == "decision" && st == "settled" { return "decided" }
+    if t == "step" && (st == "done" || st == "looks_done") { return "finished" }
+    return nil
+}
+
+private func gainedAt(_ i: J) -> String {
+    let t = outcome(i) == "finished" ? i["updated"].str : i["source_ts"].str
+    return t.isEmpty ? i["created"].str : t
+}
+
+func lastGains(_ items: [J]) -> Gains {
+    let gained = items.filter { outcome($0) != nil }
+    let day = gained.map { String(gainedAt($0).prefix(10)) }.max()
+    let shown = gained.filter { String(gainedAt($0).prefix(10)) == day }
+        .sorted { a, b in
+            let fa = outcome(a) == "finished" ? 0 : 1, fb = outcome(b) == "finished" ? 0 : 1
+            return fa != fb ? fa < fb : gainedAt(a) > gainedAt(b)
+        }
+    return Gains(day: day, shown: Array(shown.prefix(3)))
+}
+
+private func agoText(_ t: String) -> String {
+    guard let d = parseTS(t) ?? {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f.date(from: String(t.prefix(10)))
+    }() else { return "" }
+    let n = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: d), to: Calendar.current.startOfDay(for: Date())).day ?? 0
+    return n <= 0 ? "Today" : n == 1 ? "Yesterday" : "\(n) days ago"
+}
+
+struct LeftOffCard: View {
+    @EnvironmentObject var store: Store
+    let sources: [J]
+    let gains: Gains
+    let next: J?
+    let open: (J) -> Void
+
+    var body: some View {
+        let last = sources.filter { $0["kind"].str == "session" }.max { $0["last_ts"].str < $1["last_ts"].str }
+        if let last {
+            HStack(alignment: .center, spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Where you left off").font(.system(size: 12.5)).foregroundStyle(Color.mut)
+                    Text(agoText(last["last_ts"].str)).font(.system(size: 26, weight: .semibold)).tracking(-0.4)
+                    Text(last["title"].str).font(.system(size: 13)).foregroundStyle(Color.soft).lineLimit(2)
+                }
+                .padding(.horizontal, 22).padding(.vertical, 18).frame(width: 220, alignment: .leading)
+                Divider().overlay(Color.line)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(gains.day.map { "What moved forward on \(dayFmt($0))" } ?? "Nothing decided or finished yet")
+                        .font(.system(size: 12.5)).foregroundStyle(Color.mut)
+                    ForEach(gains.shown, id: \.id) { i in
+                        let finished = outcome(i) == "finished"
+                        let c: Color = finished ? .accent : .moving
+                        Button { open(i) } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Label(finished ? "Finished" : "Decided", systemImage: finished ? "checkmark" : "lightbulb")
+                                    .font(.system(size: 11.5, weight: .medium)).padding(.horizontal, 8).padding(.vertical, 2)
+                                    .background(c.opacity(0.14), in: Capsule()).foregroundStyle(c)
+                                Text(i["title"].str).font(.system(size: 15, weight: .medium)).lineLimit(2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 22).padding(.vertical, 18).frame(maxWidth: .infinity, alignment: .leading)
+                Divider().overlay(Color.line)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Circle().fill(next == nil ? Color.line2 : Color.accent).frame(width: 8, height: 8).shadow(color: next == nil ? .clear : .accent, radius: 5)
+                        Text("Next").font(.system(size: 12.5)).foregroundStyle(Color.mut)
+                    }
+                    Text(next?["title"].str ?? "No open step").font(.system(size: 16, weight: .semibold)).lineLimit(3)
+                }
+                .padding(.horizontal, 22).padding(.vertical, 18).frame(width: 270, alignment: .leading)
+            }
+            .background(LinearGradient(colors: [Color.accent.opacity(0.07), .clear], startPoint: .topLeading, endPoint: .center))
+            .panel(radius: 18)
         }
     }
 }

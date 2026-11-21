@@ -72,7 +72,7 @@ struct TrailCard: View {
                         Text("\(all.lanes.count) threads worked on\(all.lanes.count > lanes.count ? ", the \(lanes.count) most recent shown" : "")")
                             .font(.system(size: 12.5)).foregroundStyle(Color.mut)
                         Spacer()
-                        Button("Full trail") { store.go(.trail) }
+                        Button("Full trail") { store.graphMode = "trail"; store.go(.graph) }
                             .buttonStyle(.plain).font(.system(size: 12.5, weight: .medium)).foregroundStyle(Color.accent)
                     }
                     TrailChart(lanes: lanes, days: all.days, labelW: 180)
@@ -167,6 +167,7 @@ struct TrailChart: View {
 
 struct TrailPage: View {
     @EnvironmentObject var store: Store
+    let tabs: AnyView
     @State private var data: J? = API.cached("/api/trail")
     @State private var latest = true
     @State private var only: String?
@@ -181,7 +182,10 @@ struct TrailPage: View {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Every thread on one timeline, how each one ended, and what came out of it").font(.system(size: 13)).foregroundStyle(Color.mut)
-                    Text("Trail").font(.system(size: 28, weight: .semibold)).tracking(-0.4)
+                    HStack(spacing: 16) {
+                        Text("Graph").font(.system(size: 28, weight: .semibold)).tracking(-0.4)
+                        tabs
+                    }
                 }
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(Self.order, id: \.self) { st in tile(st, all.lanes.filter { $0.state == st }) }

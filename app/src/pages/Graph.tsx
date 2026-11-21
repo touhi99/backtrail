@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Minus, Plus, Search as SearchIcon, Sparkles, User, X, Maximize2, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { dayFmt, post, useApi } from '@/lib/api'
 import Trail from '@/pages/Trail'
+import DecisionGraph from '@/pages/DecisionGraph'
 import More from '@/components/More'
 import Paged from '@/components/Paged'
 import Topics, { KIND_C, KINDS } from '@/components/Topics'
@@ -241,13 +242,15 @@ function Network({ tabs }: { tabs: React.ReactNode }) {
 
 export default function Graph() {
   const [sp, setSp] = useSearchParams()
-  const growth = sp.get('view') === 'trail'
+  const view = sp.get('view') ?? ''
   const tabs = (
     <div className="flex gap-1.5">
-      {([['', 'Network'], ['trail', 'Trail']] as const).map(([k, l]) => (
-        <button key={k} type="button" onClick={() => { const n = new URLSearchParams(sp); if (k) n.set('view', k); else n.delete('view'); setSp(n) }} className="rounded-full px-3 text-[12.5px] font-medium" style={{ height: 28, border: '1px solid var(--color-line2)', background: growth === !!k ? '#34d39926' : 'rgba(255,255,255,.04)', color: growth === !!k ? '#34d399' : 'var(--color-soft)' }}>{l}</button>
+      {([['', 'Decisions'], ['mentions', 'Mentions'], ['trail', 'Trail']] as const).map(([k, l]) => (
+        <button key={k} type="button" onClick={() => { const n = new URLSearchParams(); if (k) n.set('view', k); setSp(n) }} className="rounded-full px-3 text-[12.5px] font-medium" style={{ height: 28, border: '1px solid var(--color-line2)', background: view === k ? '#34d39926' : 'rgba(255,255,255,.04)', color: view === k ? '#34d399' : 'var(--color-soft)' }}>{l}</button>
       ))}
     </div>
   )
-  return growth ? <Trail tabs={tabs} /> : <Network tabs={tabs} />
+  if (view === 'trail') return <Trail tabs={tabs} />
+  if (view === 'mentions' || sp.get('e') || sp.get('tab')) return <Network tabs={tabs} />
+  return <DecisionGraph tabs={tabs} />
 }

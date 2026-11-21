@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { CircleHelp, ListTodo, Scale, Sparkles } from 'lucide-react'
 import { dayFmt, get, STALE_LABEL, staleOf } from '@/lib/api'
 import { useShell } from '@/components/Shell'
@@ -29,7 +29,7 @@ const STATE_C: Record<string, string> = { open: '#fbbf24', doing: '#60a5fa', don
 
 export default function Items() {
   const { today } = useShell()
-  const [sp, setSp] = useSearchParams()
+  const [sp, setSp] = useState(() => new URLSearchParams())
   const f = { type: sp.get('type') ?? '', state: sp.get('state') ?? '', kind: sp.get('kind') ?? '', thread: sp.get('thread') ?? '' }
   const [all, setRows] = useState<Item[] | null>(null)
   const showClosed = sp.get('closed') === '1' || f.state !== ''
@@ -42,7 +42,7 @@ export default function Items() {
   const sel = (k: keyof typeof OPT) => <select className="input !w-auto !rounded-full !px-4" value={f[k]} onChange={(e) => set(k, e.target.value)}>{OPT[k].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
   const mix = useMemo(() => { const m: Record<string, number> = {}; (rows ?? []).forEach((i) => (m[i.state] = (m[i.state] ?? 0) + 1)); return Object.entries(m).sort((a, b) => b[1] - a[1]) }, [rows])
   return (
-    <div className="nx-page">
+    <div>
       <div className="nx-in flex items-end justify-between"><div><div className="text-[13px] text-mut">Everything filed</div><h2 className="text-[30px] font-semibold leading-tight tracking-tight" title={HELP[f.type] ?? HELP.all}>Items</h2></div>
         <div className="text-right"><div className="nx-big">{rows?.length ?? 0}</div></div></div>
       <div className="nx-in mt-4 flex flex-wrap items-center gap-2" style={{ '--d': '40ms' }}>{sel('type')}{sel('state')}{sel('kind')}

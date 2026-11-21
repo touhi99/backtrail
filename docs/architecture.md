@@ -39,7 +39,7 @@ JSON API. The binary writes the database; sources (session logs, notes, git hist
 | `demo.rs` | The demo store. |
 | `src/sql/` | `schema.sql` (tables), `views.sql` (the `item`, `fact`, `thread_stat`, `source_stat` and `entity_stat` read views that pages filter) and `migrate_unify.sql`. Other statements are inline next to the code that runs them. |
 | `app/` | React and Vite web app, built to `app/dist/` and embedded into the binary. |
-| `mac/` | SwiftUI Mac app, a client of the `/api` routes on `127.0.0.1:8799`. Keeps the last answer per route in memory, so a page shows it at once and refreshes. Built by `mac/build.sh`. |
+| `mac/` | SwiftUI Mac app, a client of the `/api` routes on `127.0.0.1:8799`. Keeps the last answer per route in memory, so a page shows it at once and refreshes. Built by `mac/build.sh`. Has the same pages and actions as the web app; `scripts/check` fails when an `/api` route is called by only one of the two apps. |
 
 ## Data
 
@@ -60,6 +60,11 @@ JSON API. The binary writes the database; sources (session logs, notes, git hist
 - `entities`, `entity_aliases` and `claim_about` say what a claim is about. Decisions are linked to entities by whole-word
   alias match; `state`, `rationale` and `relation` claims name their entities when they are filed.
 - `overrides` pins sessions to threads; `kg_overrides` keeps owner choices about the graph. `log` records who changed what.
+- `claim_links` holds links from a decision (`a`) to an older decision or a reason (`b`): `changed` (the older one no
+  longer holds), `restates` (the same decision in other words; both stay true) and `because` (a rationale claim that
+  explains it). `resolve.sh --reverses` writes them; a `changed` link needs a second model's yes, as the reversal
+  always did. Each rescan labels decisions marked replaced without a link: a resolver repeat or a retire whose reason
+  says duplicate becomes `restates`, any other reversal or retire becomes `changed`.
 
 ## Processes
 
@@ -71,6 +76,12 @@ Hooks (diagram: README, "How it works"):
 - SessionStart runs `bt brief`, which rescans and prints open questions and threads in motion; embedding is left
   to the timer and the session end. `bt brief --thread <name>` adds the project's latest settled decisions, settled
   ones only.
+- UserPromptSubmit runs `bt recall` (`recall.rs`), with no rescan and no model call. It scores settled decisions in
+  force by the rare words they share with the prompt (inverse frequency over decision titles) plus a bonus when the
+  prompt names a project the decision is about. A decision outside the session's project needs that bonus. The
+  session's project is its thread when that thread is a project, else the thread holding 80% of the sessions from
+  the working directory. At most two decisions print, each once per session (ids in `recall/<session id>`).
+  Paraphrases with no shared words are missed.
 - SessionEnd runs `skill/session-end.sh` in the background: `ingest`, `embed`, then extraction
   (`skill/extract.sh`, one small-model call per session) and resolution (`skill/resolve.sh`, one call per proposed
   item). `BACKTRAIL_COMPILE_ON_END=0` skips both.
@@ -113,7 +124,7 @@ whose passage no longer holds its quote at the passage that does.
 
 ## App
 
-Routes: Home, Graph (network and over-time views), Items, Log, Search, Thread, Source. `/map?thread=` shows one
+Routes: Home, Graph (decisions, mentions and over-time views), Items, Log, Search, Thread, Source. `/map?thread=` shows one
 project's items and notes. Home reads `/api/today` and `/api/thread` (one call per project in motion, for its next step
 and latest decisions); the Graph page reads `/api/kg/graph`, `/api/kg/claims`,
 `/api/kg/lineage`, `/api/kg/suggest` (terms with example quotes) and `/api/kg/growth`. `POST /api/kg/entity` returns the claims linked and the unread sessions; `POST /api/kg/extract` starts `skill/extract.sh --entity` in the background. All writes from the app go through `POST /api/*` handlers in
@@ -190,3 +201,16 @@ The source carries no comments. The reasons behind rules that the code alone doe
 - Web app: the map page keeps the last map and the measured node sizes while the next one loads, since React Flow
   hides an unmeasured node and that showed as flicker. Claims are written in the third person; the app speaks to the
   user.
+
+## Decision graph
+
+The Graph page opens on decisions (`app/src/pages/DecisionGraph.tsx`, data from `kg/decisions.rs`).
+
+- At rest (`/api/kg/decisions`): one card per project with its newest settled decision. Lines: `changed` links whose
+  two decisions sit in different projects, project relations (built on, spun out of), and, on hover, the latest
+  decision two projects share.
+- A project (`?project=`): its decisions plus any decision a link reaches in another project. The page puts them on a
+  day axis, one lane per most common other subject, merges `restates` groups into one dot and draws `changed` links
+  as arrows.
+- A decision (`/api/kg/chain?id=`): every decision reachable through `changed` and `restates` links, grouped into
+  steps by how many changes precede each, with quotes and `because` reasons.

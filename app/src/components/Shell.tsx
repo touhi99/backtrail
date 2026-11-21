@@ -1,8 +1,11 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { House, ChevronRight, ListChecks, Plus, ScrollText, Search, Share2 } from 'lucide-react'
+import { House, ChevronRight, ListChecks, Plus, ScrollText, Search as SearchIcon, Share2, X } from 'lucide-react'
 import { STATE, useApi } from '@/lib/api'
 import Capture from '@/components/Capture'
+import Search from '@/pages/Search'
+import Items from '@/pages/Items'
+import Log from '@/pages/Log'
 import type { KgSuggest, Today } from '@/lib/types'
 
 function TrailMark({ size = 17, className = '' }: { size?: number; className?: string }) {
@@ -13,20 +16,29 @@ function TrailMark({ size = 17, className = '' }: { size?: number; className?: s
   )
 }
 
-type Ctx = { today: Today | null; reload: () => void; capture: (thread?: string) => void }
-const ShellCtx = createContext<Ctx>({ today: null, reload: () => {}, capture: () => {} })
+type Ctx = { today: Today | null; reload: () => void; capture: (thread?: string) => void; search: (q: string, thread?: string) => void }
+const ShellCtx = createContext<Ctx>({ today: null, reload: () => {}, capture: () => {}, search: () => {} })
 export const useShell = () => useContext(ShellCtx)
 
-const TITLE: Record<string, string> = { map: 'Map', graph: 'Graph', thread: 'Thread', source: 'Source', search: 'Search', items: 'Items', log: 'Log' }
+const TITLE: Record<string, string> = { map: 'Map', graph: 'Graph', thread: 'Thread', source: 'Source' }
 
 const NAV = [
   { to: '/', label: 'Home', icon: House, end: true },
   { to: '/graph', label: 'Graph', icon: Share2, end: false },
 ]
-const MORE = [
-  { to: '/items', label: 'Items', icon: ListChecks },
-  { to: '/log', label: 'Log', icon: ScrollText },
-]
+type Sheet = { kind: 'search'; q: string; thread: string } | { kind: 'items' } | { kind: 'log' }
+
+function Modal({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  useEffect(() => { const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h) }, [onClose])
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm" onMouseDown={onClose}>
+      <div className="relative flex max-h-[86vh] w-[min(1000px,94vw)] flex-col overflow-hidden rounded-[22px] border border-line2 bg-bg shadow-[0_24px_60px_rgba(0,0,0,.55)]" onMouseDown={(e) => e.stopPropagation()}>
+        <button type="button" className="btn ghost sm absolute right-3 top-3 z-10" onClick={onClose} title="Close (Esc)"><X size={14} /></button>
+        <div className="overflow-auto p-6">{children}</div>
+      </div>
+    </div>
+  )
+}
 
 export default function Shell({ children }: { children: ReactNode }) {
   const { data: today, reload } = useApi<Today>('/api/today')
@@ -34,17 +46,20 @@ export default function Shell({ children }: { children: ReactNode }) {
   useEffect(() => { window.addEventListener('bt-suggest', reloadSug); return () => window.removeEventListener('bt-suggest', reloadSug) }, [reloadSug])
   const toReview = sug ? sug.entities.length + sug.aliases.length : 0
   const [cap, setCap] = useState<{ open: boolean; thread?: string }>({ open: false })
+  const [sheet, setSheet] = useState<Sheet | null>(null)
   const nav = useNavigate()
   const loc = useLocation()
   useEffect(() => { if (new URLSearchParams(loc.search).get('add')) setCap({ open: true, thread: new URLSearchParams(loc.search).get('thread') ?? undefined }) }, [loc.search])
   const title = TITLE[loc.pathname.split('/')[1]] ?? 'Home'
+  const scope = loc.pathname.startsWith('/thread/') ? decodeURIComponent(loc.pathname.slice(8)) : ''
+  useEffect(() => { setSheet(null) }, [loc.pathname, loc.search])
   const live = (today?.threads ?? []).filter((t) => t.state === 'moving')
   const others = (today?.threads ?? []).filter((t) => t.state !== 'moving' && t.name !== 'Unsorted')
   const [showOthers, setShowOthers] = useState(false)
   const toggleOthers = () => setShowOthers((v) => !v)
 
   return (
-    <ShellCtx.Provider value={{ today, reload, capture: (thread) => setCap({ open: true, thread }) }}>
+    <ShellCtx.Provider value={{ today, reload, capture: (thread) => setCap({ open: true, thread }), search: (q, thread = '') => setSheet({ kind: 'search', q, thread }) }}>
       <div className="flex h-full bg-side">
         <aside className="hidden w-60 shrink-0 flex-col gap-1 overflow-y-auto px-3 py-4 md:flex">
           <Link to="/" className="mb-3 flex items-center gap-2.5 px-2 py-1.5">
@@ -84,13 +99,10 @@ export default function Shell({ children }: { children: ReactNode }) {
               })}</div>}
             </>
           )}
-          <div className="mt-auto pt-4">
-            {MORE.map(({ to, label, icon: Icon }) => (
-              <NavLink key={to} to={to} className={({ isActive }) => `row-hover flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] ${isActive ? 'bg-white/[.07] font-medium text-ink' : 'text-soft'}`}><Icon size={15} />{label}</NavLink>
-            ))}
-          </div>
-          <div className="px-2.5 pt-3 text-[11.5px] text-mut">
-            {today ? `${today.totals.sessions} sessions, ${today.totals.notes} notes, ${today.totals.artifacts} artifacts` : ''}
+          <div className="mt-auto flex items-center gap-1 px-2.5 pt-4 text-[11.5px] text-mut">
+            <span className="min-w-0 flex-1 truncate">{today ? `${today.totals.sessions} sessions, ${today.totals.notes} notes` : ''}</span>
+            <button type="button" className="grid size-7 place-items-center rounded-md hover:bg-white/10 hover:text-ink" title="Items: everything filed" onClick={() => setSheet({ kind: 'items' })}><ListChecks size={14} /></button>
+            <button type="button" className="grid size-7 place-items-center rounded-md hover:bg-white/10 hover:text-ink" title="Log: every change" onClick={() => setSheet({ kind: 'log' })}><ScrollText size={14} /></button>
           </div>
         </aside>
 
@@ -98,14 +110,15 @@ export default function Shell({ children }: { children: ReactNode }) {
           <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-5">
             <h1 className="text-[15px] font-semibold">{title}</h1>
             <div className="relative ml-4 max-w-sm flex-1">
-              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-mut" />
-              <input className="input !pl-9" placeholder="Search everything" onKeyDown={(e) => { if (e.key === 'Enter') { const q = (e.target as HTMLInputElement).value; if (q) nav(`/search?q=${encodeURIComponent(q)}`); else nav('/') } }} />
+              <SearchIcon size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-mut" />
+              <input key={scope} className="input !pl-9" placeholder={scope ? `Search ${scope}` : 'Search everything'} onKeyDown={(e) => { if (e.key === 'Enter') { const el = e.target as HTMLInputElement; const q = el.value.trim(); if (q) { setSheet({ kind: 'search', q, thread: scope }); el.value = '' } } }} />
             </div>
             {!loc.pathname.startsWith('/thread') && <button className="btn primary ml-auto" onClick={() => setCap({ open: true })}><Plus size={15} />Add</button>}
           </header>
           <div className="min-h-0 flex-1 overflow-auto">{children}</div>
         </main>
       </div>
+      {sheet && <Modal onClose={() => setSheet(null)}>{sheet.kind === 'search' ? <Search initial={sheet.q} scope={sheet.thread} /> : sheet.kind === 'items' ? <Items /> : <Log />}</Modal>}
       {cap.open && <Capture thread={cap.thread} onClose={() => setCap({ open: false })} onDone={reload} />}
     </ShellCtx.Provider>
   )

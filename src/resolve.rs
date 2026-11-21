@@ -261,6 +261,20 @@ pub fn reverse_packet(c: &Connection, id: &str) {
             clip(s(&k, "quote"), 140)
         );
     }
+    println!("\nREASONS SAID IN THE SAME SESSION:");
+    for r in rows(
+        c,
+        "SELECT r.id, r.title, ifnull(r.quote,'') AS quote FROM claims r JOIN claims d ON d.id=?1
+         WHERE r.type='rationale' AND r.source_id=d.source_id AND r.state!='rejected'",
+        &[&id],
+    ) {
+        println!(
+            "- {}: {} | said: {}",
+            s(&r, "id"),
+            clip(s(&r, "title"), 160),
+            clip(s(&r, "quote"), 140)
+        );
+    }
 }
 
 pub fn reverse_queue(c: &Connection, limit: usize) {
@@ -289,11 +303,11 @@ fn apply_reverse(c: &Connection, v: &Value) -> anyhow::Result<String> {
     let reason = clip(v["reason"].as_str().unwrap_or("").trim(), 320);
     let settled = count(
         c,
-        "SELECT COUNT(*) FROM claims WHERE id=?1 AND type='decision' AND state='settled'",
+        "SELECT COUNT(*) FROM claims WHERE id=?1 AND type='decision' AND state IN ('settled','superseded')",
         &[&id],
     );
     if settled == 0 {
-        anyhow::bail!("the item is not a settled decision");
+        anyhow::bail!("the item is not a settled or replaced decision");
     }
     let said = when(c, id);
     let mut done = vec![];
@@ -324,10 +338,84 @@ fn apply_reverse(c: &Connection, v: &Value) -> anyhow::Result<String> {
         )
         ?;
         logw(c, "resolver", "reverse", old, &format!("by {id}: {reason}"));
+        link(c, id, old, "changed", &reason);
         done.push(format!("replaces {old}"));
+    }
+    let ids = |key: &str| -> Vec<String> {
+        v[key]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(String::from)
+            .collect()
+    };
+    for old in ids("restates") {
+        let ok = old != id
+            && count(
+                c,
+                "SELECT COUNT(*) FROM claims WHERE id=?1 AND type='decision' AND state IN ('settled','superseded')",
+                &[&old],
+            ) == 1
+            && when(c, &old) <= said;
+        if ok {
+            link(c, id, &old, "restates", "");
+            done.push(format!("restates {old}"));
+        }
+    }
+    for why in ids("because") {
+        if count(
+            c,
+            "SELECT COUNT(*) FROM claims WHERE id=?1 AND type='rationale' AND state!='rejected'",
+            &[&why],
+        ) == 1
+        {
+            link(c, id, &why, "because", "");
+            done.push(format!("because {why}"));
+        }
     }
     logw(c, "resolver", "reverse-checked", id, &done.join("; "));
     Ok(done.join("; "))
+}
+
+pub fn link(c: &Connection, a: &str, b: &str, kind: &str, reason: &str) {
+    c.execute(
+        "INSERT OR IGNORE INTO claim_links(a,b,kind,reason,actor,created) VALUES(?1,?2,?3,?4,'resolver',?5)",
+        params![a, b, kind, reason, now()],
+    )
+    .expect("write to database");
+}
+
+pub fn label_replaced(c: &Connection) -> usize {
+    let open = rows(
+        c,
+        "SELECT o.id, o.superseded_by AS by,
+                (SELECT l.actor||':'||l.action||':'||ifnull(l.detail,'') FROM log l
+                  WHERE l.target=o.id AND l.action IN ('resolve','reverse','retire') ORDER BY l.id DESC LIMIT 1) AS how
+         FROM claims o
+         WHERE o.type='decision' AND ifnull(o.superseded_by,'')!=''
+           AND NOT EXISTS (SELECT 1 FROM claim_links k WHERE k.b=o.id AND k.a=o.superseded_by AND k.kind IN ('changed','restates'))",
+        &[],
+    );
+    let mut n = 0;
+    for r in &open {
+        let how = s(r, "how").to_lowercase();
+        let kind = if how.starts_with("resolver:resolve")
+            || (how.contains(":retire:")
+                && ["duplicate", "repeats", "which says"]
+                    .iter()
+                    .any(|w| how.contains(w)))
+        {
+            "restates"
+        } else if how.starts_with("resolver:reverse") || how.contains(":retire:") {
+            "changed"
+        } else {
+            continue;
+        };
+        link(c, s(r, "by"), s(r, "id"), kind, "");
+        n += 1;
+    }
+    n
 }
 
 pub fn unresolve(c: &Connection, id: &str) -> bool {
@@ -348,6 +436,11 @@ pub fn unresolve(c: &Connection, id: &str) -> bool {
         if ok {
             c.execute("DELETE FROM log WHERE target=?1 AND action='reverse'", [id])
                 .ok();
+            c.execute(
+                "DELETE FROM claim_links WHERE b=?1 AND kind='changed'",
+                [id],
+            )
+            .ok();
             logw(c, "owner", "unresolve", id, "back to settled");
         }
         return ok;

@@ -27,7 +27,9 @@ pub fn queue(
         .unwrap_or(0);
     let room = match cap {
         Cap::Ignore => usize::MAX,
-        Cap::Daily => usize::try_from(crate::config::cfg().daily_cap - used).unwrap_or(0),
+        Cap::Daily => crate::config::cfg()
+            .daily_cap
+            .map_or(usize::MAX, |n| usize::try_from(n - used).unwrap_or(0)),
     };
     let only = session_id.map(|s| {
         crate::db::resolve_ref(c, &format!("session:{}", s.trim_start_matches("session:")))

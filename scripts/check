@@ -24,6 +24,15 @@ if command -v swift >/dev/null && [ "$(uname)" = Darwin ]; then
   (cd mac && swift build --quiet)
 fi
 
+step "app parity"
+endpoints() { grep -rhoE "/api/[a-z0-9_/-]+" "$1" | sort -u; }
+gap=$(diff <(endpoints app/src) <(endpoints mac/Sources) | grep '^[<>]' || true)
+if [ -n "$gap" ]; then
+  echo "API endpoints used by only one app (< web, > mac):"
+  echo "$gap"
+  exit 1
+fi
+
 step "shell syntax"
 for f in install.sh mac/build.sh skill/*.sh scripts/check; do bash -n "$f"; done
 

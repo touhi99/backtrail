@@ -42,7 +42,7 @@ pub struct Config {
     pub entities: Vec<EntitySeed>,
     pub port: u16,
     pub embeddings: Embeddings,
-    pub daily_cap: i64,
+    pub daily_cap: Option<i64>,
 }
 
 fn prefixes(model: &str) -> (&'static str, &'static str) {
@@ -201,7 +201,7 @@ fn load() -> Config {
             .and_then(|p| u16::try_from(p).ok())
             .unwrap_or(8799),
         embeddings: embeddings(&v["embeddings"]),
-        daily_cap: v["compile"]["daily_cap"].as_i64().unwrap_or(8),
+        daily_cap: v["compile"]["daily_cap"].as_i64(),
     }
 }
 

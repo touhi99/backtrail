@@ -45,3 +45,7 @@
   -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px), linear-gradient(to left, transparent, #000 28px); -webkit-mask-composite: source-in; mask-image: linear-gradient(to bottom, transparent, #000 28px), linear-gradient(to left, transparent, #000 28px); mask-composite: intersect; }
 .nx-gmap .nx-canvas.nx-wide { right: 0; width: 100%; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px); mask-image: linear-gradient(to bottom, transparent, #000 28px); }
 @media (max-width: 900px) { .nx-gmap .nx-canvas { right: 0; width: 100%; } }
+
+.nx-strands .nx-pulse { transform-box: fill-box; transform-origin: center; animation: nx-pulse 2.8s ease-out infinite; }
+@keyframes nx-pulse { 0% { transform: scale(.7); opacity: .9; } 100% { transform: scale(1.6); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .nx-strands .nx-pulse { animation: none; } }

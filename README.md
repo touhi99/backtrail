@@ -11,6 +11,7 @@ trail when a session starts; a web app and a Mac app show it by project, over ti
 ## How it works
 
 - A session is read when it ends. Each item is filed with a verbatim quote, checked against the source.
+- Each prompt is matched against settled decisions; up to two that bear on it are added to Claude's context.
 - A decision is settled when the user typed it, accepts it in an app, or it comes from a note.
 - A step closes when a session shows it finished and a second model agrees.
 - Unconfirmed items are parked after 14 days, or when their project is built, dropped or parked.
@@ -45,15 +46,15 @@ On macOS, `install.sh` also installs a login agent that runs the server and buil
 
 - Reads: Claude Code sessions (`~/.claude/projects`), and the note folders and git repositories in `config.json`.
 - Writes: the data directory (database, backups, logs), `~/.claude/settings.json` (hooks), and the login agent on macOS.
-- Sends: session text to Claude through the `claude` CLI after each session, about 0.05 to 0.15 USD each (one
-  small-model read, one check per item filed); passage text to the embedding server (`127.0.0.1:11434`).
+- Sends: session text to Claude through the `claude` CLI after each session, about 0.05 to 0.20 USD each (one
+  small-model read, one check per item filed, one link check per new decision); passage text to the embedding server (`127.0.0.1:11434`).
 
 ## Limits
 
 - Search holds vectors in memory: a few hundred thousand passages at most.
 - The quote check shows a quote exists, not that the title reads it fairly.
-- An item's project can be wrong. `bt check` reports accuracy from owner reviews; on the author's store (109 reviews,
-  November 2026) 79% of suggestions were kept and 39% were moved to another project before the `rehome` rule.
+- An item's project can be wrong. `bt check` reports how many items filed in the last 7 days were moved to another
+  project or retired by hand.
 
 ## License
 

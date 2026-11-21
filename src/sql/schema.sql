@@ -165,6 +165,18 @@ CREATE TABLE IF NOT EXISTS claim_about(
 
 CREATE INDEX IF NOT EXISTS claim_about_e ON claim_about(entity_id, claim_id);
 
+CREATE TABLE IF NOT EXISTS claim_links(
+  a TEXT NOT NULL,
+  b TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('changed','restates','because')),
+  reason TEXT,
+  actor TEXT,
+  created TEXT,
+  PRIMARY KEY(a, b, kind)
+);
+
+CREATE INDEX IF NOT EXISTS claim_links_b ON claim_links(b);
+
 CREATE TABLE IF NOT EXISTS kg_overrides(
   target TEXT NOT NULL,
   field TEXT NOT NULL,

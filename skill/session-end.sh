@@ -11,7 +11,7 @@ sid="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_id",
     "$DIR/extract.sh" --session "$sid" --limit 1 >> "${TMPDIR:-/tmp}/backtrail-extract.log" 2>&1
     "$DIR/resolve.sh" --limit 20 >> "${TMPDIR:-/tmp}/backtrail-extract.log" 2>&1
     "$DIR/finish.sh" --limit 15 >> "${TMPDIR:-/tmp}/backtrail-extract.log" 2>&1
-    [ "${BACKTRAIL_REVERSE_ON_END:-0}" = "1" ] && "$DIR/resolve.sh" --reverses --limit 5 >> "${TMPDIR:-/tmp}/backtrail-extract.log" 2>&1
+    [ "${BACKTRAIL_LINK_ON_END:-1}" = "1" ] && "$DIR/resolve.sh" --reverses --limit 10 >> "${TMPDIR:-/tmp}/backtrail-extract.log" 2>&1
   fi
 ) >/dev/null 2>&1 &
 disown 2>/dev/null

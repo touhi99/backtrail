@@ -53,9 +53,9 @@ enum API {
 enum Page: Hashable {
     case home
     case graph
-    case trail
+    case decisions(String)
     case thread(String)
-    case search(String)
+    case map(String)
     case source(Int, chunk: Int?)
 }
 
@@ -65,8 +65,24 @@ final class Store: ObservableObject {
     @Published var offline = false
     @Published var page: Page = .home
     @Published var back: [Page] = []
+    @Published var sheet: Sheet?
+    var graphMode: String?
+
+    enum Sheet: Identifiable, Equatable {
+        case search(String, thread: String)
+        case items
+        case log
+        var id: String {
+            switch self {
+            case .search(let q, let t): "search|\(q)|\(t)"
+            case .items: "items"
+            case .log: "log"
+            }
+        }
+    }
 
     func go(_ p: Page) {
+        sheet = nil
         guard p != page else { return }
         back.append(page)
         page = p
@@ -77,11 +93,14 @@ final class Store: ObservableObject {
     }
     @Published var capture: String?? = nil
     @Published var tick = 0
+    var openTopics = Snapshot.env["BACKTRAIL_TAB"] == "topics"
+    @Published var toReview = 0
 
     func reload() async {
         do {
             let first = today == nil
             today = try await API.get("/api/today")
+            if let s = try? await API.get("/api/kg/suggest") { toReview = s["entities"].arr.count + s["aliases"].arr.count }
             offline = false
             if first { prefetch() }
         } catch {
@@ -105,6 +124,7 @@ final class Store: ObservableObject {
     }
 
     var threads: [J] { today?["threads"].arr ?? [] }
+    var scope: String { if case .thread(let n) = page { n } else { "" } }
     var moving: [J] { threads.filter { $0["state"].str == "moving" } }
 }
 
