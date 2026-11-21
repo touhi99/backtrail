@@ -12,6 +12,7 @@ export type Item = {
   id: string
   type: ItemType
   thread: string
+  sub?: string
   title: string
   body: string
   state: string
@@ -89,6 +90,7 @@ export type Decided = {
   chunk_id: number | null
   day: string
   how: string
+  sub?: string
   also?: ClaimEdge[]
 }
 

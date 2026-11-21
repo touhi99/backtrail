@@ -32,6 +32,7 @@ function Panel({ title, count, children, className = '', id }: { title: string; 
     </section>
   )
 }
+const Sub = ({ name }: { name?: string }) => name ? <span className="nx-chip mr-2 align-middle text-mut" style={{ background: '#ffffff0f' }}>{name}</span> : null
 const Empty = ({ children }: { children: React.ReactNode }) => <div className="px-5 pb-5 text-[13px] text-mut">{children}</div>
 const Src = ({ i }: { i: Item }) => i.source_id ? <Link to={`/source/${i.source_id}${i.chunk_id ? `?c=${i.chunk_id}` : ''}`} className="mt-1 inline-flex items-center gap-1.5 text-[12px] text-mut hover:text-ink" title={i.state === 'looks_done' ? 'Where the step was planned. It does not show the built result.' : undefined}><FileText size={12} />{i.state === 'looks_done' ? 'Planned in: ' : ''}{i.source_title}</Link> : null
 
@@ -138,7 +139,7 @@ export default function Thread() {
         {s.state === 'done' && <CheckCheck size={12} color="#04130c" strokeWidth={3} />}
       </button>
       <div className="min-w-0">
-        <div className={`text-[16px] ${s.state === 'done' ? 'text-mut line-through' : 'font-medium'}`}>{s.tag === 'bug' && <Bug size={13} className="mr-1.5 inline text-dropped" />}{s.title}{STEP_STATUS[s.state] && <span title={STEP_STATUS[s.state].hint} className="nx-chip ml-2 align-middle" style={{ background: STEP_STATUS[s.state].color + '22', color: STEP_STATUS[s.state].color }}>{STEP_STATUS[s.state].label}</span>}</div>
+        <div className={`text-[16px] ${s.state === 'done' ? 'text-mut line-through' : 'font-medium'}`}><Sub name={s.sub} />{s.tag === 'bug' && <Bug size={13} className="mr-1.5 inline text-dropped" />}{s.title}{STEP_STATUS[s.state] && <span title={STEP_STATUS[s.state].hint} className="nx-chip ml-2 align-middle" style={{ background: STEP_STATUS[s.state].color + '22', color: STEP_STATUS[s.state].color }}>{STEP_STATUS[s.state].label}</span>}</div>
         {s.state !== 'done' && s.check_how && <More label="How to check" className="mr-3 mt-1 text-[12.5px] text-mut">{s.check_how}</More>}
         {s.state === 'looks_done' && s.answer && <p className="mr-3 mt-1 text-[13px] text-soft"><span className="text-mut">Claude says it built: </span>{s.answer}</p>}
         {s.body && s.state !== 'done' && <p className="mr-3 mt-1 text-[13px] text-soft">{s.body}</p>}
@@ -219,7 +220,7 @@ export default function Thread() {
             {decidedRest.map((x) => (
               <Link key={x.id} to={x.source_id ? `/source/${x.source_id}${x.chunk_id ? `?c=${x.chunk_id}` : ''}` : '#'} className="nx-row" style={{ gridTemplateColumns: '60px minmax(0,1fr) auto' }} title="Open the source">
                 <span className="text-[12.5px] tabular-nums text-mut">{x.day === 'undated' ? '' : dayFmt(x.day)}</span>
-                <span className="min-w-0"><span className="block text-[14px]">{x.title}</span>{x.also?.length ? <AlsoConsidered also={x.also} /> : null}</span>
+                <span className="min-w-0"><span className="block text-[14px]"><Sub name={x.sub} />{x.title}</span>{x.also?.length ? <AlsoConsidered also={x.also} /> : null}</span>
                 <span className="size-2 rounded-full" title={x.how === 'owner-stated' ? 'You said it' : x.how === 'owner-accepted' ? 'You confirmed it' : 'From a note'} style={{ background: HOW[x.how] ?? '#8b8b95' }} />
               </Link>
             ))}
@@ -243,7 +244,7 @@ export default function Thread() {
               {todo.slice(0, 3).map((s, n) => (
                 <button key={s.id} onClick={() => { setView('steps'); setTimeout(() => document.getElementById(`item-${s.id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 120) }}
                   className="nx-panel flex min-h-[108px] flex-col gap-2.5 !rounded-2xl px-4 py-3.5 text-left transition hover:-translate-y-px hover:border-[#34343c]" style={n === 0 ? { borderColor: '#2b3a33' } : {}}>
-                  <span className="size-2 rounded-full" style={n === 0 ? { background: '#34d399', boxShadow: '0 0 10px #34d399' } : { background: '#3f3f46' }} />
+                  <span className="flex items-center gap-2"><span className="size-2 rounded-full" style={n === 0 ? { background: '#34d399', boxShadow: '0 0 10px #34d399' } : { background: '#3f3f46' }} />{s.sub && <span className="text-[12px] text-mut">{s.sub}</span>}</span>
                   <span className="line-clamp-3 text-[15px] font-semibold leading-snug">{s.title}</span>
                 </button>
               ))}

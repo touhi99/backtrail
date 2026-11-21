@@ -72,7 +72,7 @@ export default function Shell({ children }: { children: ReactNode }) {
               <Icon size={16} />{label}{to === '/graph' && toReview > 0 && <span role="button" onClick={(e) => { e.preventDefault(); nav('/graph?tab=topics') }} className="ml-auto rounded-full bg-[#fbbf2426] px-1.5 text-[11px] tabular-nums text-[#fbbf24]" title="Topics waiting for a decision">{toReview}</span>}
             </NavLink>
           ))}
-          <div className="mt-5 px-2.5 pb-1 text-[12px] text-mut" title="Threads whose state is In development.">Threads</div>
+          <div className="mt-5 px-2.5 pb-1 text-[12px] text-mut" title="Threads whose state is In development.">Active threads</div>
           {live.map((t) => (
             <Link key={t.name} to={`/thread/${encodeURIComponent(t.name)}`} className={`row-hover flex items-center gap-2.5 rounded-lg py-1.5 pr-2.5 text-[13px] text-soft ${nested(t, live) ? 'pl-6' : 'pl-2.5'}`}>
               <span className="size-2 rounded-full" style={{ background: STATE.moving.color }} />

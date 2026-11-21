@@ -45,7 +45,17 @@ struct RootView: View {
         } else if store.today == nil {
             Color.bg.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ZStack(alignment: .topLeading) {
+            VStack(alignment: .leading, spacing: 0) {
+                if let prev = store.back.last {
+                    Button { store.goBack() } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
+                            Text(prev.label).font(.system(size: 12.5)).lineLimit(1)
+                        }
+                    }
+                    .buttonStyle(BtnStyle(kind: .ghost)).foregroundStyle(Color.mut).help("Back (⌘[)")
+                    .padding(.leading, 12).padding(.top, 8)
+                }
                 switch store.page {
                 case .home: HomeView()
                 case .graph: GraphView()
@@ -53,10 +63,6 @@ struct RootView: View {
                 case .thread(let name): ThreadView(name: name).id(name)
                 case .map(let name): MapView(thread: name).id(name)
                 case .source(let id, let c): SourceView(id: id, chunk: c).id("\(id)-\(c ?? 0)")
-                }
-                if !store.back.isEmpty {
-                    Button { store.goBack() } label: { Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold)) }
-                        .buttonStyle(BtnStyle(kind: .ghost)).help("Back (⌘[)").padding(.leading, 8).padding(.top, 8)
                 }
             }
         }
@@ -113,7 +119,7 @@ struct Sidebar: View {
             NavRow(icon: "point.3.connected.trianglepath.dotted", label: "Graph", active: store.page == .graph,
                    badge: store.toReview > 0 ? "\(store.toReview)" : nil, onBadge: { store.openTopics = true; store.go(.graph) }) { store.go(.graph) }
 
-            Text("Threads").font(.system(size: 12)).foregroundStyle(Color.mut)
+            Text("Active threads").font(.system(size: 12)).foregroundStyle(Color.mut)
                 .padding(.horizontal, 10).padding(.top, 18).padding(.bottom, 4)
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
