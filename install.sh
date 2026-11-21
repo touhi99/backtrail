@@ -1,11 +1,14 @@
 #!/bin/sh
 set -e
 cd "$(dirname "$0")"
-for tool in cargo npm; do
+for tool in cargo node npm gh; do
   command -v "$tool" >/dev/null || { echo "$tool is required but not installed." >&2; exit 1; }
 done
-command -v rustc >/dev/null && [ "$(rustc --version | awk '{print $2}' | awk -F. '{print $1*1000+$2}')" -lt 1085 ] \
-  && { echo "Rust 1.85 or newer is required (found $(rustc --version))." >&2; exit 1; }
+command -v rustc >/dev/null && [ "$(rustc --version | awk '{print $2}' | awk -F. '{print $1*1000+$2}')" -lt 1088 ] \
+  && { echo "Rust 1.88 or newer is required (found $(rustc --version))." >&2; exit 1; }
+[ "$(node --version | tr -d v | cut -d. -f1)" -lt 22 ] \
+  && { echo "Node.js 22 or newer is required (found $(node --version))." >&2; exit 1; }
+gh auth status >/dev/null 2>&1 || { echo "gh is not logged in: run gh auth login, then ./install.sh again." >&2; exit 1; }
 command -v ollama >/dev/null || {
   echo "Ollama is required for embeddings: install it from https://ollama.com, then run ./install.sh again." >&2
   exit 1
