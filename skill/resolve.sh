@@ -20,9 +20,7 @@ if [ -n "$REV" ]; then PROMPT="$DIR/reverse-prompt.md"; else PROMPT="$DIR/resolv
 cd "$(mktemp -d)" || exit 1
 for id in "${IDS[@]+"${IDS[@]}"}"; do
   packet="$("$TM" resolve-packet "$id" ${REV:+--reverses})" || { echo "$id: no packet"; continue; }
-  raw="$(printf '%s' "$packet" | claude -p --model "$MODEL" --tools "" --no-session-persistence --output-format json \
-        --setting-sources project --disable-slash-commands --strict-mcp-config --max-budget-usd 0.25 \
-        --system-prompt "$(cat "$PROMPT")" 2>/dev/null)"
+  raw="$(printf '%s' "$packet" | "$DIR/ask.py" --tier medium --model "$MODEL" --budget 0.25 --system "$PROMPT")"
   REV="$REV" DRY="$DRY" ID="$id" TM="$TM" RAW="$raw" PACKET="$packet" DIR="$DIR" VMODEL="${BACKTRAIL_VERIFY_MODEL:-opus}" python3 - <<'PY'
 import json, os, re, subprocess, sys
 id_, tm, raw = os.environ["ID"], os.environ["TM"], os.environ["RAW"]
@@ -37,10 +35,8 @@ try:
 except Exception as e:
     print(f"{id_}: failed ({type(e).__name__})"); sys.exit(0)
 def ask_verifier(ask, prompt_file):
-    p = subprocess.run(["claude", "-p", "--model", os.environ["VMODEL"], "--tools", "", "--no-session-persistence",
-        "--output-format", "json", "--setting-sources", "project", "--disable-slash-commands", "--strict-mcp-config",
-        "--max-budget-usd", "0.25", "--system-prompt", open(os.environ["DIR"] + "/" + prompt_file).read()],
-        input=ask, capture_output=True, text=True, timeout=300)
+    p = subprocess.run([os.environ["DIR"] + "/ask.py", "--tier", "large", "--model", os.environ["VMODEL"],
+        "--system", os.environ["DIR"] + "/" + prompt_file], input=ask, capture_output=True, text=True, timeout=600)
     d2 = json.loads(p.stdout)
     verdict = json.loads(re.sub(r"^```(?:json)?|```$", "", d2["result"].strip(), flags=re.M).strip())
     return verdict, d2.get("total_cost_usd", 0)
@@ -65,10 +61,8 @@ if os.environ.get("REV"):
 if v.get("resolves_by"):
     ask = os.environ["PACKET"] + f"\n\nPROPOSED RESOLUTION\nCANDIDATE {v['resolves_by']}\nREASON {v.get('reason', '')}\n"
     try:
-        p = subprocess.run(["claude", "-p", "--model", os.environ["VMODEL"], "--tools", "", "--no-session-persistence",
-            "--output-format", "json", "--setting-sources", "project", "--disable-slash-commands", "--strict-mcp-config",
-            "--max-budget-usd", "0.25", "--system-prompt", open(os.environ["DIR"] + "/resolve-verify-prompt.md").read()],
-            input=ask, capture_output=True, text=True, timeout=300)
+        p = subprocess.run([os.environ["DIR"] + "/ask.py", "--tier", "large", "--model", os.environ["VMODEL"],
+            "--system", os.environ["DIR"] + "/resolve-verify-prompt.md"], input=ask, capture_output=True, text=True, timeout=600)
         d2 = json.loads(p.stdout)
         ok = json.loads(re.sub(r"^```(?:json)?|```$", "", d2["result"].strip(), flags=re.M).strip()).get("settled") is True
         cost += f" verify={d2.get('total_cost_usd', 0):.4f}"

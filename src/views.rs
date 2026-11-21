@@ -1,3 +1,9 @@
+macro_rules! say {
+    ($out:expr, $($arg:tt)*) => {
+        let _ = writeln!($out, $($arg)*);
+    };
+}
+
 use crate::clock::{days_ago, now};
 use crate::config::cfg;
 use crate::db::{rows, s};
@@ -153,11 +159,14 @@ pub fn decided(c: &Connection, thread: &str, limit: i64) -> Vec<Value> {
     found
 }
 
-fn brief_short(c: &Connection) {
-    println!("Backtrail · {}", &now()[..10]);
+fn brief_short(c: &Connection) -> String {
+    let mut out = String::new();
+    say!(out, "Backtrail · {}", &now()[..10]);
+    say!(out, "{}", crate::coverage::one_line(c));
     let waiting = waiting_on_owner(c);
     let count = |list: &[Value], name: &str| list.iter().filter(|r| s(r, "thread") == name).count();
-    println!(
+    say!(
+        out,
         "Projects in motion (detail for one: `bt brief --thread \"<name>\"`, everything: `bt brief --all`):"
     );
     for t in threads(c).iter().filter(|t| s(t, "state") == "moving") {
@@ -175,7 +184,7 @@ fn brief_short(c: &Connection) {
         if let Some(step) = next.first() {
             let _ = write!(line, " · next: {}", s(step, "title"));
         }
-        println!("{line}");
+        say!(out, "{line}");
     }
     let moving: HashSet<String> = threads(c)
         .iter()
@@ -188,19 +197,22 @@ fn brief_short(c: &Connection) {
     }
     if !elsewhere.is_empty() {
         let list: Vec<String> = elsewhere.iter().map(|(n, k)| format!("{n} {k}")).collect();
-        println!(
+        say!(
+            out,
             "Also waiting on the owner, in projects not in motion: {}",
             list.join(", ")
         );
     }
     let asks = waiting_on_claude(c);
     if !asks.is_empty() {
-        println!(
+        say!(
+            out,
             "\nAsked by the owner, waiting on Claude ({}): answer each with `backtrail reply <id> --text ...`",
             asks.len()
         );
         for q in &asks {
-            println!(
+            say!(
+                out,
                 "  - {} [{}] {} {}",
                 s(q, "id"),
                 s(q, "thread"),
@@ -209,6 +221,7 @@ fn brief_short(c: &Connection) {
             );
         }
     }
+    out
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -217,35 +230,45 @@ pub enum Detail {
     Full,
 }
 
-pub fn brief(c: &Connection, only: Option<&str>, detail: Detail) {
+pub fn brief(c: &Connection, only: Option<&str>, detail: Detail) -> String {
+    let mut out = String::new();
     if only.is_none() && detail == Detail::Short {
         return brief_short(c);
     }
     let wanted = |row: &Value, key: &str| only.is_none_or(|thread| s(row, key) == thread);
-    println!("Backtrail brief · {}", &now()[..10]);
+    say!(out, "Backtrail brief · {}", &now()[..10]);
 
     let waiting: Vec<Value> = waiting_on_owner(c)
         .into_iter()
         .filter(|q| wanted(q, "thread"))
         .collect();
-    println!(
+    say!(
+        out,
         "\nClaude asked the owner, waiting on the owner ({}): ask when it fits the work, then record the reply with `backtrail answer <id> --text ...`. Unanswered ones are parked after 14 days.",
         waiting.len()
     );
     for q in &waiting {
-        println!("  - {} [{}] {}", s(q, "id"), s(q, "thread"), s(q, "title"));
+        say!(
+            out,
+            "  - {} [{}] {}",
+            s(q, "id"),
+            s(q, "thread"),
+            s(q, "title")
+        );
     }
 
     let asks: Vec<Value> = waiting_on_claude(c)
         .into_iter()
         .filter(|q| wanted(q, "thread"))
         .collect();
-    println!(
+    say!(
+        out,
         "\nAsked by the owner, waiting on Claude ({}): answer each with `backtrail reply <id> --text ...`",
         asks.len()
     );
     for q in &asks {
-        println!(
+        say!(
+            out,
             "  - {} [{}] {} {}",
             s(q, "id"),
             s(q, "thread"),
@@ -254,13 +277,14 @@ pub fn brief(c: &Connection, only: Option<&str>, detail: Detail) {
         );
     }
 
-    println!("\nThreads in motion:");
+    say!(out, "\nThreads in motion:");
     for t in threads(c)
         .iter()
         .filter(|t| s(t, "state") == "moving" && wanted(t, "name"))
     {
         let name = s(t, "name");
-        println!(
+        say!(
+            out,
             "  - {name}: {} open steps, {} done; last activity {}",
             t["open_s"],
             t["done_s"],
@@ -272,7 +296,7 @@ pub fn brief(c: &Connection, only: Option<&str>, detail: Detail) {
             &[&name],
         );
         if let Some(step) = next.first() {
-            println!("      next: {}", s(step, "title"));
+            say!(out, "      next: {}", s(step, "title"));
         }
         let answered = rows(
             c,
@@ -286,14 +310,15 @@ pub fn brief(c: &Connection, only: Option<&str>, detail: Detail) {
             } else {
                 "owner answered"
             };
-            println!("      {who} \"{}\": {}", s(q, "title"), s(q, "answer"));
+            say!(out, "      {who} \"{}\": {}", s(q, "title"), s(q, "answer"));
         }
         let decided = decided(c, name, 5);
         if !decided.is_empty() {
-            println!("      decided, latest settled:");
+            say!(out, "      decided, latest settled:");
         }
         for d in &decided {
-            println!(
+            say!(
+                out,
                 "        {} · {} ({})",
                 s(d, "day"),
                 s(d, "title"),
@@ -302,10 +327,12 @@ pub fn brief(c: &Connection, only: Option<&str>, detail: Detail) {
         }
     }
 
-    println!(
+    say!(
+        out,
         "\nThe store is the source of truth: backtrail serve (http://127.0.0.1:{}). Sources are read only; notes carry no status.",
         cfg().port
     );
+    out
 }
 
 pub fn thread(c: &Connection, name: &str) -> Value {
@@ -332,7 +359,28 @@ pub fn thread(c: &Connection, name: &str) -> Value {
         &[&name],
     );
     json!({"thread": thread.first(), "items": items, "sources": sources, "claims": claims, "decided": decided(c, name, 8),
-           "artifacts": thread_artifacts(c, name)})
+           "artifacts": thread_artifacts(c, name), "agent": agent_start(name)})
+}
+
+fn agent_start(thread: &str) -> Value {
+    let brief = format!(
+        "\"$(backtrail brief --thread '{}')\"",
+        thread.replace('\'', "'\\''")
+    );
+    let (name, start) = match cfg().agent.as_str() {
+        "gemini" => ("Gemini CLI", format!("gemini -i {brief}")),
+        "codex" => ("Codex", format!("codex {brief}")),
+        "antigravity" => (
+            "Antigravity",
+            format!("backtrail brief --thread '{thread}'"),
+        ),
+        "command" => (
+            "the coding agent",
+            format!("backtrail brief --thread '{thread}'"),
+        ),
+        _ => ("Claude Code", format!("claude {brief}")),
+    };
+    json!({"name": name, "start": start})
 }
 
 fn thread_artifacts(c: &Connection, name: &str) -> Vec<Value> {

@@ -19,9 +19,7 @@ fi
 cd "$(mktemp -d)" || exit 1
 for id in "${IDS[@]+"${IDS[@]}"}"; do
   packet="$("$TM" howto-packet "$id")" || { echo "$id: no packet"; continue; }
-  raw="$(printf '%s' "$packet" | claude -p --model "$MODEL" --tools "" --no-session-persistence --output-format json \
-        --setting-sources project --disable-slash-commands --strict-mcp-config --max-budget-usd 0.10 \
-        --system-prompt "$(cat "$DIR/howto-prompt.md")" 2>/dev/null)"
+  raw="$(printf '%s' "$packet" | "$DIR/ask.py" --tier small --model "$MODEL" --budget 0.10 --system "$DIR/howto-prompt.md")"
   DRY="$DRY" ID="$id" TM="$TM" RAW="$raw" python3 - <<'PY'
 import json, os, re, subprocess, sys
 id_, tm, raw = os.environ["ID"], os.environ["TM"], os.environ["RAW"]

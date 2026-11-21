@@ -3,6 +3,7 @@ use crate::db::{home, rows, s};
 use rusqlite::Connection;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
 use std::io::Read;
 
 const MAX_SHOWN: usize = 2;
@@ -152,13 +153,25 @@ fn shown_path(session: &str) -> Option<std::path::PathBuf> {
     (!safe.is_empty()).then(|| home().join("recall").join(safe))
 }
 
-pub fn hook(c: &Connection) {
+pub fn hook(c: &Connection, harness: Option<crate::hooks::Harness>) {
     let mut raw = String::new();
     std::io::stdin().read_to_string(&mut raw).ok();
     let input: Value = serde_json::from_str(&raw).unwrap_or_default();
-    let prompt = input["prompt"].as_str().unwrap_or("");
-    let session = input["session_id"].as_str().unwrap_or("");
-    let cwd = input["cwd"].as_str().unwrap_or("");
+    let field = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|k| input[*k].as_str())
+            .or_else(|| {
+                input["workspacePaths"][0]
+                    .as_str()
+                    .filter(|_| keys.contains(&"cwd"))
+            })
+            .unwrap_or("")
+            .to_string()
+    };
+    let prompt = field(&["prompt", "lastUserInput"]);
+    let session = field(&["session_id", "conversationId"]);
+    let cwd = field(&["cwd"]);
+    let (prompt, session, cwd) = (prompt.as_str(), session.as_str(), cwd.as_str());
     let path = shown_path(session);
     let seen: HashSet<String> = path
         .as_ref()
@@ -173,12 +186,13 @@ pub fn hook(c: &Connection) {
     if fresh.is_empty() {
         return;
     }
-    println!(
-        "Backtrail: settled decisions that may bear on this request (cite or follow them; ask before reversing one):"
+    let mut text = String::from(
+        "Backtrail: settled decisions that may bear on this request (cite or follow them; ask before reversing one):\n",
     );
     for h in &fresh {
-        println!("- {} ({}) — said: \"{}\"", h.title, h.day, h.quote);
+        let _ = writeln!(text, "- {} ({}) — said: \"{}\"", h.title, h.day, h.quote);
     }
+    crate::hooks::emit(harness, crate::hooks::prompt_event(harness), &text);
     if let Some(p) = path {
         if let Some(dir) = p.parent() {
             std::fs::create_dir_all(dir).ok();

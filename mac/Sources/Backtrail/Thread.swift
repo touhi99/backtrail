@@ -23,7 +23,7 @@ struct ThreadView: View {
     @State private var story: Story?
     @State private var showRejected = false
 
-    enum Tab: String, CaseIterable { case steps = "Steps", journey = "Journey", decisions = "Decisions", made = "Made", artifacts = "Artifacts", sources = "Sources", archive = "Archive", claude = "Claude Code" }
+    enum Tab: String, CaseIterable { case steps = "Steps", journey = "Journey", decisions = "Decisions", made = "Made", artifacts = "Artifacts", sources = "Sources", archive = "Archive", agent = "Coding agent" }
 
     var body: some View {
         ScrollView {
@@ -221,8 +221,8 @@ struct ThreadView: View {
                 SourcesView(sources: d["sources"].arr)
             case .archive:
                 archive(items)
-            case .claude:
-                claudeCode
+            case .agent:
+                agentView(d["agent"])
             }
         }
         .padding(.horizontal, 32).padding(.top, 30).padding(.bottom, 44)
@@ -292,10 +292,10 @@ struct ThreadView: View {
         }
     }
 
-    private var claudeCode: some View {
-        let cmd = "claude \"$(backtrail brief --thread '\(name)')\""
+    private func agentView(_ agent: J) -> some View {
+        let cmd = agent["start"].str
         return VStack(alignment: .leading, spacing: 10) {
-            Text("Work on it in Claude Code").font(.system(size: 15, weight: .semibold))
+            Text("Work on it in \(agent["name"].str)").font(.system(size: 15, weight: .semibold))
             HStack(spacing: 8) {
                 Text(cmd).font(.system(size: 12, design: .monospaced)).foregroundStyle(Color.soft).lineLimit(1).truncationMode(.middle)
                     .textSelection(.enabled)

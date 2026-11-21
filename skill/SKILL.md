@@ -5,25 +5,27 @@ description: File decisions, steps and questions into the Backtrail store from r
 
 # Backtrail thinking job
 
-Backtrail indexes Claude Code sessions, notes and artifact snapshots. Facts are filed against threads and must
+Backtrail indexes coding-agent sessions (Claude Code, Codex CLI, Gemini CLI, and any tool with a converter), notes
+and artifact snapshots. Facts are filed against threads and must
 cite an indexed source with a verbatim quote. The store is read through the `backtrail` binary
 (`target/release/backtrail` in the project folder). Never write status into notes.
 
 ## Cheap path (default)
 
 Extraction is overview work and does not need a large model. `skill/extract.sh <session ref>...` (or `--session ID`,
-`--limit N`, `--entity NAME`) runs one single-shot call per session on a small model (`BACKTRAIL_COMPILE_MODEL`, default
-`haiku`) with no tools, no project instructions and no saved session. It pipes `backtrail extract-input <ref>` in and
+`--limit N`, `--entity NAME`) runs one single-shot call per session on a small model through `skill/ask.py`, which uses the agent CLI set with
+`bt agent` (`claude` by default, with `BACKTRAIL_COMPILE_MODEL`, default `haiku`), with no tools and no saved session. It pipes `backtrail extract-input <ref>` in and
 `backtrail import -` out, then records the cost with `extract-log`. One call returns decisions, steps, questions,
 state and rationale claims, and relations, so a session is read once. `skill/session-end.sh` is the SessionEnd hook
-body: it runs `ingest` and `embed`, and starts `extract.sh` and `resolve.sh` in the background unless `BACKTRAIL_COMPILE_ON_END=0`.
+body: it runs `ingest`, marks the session ended and starts `skill/sweep.sh` in the background unless
+`BACKTRAIL_COMPILE_ON_END=0`. The sweep reads every queued session (`bt status` lists them) and checks every proposed item.
 While `BACKTRAIL_COMPILE` is set, `brief` and the hook exit at once, so an extraction run cannot start another. Main
 sessions do not file facts themselves.
 
 `skill/finish.sh [--dry] [--limit N] [id...]` closes open steps, answered questions and proposed decisions that a later
 session, note or commit shows finished. A model names a passage and a verbatim quote, a second model confirms it, and
 `backtrail finish` checks the quote against the source before writing. An item judged and left open is skipped for 7 days.
-The session-end hook runs it for 15 items.
+Each sweep runs it for 15 items.
 
 Other commands for keeping the store accurate without raw SQL:
 - `backtrail flag <id> --as live|in_effect|superseded|done --reason "..."` labels a proposed item after checking it
@@ -36,7 +38,7 @@ Other commands for keeping the store accurate without raw SQL:
 
 1. `backtrail ingest` to pick up new sources. Artifacts are read with the Artifact tool and saved to
    `<data dir>/artifacts/<id>/index.html` first.
-2. `backtrail pending --days 3` lists recent sessions that no item cites.
+2. `backtrail status` lists sessions not yet read, with the reason for each.
 3. `backtrail show <ref>` prints a source. Read it before filing anything.
 4. File each finding with
    `backtrail add <decision|step|question|turn> --thread "<thread>" --title "<=110 chars" --body "<=320 chars" --entities "<main subject>,<others>" --source "<ref>" --quote "<verbatim text from that source>" --origin suggested --state proposed`

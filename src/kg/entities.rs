@@ -281,7 +281,7 @@ fn mask_word(text: &str, word: &str) -> String {
 
 pub fn relink_all(c: &Connection) -> usize {
     let rows: Vec<(String, String, String)> = c
-        .prepare("SELECT id, ifnull(thread,''), title||' '||ifnull(body,'')||' '||ifnull(quote,'') FROM claims WHERE type IN ('decision','state','rationale')")
+        .prepare("SELECT id, ifnull(thread,''), title||' '||ifnull(body,'')||' '||ifnull(quote,'') FROM claims")
         .expect("prepare query")
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
         .expect("run query")

@@ -13,8 +13,9 @@ JSON API. The binary writes the database; sources (session logs, notes, git hist
   keyword only. `"embeddings": false` in `config.json` turns it off.
 - The server listens on `127.0.0.1` and answers `403` to a request whose `Host` or `Origin` header names another
   machine, so a page on another site cannot read or write the store.
-- Facts (decisions, steps, questions, claims) are produced by Claude Code sessions or `skill/extract.sh`, and written
-  back through the binary.
+- Facts (decisions, steps, questions, claims) are produced by agent sessions or `skill/extract.sh`, and written back
+  through the binary. Every model call in `skill/` goes through `skill/ask.py`, which runs the reading agent's CLI
+  (`claude`, `gemini`, `codex`, `agy` or a configured command; `bt agent` sets it) and returns one JSON shape.
 - The knowledge graph is built from those records. Entities are named in a dictionary (`bt kg entity add`); each claim
   is linked to the entities its text names, and relations between threads come from `skill/extract.sh` or `bt relate`.
   `bt kg lint` lists probable duplicates.
@@ -29,9 +30,12 @@ JSON API. The binary writes the database; sources (session logs, notes, git hist
 | `items.rs` | Work items: the write rule (type, length limits, a verbatim quote from an indexed source), the keep rule, and every change the app or the command line makes to an item. |
 | `views.rs` | Read-only page data for the app (Home, thread, focus, items, source, trail, graph) and the session-start brief. `decided()` lists a project's latest settled decisions still in force, with who confirmed each; the brief and `/api/thread` use it. |
 | `search.rs` | Hybrid passage search (BM25 and vectors, merged by reciprocal rank fusion) and the item index. |
-| `check.rs` | `check`, `check --pairs`, `pending`, `match`, `artifacts`, `show` and `log`. |
+| `check.rs` | `check`, `check --pairs`, `match`, `artifacts`, `show` and `log`. |
+| `coverage.rs` | Session states (`complete`, `running`, `unread`, `behind`, `failed`, `excluded`) for `status`, the brief and the extraction queue. |
 | `server.rs` | Local HTTP server (`tiny_http`, loopback only): routes, request guard and the background scan. Each route calls one function. |
-| `ingest/` | Readers for sessions, notes, artifact snapshots and git (`sessions.rs`, `notes.rs`, `git.rs`), thread assignment (`threads.rs`), relinking and the daily backup (`mod.rs`). |
+| `ingest/` | Readers for Claude Code sessions, notes, artifact snapshots and git (`sessions.rs`, `notes.rs`, `git.rs`), thread assignment (`threads.rs`), relinking and the daily backup (`mod.rs`). |
+| `ingest/harness/` | Readers for other agents' sessions (`codex.rs`, `gemini.rs`) and inbox files (`inbox.rs`); each returns the same turn list, which `mod.rs` stores. |
+| `hooks.rs` | `bt hooks` for each agent (hooks file, events, skill link) and `emit`, which wraps brief and recall text in the JSON each agent reads. |
 | `resolve.rs` | Candidates for a proposed item (shared entities, rarity-weighted words, nearest passages), the model packet, applying a verdict (entities, thread, `valid_to`, settling item), `resolve`, `unresolve`, expiry. |
 | `kg/` | Knowledge graph: claim write rule and relations (`claims.rs`), entities (`entities.rs`), history queries (`query.rs`), extraction queue and packet (`extract.rs`), graph pages (`screen.rs`), lint, export and restore. |
 | `embed.rs` | Embedding client, vector table and brute-force nearest-neighbour lookup. |
@@ -71,7 +75,7 @@ JSON API. The binary writes the database; sources (session logs, notes, git hist
 The server runs a timer thread every 5 minutes: rescan sources, write a daily backup, embed new passages up to the
 configured batch size.
 
-Hooks (diagram: README, "How it works"):
+Hooks, for each connected agent (events per agent: `harnesses.md`, "Support by tool"):
 
 - SessionStart runs `bt brief`, which rescans and prints open questions and threads in motion; embedding is left
   to the timer and the session end. `bt brief --thread <name>` adds the project's latest settled decisions, settled
@@ -82,9 +86,17 @@ Hooks (diagram: README, "How it works"):
   session's project is its thread when that thread is a project, else the thread holding 80% of the sessions from
   the working directory. At most two decisions print, each once per session (ids in `recall/<session id>`).
   Paraphrases with no shared words are missed.
-- SessionEnd runs `skill/session-end.sh` in the background: `ingest`, `embed`, then extraction
-  (`skill/extract.sh`, one small-model call per session) and resolution (`skill/resolve.sh`, one call per proposed
-  item). `BACKTRAIL_COMPILE_ON_END=0` skips both.
+- SessionEnd runs `skill/session-end.sh`: `ingest`, marks the session ended, then `skill/sweep.sh` in the background.
+  The server also starts `skill/sweep.sh` every 5 minutes while any session is queued or any proposed item is
+  unchecked. The sweep holds `<data dir>/sweep.lock`, so only one runs at a time, and drains the queues: extraction
+  (`skill/extract.sh`, one small-model call per session), resolution and reverse checks (`skill/resolve.sh`), then
+  `finish.sh --limit 15`. It logs to `<data dir>/logs/sweep.log`. `BACKTRAIL_COMPILE_ON_END=0` skips it.
+- Session states (`coverage.rs`): `excluded` (no owner turn, Backtrail's own call or a probe prompt, duplicate id, or skipped by
+  hand), `complete` (read, and no owner turn newer than the read), `running` (file written in the last 30 minutes and
+  no end mark), `unread`, `behind` (owner turns after the last read; only those turns are sent), and `failed` (5
+  failed attempts since the last read; the last error is shown). Unread and behind sessions are queued, including
+  Unsorted ones. Every ingest links each item to the entities its text names, so an item reaches the graph without a
+  model call when its project or a known alias is named.
 - Finished steps: the extraction packet lists every open step with its id, and the model names the ones the session
   finished, with a quote. `skill/close-step.sh` runs `finish`: the quote must be in the session, and a second model
   (`BACKTRAIL_VERIFY_MODEL`, default opus) must confirm the passage shows that step finished before it closes;
@@ -122,6 +134,11 @@ earlier is read again in full. Reading stops at the last complete line, so a lin
 next scan. Notes and artifacts are still read again in full when they change; after a scan, `relink` points each fact
 whose passage no longer holds its quote at the passage that does.
 
+Codex and Gemini CLI files are read again in full when their modification time changes (`ingest/harness/`); stored
+turns are replaced, and a file whose session is already stored at the same time only has its path updated. Each
+file's working directory sets its project through the same mapping as Claude Code's folder names, so one folder is
+one project across agents. Subagent sessions and sessions run from a temporary folder are skipped.
+
 ## App
 
 Routes: Home, Graph (decisions, mentions and over-time views), Items, Log, Search, Thread, Source. `/map?thread=` shows one
@@ -152,8 +169,9 @@ The source carries no comments. The reasons behind rules that the code alone doe
 - `ingest/mod.rs`: commit matching (`bt match`) is not part of the scan, because a shared two-word phrase marked
   unrelated steps as done. The newest three daily backups are kept. Secret redaction is pattern based and misses
   secrets with no fixed shape.
-- `ingest/threads.rs`: a project thread gets a project entity, because the extractor and resolver file an item under
-  the thread of its main entity. A short untitled session stays unsorted. A session pinned with `bt assign` keeps its
+- `ingest/threads.rs`: a build or plan thread gets a project entity, because the extractor and resolver file an item
+  under the thread of its main entity. Every other configured thread gets a topic entity, so an item on an idea or
+  discussion thread that names no known entity still reaches the graph. A short untitled session stays unsorted. A session pinned with `bt assign` keeps its
   thread on every rescan.
 - `items.rs`: the thread follows the first named project entity; mentions alone move an item only off a topic thread,
   so a passing mention leaves an item on its project. Each rescan runs `rehome`: an item on a discussion, idea or
@@ -175,9 +193,9 @@ The source carries no comments. The reasons behind rules that the code alone doe
   ends on its last update or the resolver's `stale` check, the day the system noticed. Rejected suggestions with no end
   count as not in force on any day. `BACKTRAIL_EXCLUDE_SESSION` hides one session's claims and passages, for evaluation. Neighbour
   strength is shared claims relative to the size of the entity reached, so a hub does not win by volume.
-- `kg/extract.rs`: Unsorted sessions are left out of the general queue but kept when the hook names the session that
-  just ended, since work run from a parent folder lands in Unsorted. The cost estimate is the logged read cost plus 0.011 USD per item filed, and falls back to 0.08 USD when no
-  run is logged.
+- `kg/extract.rs`: the queue comes from the session states in `coverage.rs`, Unsorted sessions included, since work run
+  from a parent folder lands in Unsorted. The usage estimate is one call per read plus one per item filed, averaged
+  over logged reads, and falls back to 5 calls when none is logged.
 - `finish.rs`: open steps of every thread are listed, since a session is often filed under another thread than the
   step it finishes. A step closes only when a second model confirms the passage, because in a test run the first model
   named a step for an unrelated line. Commit subjects were tried as corroboration and dropped: on a busy thread a commit

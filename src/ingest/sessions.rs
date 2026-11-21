@@ -91,13 +91,7 @@ fn parse_session(raw: &str) -> (String, Vec<(String, String, String)>) {
                 _ => {}
             }
             let tt = text.trim();
-            if tt.len() < 15
-                || tt.starts_with("<local-command")
-                || tt.starts_with("<command-")
-                || tt.starts_with("<system-reminder")
-                || tt.starts_with("[SYSTEM")
-                || tt.starts_with("Caveat:")
-            {
+            if !worth_keeping(tt) {
                 continue;
             }
             turns.push((t.to_string(), ts, redact(tt).into_owned()));
@@ -106,7 +100,43 @@ fn parse_session(raw: &str) -> (String, Vec<(String, String, String)>) {
     (title, turns)
 }
 
-fn add_turns(c: &Connection, sid: i64, seq0: i64, turn0: i64, turns: &[(String, String, String)]) {
+pub(super) fn worth_keeping(text: &str) -> bool {
+    text.len() >= 15
+        && ![
+            "<local-command",
+            "<command-",
+            "<system-reminder",
+            "[SYSTEM",
+            "Caveat:",
+        ]
+        .iter()
+        .any(|p| text.starts_with(p))
+}
+
+pub(super) fn project_of(dir_name: &str) -> Option<String> {
+    if dir_name.contains("private-tmp") || dir_name.contains("private-var") {
+        return None;
+    }
+    let hs = slug(&home_dir());
+    let rest = dir_name.strip_prefix(&format!("{hs}-")).unwrap_or(dir_name);
+    Some(if dir_name == hs {
+        "home".to_string()
+    } else {
+        ["Desktop-", "Documents-"]
+            .iter()
+            .find_map(|p| rest.strip_prefix(p))
+            .unwrap_or(rest)
+            .to_string()
+    })
+}
+
+pub(super) fn add_turns(
+    c: &Connection,
+    sid: i64,
+    seq0: i64,
+    turn0: i64,
+    turns: &[(String, String, String)],
+) {
     let mut seq = seq0;
     for (i, (role, ts, text)) in turns.iter().enumerate() {
         for (k, part) in split_turn(text, TURN_CHUNK).iter().enumerate() {
@@ -164,19 +194,8 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
     c.execute_batch("BEGIN").expect("write to database");
     for d in dirs.flatten() {
         let dn = d.file_name().to_string_lossy().to_string();
-        if dn.contains("private-tmp") || dn.contains("private-var") {
+        let Some(proj) = project_of(&dn) else {
             continue;
-        }
-        let hs = slug(&home_dir());
-        let rest = dn.strip_prefix(&format!("{hs}-")).unwrap_or(&dn);
-        let proj = if dn == hs {
-            "home".to_string()
-        } else {
-            ["Desktop-", "Documents-"]
-                .iter()
-                .find_map(|p| rest.strip_prefix(p))
-                .unwrap_or(rest)
-                .to_string()
         };
         let Ok(files) = std::fs::read_dir(d.path()) else {
             continue;
@@ -367,6 +386,7 @@ pub fn unindexed(c: &Connection) -> Vec<(String, u64)> {
             }
         }
     }
+    out.extend(super::harness::unindexed(c));
     out.sort_by_key(|e| std::cmp::Reverse(e.1));
     out
 }

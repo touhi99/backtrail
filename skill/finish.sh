@@ -5,7 +5,7 @@ TM="$DIR/../target/release/backtrail"
 MODEL="${BACKTRAIL_FINISH_MODEL:-sonnet}"
 export BACKTRAIL_COMPILE=1
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-command -v claude >/dev/null 2>&1 || { echo "finish.sh: the claude CLI is not on PATH" >&2; exit 1; }
+"$DIR/ask.py" --check >/dev/null || exit 1
 DRY=""; LIMIT=50; IDS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -18,9 +18,7 @@ done
 cd "$(mktemp -d)" || exit 1
 for id in "${IDS[@]+"${IDS[@]}"}"; do
   packet="$("$TM" finish-input "$id")" || continue
-  raw="$(printf '%s' "$packet" | claude -p --model "$MODEL" --tools "" --no-session-persistence --output-format json \
-        --setting-sources project --disable-slash-commands --strict-mcp-config --max-budget-usd 0.10 \
-        --system-prompt "$(cat "$DIR/finish-prompt.md")" 2>/dev/null)"
+  raw="$(printf '%s' "$packet" | "$DIR/ask.py" --tier medium --model "$MODEL" --budget 0.10 --system "$DIR/finish-prompt.md")"
   ID="$id" TM="$TM" RAW="$raw" DRY="$DRY" DIR="$DIR" python3 - <<'PY'
 import json, os, re, subprocess
 i, tm, raw, dry = os.environ["ID"], os.environ["TM"], os.environ["RAW"], os.environ["DRY"]

@@ -32,14 +32,16 @@ Commands run as `bt <command>`.
 | `show <ref>` | Print a source's passages |
 | `check [--pairs]` | Report the last 7 days of filing (items filed, how many the owner moved to another project or retired, how many `rehome` moved), lost quotes, session files not indexed yet, orphan threads, stale work; `--pairs` lists candidate contradictions |
 | `match` | Mark open steps that a later commit seems to complete as `looks done?` (word-overlap heuristic; it marks unrelated steps that share a phrase, so it runs only when called) |
-| `pending [--days N]` | List recent sessions that no item cites |
+| `status [--all]` | Session states and graph gaps; lists every session that is not complete or excluded (`--all`: every session). Exits 1 when a session failed or an item has no entity |
+| `ended <session id>` | Mark a session ended (the SessionEnd hook runs it) |
+| `home` | Print the data directory |
 | `artifacts [--manifest list.json]` | Record publish dates and report missing or stale snapshots |
 | `extract-input <ref>` | Print one session for a model: the thread's existing items, the open steps of every thread with their ids, the entity names, and the turns |
 | `finish <step> --source REF --quote Q [--verified] [--dry]` | Close an open step from a quote found in the source. It closes only with `--verified` (a second model agreed the passage shows the step finished); without, it is refused. `--dry` prints the verdict only |
 | `finish-input <step>` | Print a step and the ten passages written after it that are most like it, for `skill/finish.sh` |
 | `finish-evidence <step> --source REF --quote Q` | Print a step and the passage holding the quote, for the confirming model |
 | `finish-queue` | List steps open for more than a day |
-| `extract-queue [--session ID] [--limit N] [--entity E] [--no-cap]` | List sessions worth extracting (at most `daily_cap` a day when set, unless `--no-cap`) |
+| `extract-queue [--session ID] [--limit N] [--entity E] [--no-cap]` | List unread and behind sessions (at most `daily_cap` a day when set, unless `--no-cap`) |
 | `extract-log <ref> [--failed 1] --detail "..."` | Record one extraction run and its cost |
 | `log [--n N]` | Print the append-only change log |
 | `backup` | Copy the store to `<data dir>/backups` (also daily on rescan, newest 3 kept) |
@@ -57,7 +59,8 @@ Commands run as `bt <command>`.
 | `kg export <file>` / `kg restore <file>` | Backup of entities and all claims as JSONL; each quote is re-located by source on restore |
 | `build` | Ingest all sources, create the configured entities (`config.json` key `entities`) and embed (first run); in a terminal, offers to read the newest 20 unread sessions |
 | `demo` | Write a demo store (requires `BACKTRAIL_HOME`) |
-| `hooks [status\|install\|remove]` | Show, add or remove the Claude Code hooks in `~/.claude/settings.json`; the old file is copied to `settings.json.bak-backtrail` first |
+| `hooks [status\|install\|remove] [--harness claude,gemini,codex,antigravity]` | Show, add or remove each agent's hooks and skill link (default `claude`; `status` shows all); the old hooks file is copied to `<name>.bak-backtrail` first. Paths and events: [`harnesses.md`](harnesses.md) |
+| `agent [claude\|gemini\|codex\|antigravity\|command]` | Print or set the CLI that reads sessions (`config.json` key `agent.cli`) |
 
 `relate <A> <B> <kind> --source <ref> --quote "..." [--state proposed]` files a relation between two threads
 (`spun out of`, `forked from`, `built on`, `replaced by`) with a quote from a source. It is stored as a relation claim.
@@ -100,6 +103,7 @@ indexed. It holds custom thread rules, note folders and repositories:
 | `repos` | Repository path to thread table, used for commit matching |
 | `aliases` | Alternative names used for mention edges |
 | `compile` | `daily_cap`: extraction runs a day; unset means no limit |
+| `agent` | The CLI that reads sessions: `cli` is `claude` (default), `gemini`, `codex`, `antigravity` or `command`; `small`, `medium`, `large` name the models for the CLIs other than `claude`; `command` is a shell command that reads the prompt on stdin and prints the answer. `BACKTRAIL_AGENT` overrides `cli`. See [`harnesses.md`](harnesses.md#reading-agent) |
 | `port` | Server port (8799) |
 | `embeddings` | On by default with `url` `http://127.0.0.1:11434` and `model` `embeddinggemma-2:270m`. Keys: `url` (an Ollama-compatible server, `http://` only), `model`, and optionally `query_prefix`, `document_prefix` (default to `task: search result | query: ` and `title: none | text: ` for `embeddinggemma` models, `search_query: ` and `search_document: ` for `nomic` models, empty otherwise) and `batch_cap` (passages per background run, default 2000). `false` turns embeddings off. Changing `model` discards stored vectors and re-embeds. |
 
@@ -134,15 +138,17 @@ Titles were written by a model from the cited passage, so the queries are not ty
 
 ## Hooks
 
-`bt hooks install` adds both hooks to `~/.claude/settings.json`; `bt hooks remove` takes them out. By hand:
+`bt hooks install` adds the Claude Code hooks to `~/.claude/settings.json`; `--harness gemini,codex,antigravity`
+adds the other agents' hooks ([`harnesses.md`](harnesses.md#support-by-tool)); `bt hooks remove` takes them out. By
+hand, for Claude Code:
 
 - `SessionStart`: `bt brief` prints one line per thread in motion. Claude runs `bt brief --thread <name>` for the project at hand.
-- `SessionEnd`: `<path>/skill/session-end.sh` runs `ingest` and `embed` in the background when a session closes, then
-  `skill/extract.sh` on the session and `skill/resolve.sh` on the unjudged proposed items. Both make model calls.
-  Extraction also names open steps the session finished; `skill/close-step.sh` closes each one (see `finish`).
-  `BACKTRAIL_COMPILE_ON_END=0` in the hook's environment skips them. It then runs `skill/resolve.sh --reverses
-  --limit 10`, which links the newest settled decisions not yet checked to older ones (changed, restates) and to the
-  reasons from their session (because); `BACKTRAIL_LINK_ON_END=0` skips it.
+- `SessionEnd`: `<path>/skill/session-end.sh` runs `ingest`, marks the session ended and starts `skill/sweep.sh` in
+  the background. The sweep reads every queued session with `skill/extract.sh`, judges every unjudged proposed item
+  with `skill/resolve.sh`, links settled decisions to older ones and to their reasons with `resolve.sh --reverses`, and
+  runs `finish.sh --limit 15`. All of these make model calls. Extraction also names open steps the session finished;
+  `skill/close-step.sh` closes each one (see `finish`). `BACKTRAIL_COMPILE_ON_END=0` in the hook's environment skips
+  the sweep. The server starts the same sweep every 5 minutes while work is queued.
 
 ## First run on a machine with existing sessions
 
@@ -154,14 +160,14 @@ bt build
 
 - `bt build` indexes every session and note, then embeds. On one Mac, 457 sessions and 136 notes were indexed in 4 s and
   11,728 passages embed in about 15 minutes. Without Ollama it prints how to install it and search stays keyword only.
-- The brief and the graph are empty at first: decisions come from a model reading a session. The `SessionEnd` hook reads
-  only the session that just ended, so earlier history stays unread. In a terminal, `bt build` offers to read the newest
-  20 sessions; otherwise it prints the commands (`skill/extract.sh --no-cap --limit N`, then `skill/resolve.sh`). A
-  session costs about 0.01 USD to read on a small model, plus about 0.01 USD per item filed for the check that follows;
-  0.05 to 0.15 USD per session in practice.
+- The brief and the graph are empty at first: decisions come from a model reading a session. The sweep reads every unread
+  session, including earlier history, once the server runs. In a terminal, `bt build` offers to read the newest 20
+  sessions first; `bt skip <ref>` excludes a session from reading. A
+  session takes one small-model call to read plus one check call per item filed: about 6 calls per session in
+  practice, counted against the plan or API key of the agent CLI set in `agent`.
 - Without `config.json`, each Claude Code project folder becomes a thread named after the folder. Thread rules,
   entities and note folders are set in `config.json` (see Configuration).
-- The model scripts call the `claude` CLI, so their usage counts against the account that is logged in on that machine.
+- The model scripts call the agent CLI set in `agent`, so their usage counts against the account that is logged in on that machine.
   A second machine or account sees only its own sessions; `bt kg export <file>` and `bt kg restore <file>` carry claims
   across.
 - `bt hooks install` writes absolute paths to this checkout, so it is run on each machine.
@@ -188,7 +194,8 @@ been measured beyond that size.
 
 | Script | Usage |
 | --- | --- |
-| `skill/session-end.sh` | SessionEnd hook; reads the hook JSON (`session_id`) on stdin. In the background: `ingest`, `embed`, `extract.sh` on the session, `resolve.sh --limit 20`, `finish.sh --limit 15`. `BACKTRAIL_COMPILE_ON_END=0` skips the model calls; `resolve.sh --reverses --limit 10` links decisions unless `BACKTRAIL_LINK_ON_END=0` |
+| `skill/session-end.sh` | SessionEnd hook; reads the hook JSON (`session_id`) on stdin, runs `ingest`, `ended <id>`, then `sweep.sh` in the background |
+| `skill/sweep.sh` | One sweep under `<data dir>/sweep.lock`: `ingest`, `embed`, extraction of every queued session, `resolve.sh` and `resolve.sh --reverses` until their queues are empty, `finish.sh --limit 15`. Logs to `<data dir>/logs/sweep.log`. `BACKTRAIL_COMPILE_ON_END=0` skips it |
 | `skill/extract.sh [--entity NAME] [--limit N] [--session ID] [--no-cap] \| <session ref>...` | One single-shot model call per session; the answer goes through `bt import -` |
 | `skill/resolve.sh [--dry] [--reverses] [--limit N] \| [--dry] [--reverses] <item id>...` | One call per proposed item (`BACKTRAIL_RESOLVE_MODEL`, default sonnet). `--reverses` judges settled decisions, and a second model confirms each reversal |
 | `skill/finish.sh [--dry] [--limit N] [step id...]` | Backlog sweep over items older than a day and not judged in the last 7 days |
@@ -214,7 +221,7 @@ behind non-obvious rules are in `architecture.md`, section "Rules in the code". 
 ## Other limits
 
 - Thread assignment is regular-expression based; unmatched sources stay in `Unsorted`.
-- One extraction run of a session on a small model cost 0.0019 to 0.0033 USD in three runs (3,100 to 6,200 input tokens).
+- One extraction run of a session on a small model took 3,100 to 6,200 input tokens in three runs.
 - Only the text of user and assistant turns is stored, in chunks of at most 2,400 characters. Tool calls, tool output,
   thinking and images are not. On one store this was about 0.5% of the bytes in the transcript files (5.9 MB of
   1.8 GB over 26 days).

@@ -20,7 +20,9 @@ CREATE TABLE IF NOT EXISTS sources(
   -- sessions only: how far the file has been read, a hash of the 256 bytes before that point, turns stored
   bytes INTEGER NOT NULL DEFAULT 0,
   tail TEXT,
-  nturns INTEGER NOT NULL DEFAULT 0
+  nturns INTEGER NOT NULL DEFAULT 0,
+  -- sessions from a tool other than Claude Code: codex, gemini, or the name in an inbox file
+  harness TEXT
 );
 
 -- Sessions the owner or Claude read and decided hold nothing to file. They leave the pending list.

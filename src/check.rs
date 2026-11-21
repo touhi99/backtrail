@@ -171,37 +171,6 @@ pub fn pairs(c: &Connection) {
     );
 }
 
-pub fn pending(c: &Connection, days: i64) {
-    let sessions = rows(
-        c,
-        "SELECT s.ref, s.title, s.thread, s.last_ts, s.nchunks,
-                (SELECT substr(replace(text,char(10),' '),1,140) FROM chunks
-                 WHERE source_id=s.id AND role='user' ORDER BY seq LIMIT 1) AS first
-         FROM source_stat s
-         WHERE s.kind='session' AND s.thread!='Unsorted' AND s.nchunks>=6 AND s.cited=0 AND s.reviewed=0
-         ORDER BY s.last_ts DESC LIMIT 200",
-        &[],
-    );
-    let recent: Vec<&Value> = sessions
-        .iter()
-        .filter(|r| days_ago(s(r, "last_ts")) <= days)
-        .collect();
-    for r in &recent {
-        println!(
-            "{} | {} | {} | {} passages\n    {}",
-            s(r, "ref"),
-            s(r, "thread"),
-            s(r, "title"),
-            r["nchunks"],
-            s(r, "first")
-        );
-    }
-    println!(
-        "{} uncompiled sessions in the last {days} days. Read one with `backtrail show <ref>`, file items with `backtrail add ... --origin suggested --state proposed`.",
-        recent.len()
-    );
-}
-
 pub fn show(c: &Connection, source_ref: &str) {
     let source_ref = crate::db::resolve_ref(c, source_ref);
     let passages = rows(

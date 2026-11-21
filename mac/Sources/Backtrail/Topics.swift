@@ -13,7 +13,7 @@ private struct Added {
     let entity: String
     let linked: Int
     let unread: Int
-    let usdEach: Double
+    let callsEach: Double
     var started: Int?
 }
 
@@ -56,7 +56,7 @@ struct TopicsPanel: View {
         let r = try? await API.post("/api/kg/entity", ["name": name, "kind": k, "alias_of": aliasOf])
         if let r, !r["entity"].str.isEmpty {
             added = Added(entity: r["entity"].str, linked: r["linked"].int, unread: r["unread"].int,
-                          usdEach: (r["usd_each"].v as? NSNumber)?.doubleValue ?? 0.02)
+                          callsEach: (r["calls_each"].v as? NSNumber)?.doubleValue ?? 5)
             hid = ""
         }
         if k == "ignore" { hid = name; added = nil }
@@ -109,7 +109,7 @@ struct TopicsPanel: View {
             if a.unread > 0 && a.started == nil {
                 let n = min(a.unread, 30)
                 Button { Task { await read() } } label: {
-                    Text("Read \(n) sessions now · about $\(String(format: "%.2f", Double(n) * a.usdEach))").frame(maxWidth: .infinity)
+                    Text("Read \(n) sessions now · about \(Int((Double(n) * a.callsEach).rounded())) model calls").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(BtnStyle(kind: .primary))
             }
