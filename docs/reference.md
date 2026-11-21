@@ -185,8 +185,9 @@ stayed under 1 ms at p95; full-text search grew linearly to a p95 of about 650 m
 an entity or time prefilter past about 2 million.
 
 Keyword search uses SQLite FTS5, which handles far more than the 11,800 passages in the test store.
-Parts that do not scale unchanged: vectors are compared by brute force over an in-memory copy (about 36 MB at 768 dimensions and 11,800
-passages, a few hundred thousand passages at most before it needs an index); `graph()` rebuilds the whole graph per
+Parts that do not scale unchanged: vectors are 8-bit (772 bytes each at 768 dimensions) and scanned
+from SQLite on each search without a copy in memory: 0.11 s and 14 MB peak at 15,600 passages, 0.28 s and 12 MB at
+188,000 (measured on repeated vectors); 8-bit top-10 results match 32-bit ones 98% of the time; `graph()` rebuilds the whole graph per
 request with one FTS query per thread; the item index is rebuilt in memory whenever facts change. None of these has
 been measured beyond that size.
 

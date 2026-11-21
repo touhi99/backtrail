@@ -61,7 +61,7 @@ Options and first-run notes: [`docs/reference.md`](docs/reference.md).
 
 - Gemini CLI, Codex CLI and Antigravity support follows their docs and source and has not run against the real tools.
   Antigravity sessions need a converter ([`docs/harnesses.md`](docs/harnesses.md#adding-a-tool)).
-- Search holds vectors in memory: a few hundred thousand passages at most.
+- Search by meaning scans every stored vector: about 0.3 s per search at 190,000 passages, with flat memory.
 - The quote check shows a quote exists, not that the title reads it fairly.
 - An item's project can be wrong. `bt check` reports items moved or retired by hand in the last 7 days.
 

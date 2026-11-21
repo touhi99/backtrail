@@ -38,7 +38,7 @@ JSON API. The binary writes the database; sources (session logs, notes, git hist
 | `hooks.rs` | `bt hooks` for each agent (hooks file, events, skill link) and `emit`, which wraps brief and recall text in the JSON each agent reads. |
 | `resolve.rs` | Candidates for a proposed item (shared entities, rarity-weighted words, nearest passages), the model packet, applying a verdict (entities, thread, `valid_to`, settling item), `resolve`, `unresolve`, expiry. |
 | `kg/` | Knowledge graph: claim write rule and relations (`claims.rs`), entities (`entities.rs`), history queries (`query.rs`), extraction queue and packet (`extract.rs`), graph pages (`screen.rs`), lint, export and restore. |
-| `embed.rs` | Embedding client, vector table and brute-force nearest-neighbour lookup. |
+| `embed.rs` | Embedding client, vector table (8-bit values with one scale per vector) and a nearest-neighbour scan that reads vectors from SQLite row by row and keeps only the best `k`. |
 | `config.rs`, `clock.rs` | `config.json`, read once per process; UTC timestamps. |
 | `demo.rs` | The demo store. |
 | `src/sql/` | `schema.sql` (tables), `views.sql` (the `item`, `fact`, `thread_stat`, `source_stat` and `entity_stat` read views that pages filter) and `migrate_unify.sql`. Other statements are inline next to the code that runs them. |
