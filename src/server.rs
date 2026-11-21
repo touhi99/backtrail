@@ -294,15 +294,13 @@ fn background_scan() {
         let c = db::open();
         crate::ingest::rescan(&c);
         crate::resolve::expire(&c);
-        if crate::embed::enabled() {
-            match crate::embed::run(&c, crate::config::cfg().embeddings.batch_cap) {
-                Err(e) if !warned => {
-                    warned = true;
-                    eprintln!("embed: {e} (further errors are not printed)");
-                }
-                Ok(_) => warned = false,
-                Err(_) => {}
+        match crate::embed::run(&c, crate::config::cfg().embeddings.batch_cap) {
+            Err(e) if !warned => {
+                warned = true;
+                eprintln!("embed: {e} (further errors are not printed)");
             }
+            Ok(_) => warned = false,
+            Err(_) => {}
         }
         start_sweep(&c);
         std::thread::sleep(Duration::from_secs(300));

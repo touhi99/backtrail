@@ -99,15 +99,18 @@ pub(super) fn run() {
             match embed::run(&c, usize::MAX) {
                 Ok((n, left)) => println!("embedded {n} passages, {left} pending"),
                 Err(e) => eprintln!(
-                    "embed skipped: {e}\nSearch works by keyword only until the embedding server is reachable. \
-                     Install Ollama, run `ollama pull {}`, then `backtrail embed`.",
+                    "embed failed: {e}\nOllama is required. Start it, run `ollama pull {}` if the model is missing, \
+                     then `backtrail embed`.",
                     config::DEFAULT_EMBED_MODEL
                 ),
             }
             let unread =
                 kg::extract::queue(&c, usize::MAX, None, None, kg::extract::Cap::Ignore).len();
             if unread > 0 {
-                setup::offer_first_read(&c, unread);
+                println!(
+                    "{unread} sessions queued; the server reads them in the background, about {:.0} model calls each.",
+                    kg::extract::calls_each(&c)
+                );
             }
         }
         "add" => {
@@ -325,6 +328,8 @@ pub(super) fn run() {
             for (repo, e) in &r.failed {
                 eprintln!("{repo}: unchecked ({e})");
             }
+            let (pushes, unread) = crate::prs::refresh_pushes(&c);
+            println!("pushes checked: {pushes}; unchecked: {unread}");
             if r.read.is_empty() && r.failed.is_empty() {
                 println!("no repo due; --all reads every repo");
             }

@@ -30,6 +30,75 @@ fn pr_link(v: &Value) -> Option<PrLink> {
     })
 }
 
+pub(super) struct Push {
+    pub(super) repo: String,
+    pub(super) branch: String,
+    pub(super) sha: String,
+    pub(super) ts: String,
+}
+
+static TO: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(
+        r"^To (?:https://github\.com/|git@github\.com:)([\w.-]+/[\w.-]+?)(?:\.git)?/?$",
+    )
+    .expect("regex")
+});
+static UPDATE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(
+        r"^\s*\+?\s*[0-9a-f]{7,40}\.\.\.?([0-9a-f]{7,40})\s+(main|master) -> (main|master)\b",
+    )
+    .expect("regex")
+});
+
+fn pushes_in(text: &str, ts: &str, out: &mut Vec<Push>) {
+    let mut repo: Option<String> = None;
+    for line in text.lines() {
+        let line = line.trim_end();
+        if let Some(m) = TO.captures(line.trim_start()) {
+            repo = Some(m[1].to_string());
+        } else if let (Some(r), Some(m)) = (&repo, UPDATE.captures(line)) {
+            out.push(Push {
+                repo: r.clone(),
+                branch: m[3].to_string(),
+                sha: m[1].to_string(),
+                ts: ts.to_string(),
+            });
+        }
+    }
+}
+
+pub(super) fn parse_pushes(raw: &str) -> Vec<Push> {
+    let mut out = vec![];
+    for v in raw
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+    {
+        let Value::Array(blocks) = &v["message"]["content"] else {
+            continue;
+        };
+        let ts = v["timestamp"].as_str().unwrap_or("");
+        for b in blocks {
+            if b["type"] == "tool_result" && b["is_error"].as_bool() != Some(true) {
+                pushes_in(&result_text_full(&b["content"]), ts, &mut out);
+            }
+        }
+    }
+    out
+}
+
+fn result_text_full(content: &Value) -> String {
+    match content {
+        Value::String(s) => s.clone(),
+        Value::Array(a) => a
+            .iter()
+            .filter(|b| b["type"] == "text")
+            .filter_map(|b| b["text"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
 pub(super) fn parse_prs(raw: &str) -> Vec<PrLink> {
     raw.lines()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
@@ -52,17 +121,7 @@ fn tool_summary(name: &str, input: &Value) -> String {
 }
 
 fn result_text(content: &Value) -> String {
-    let text = match content {
-        Value::String(s) => s.clone(),
-        Value::Array(a) => a
-            .iter()
-            .filter(|b| b["type"] == "text")
-            .filter_map(|b| b["text"].as_str())
-            .collect::<Vec<_>>()
-            .join("\n"),
-        _ => String::new(),
-    };
-    clip(&text, 700)
+    clip(&result_text_full(content), 700)
 }
 
 pub(super) fn parse_session(raw: &str) -> (String, Vec<(String, String, String)>, Vec<PrLink>) {

@@ -181,8 +181,6 @@ pub fn search(c: &Connection, q: &str, f: &Filters, mode: Mode) -> Value {
 
     if mode == Mode::Text {
         res["note"] = json!("keyword search only (requested)");
-    } else if !crate::embed::enabled() {
-        res["note"] = json!("keyword search only: embeddings are turned off in config.json");
     } else {
         match crate::embed::nearest(c, q, CANDIDATES) {
             Err(e) => {

@@ -6,11 +6,12 @@ them. Each is connected in up to four ways; only the first two are needed for Ba
 | Part | Needed | What it does |
 | --- | --- | --- |
 | Session reader | yes | Indexes the tool's transcripts, so its sessions appear in search, projects and the brief |
-| Reading agent | yes | The CLI that reads sessions for decisions and checks them (`bt agent`); one per machine |
+| Extraction model | yes | The CLI that reads sessions for decisions and checks them (`bt agent`); one per machine |
 | Hooks | no | Add the brief at session start and settled decisions to each prompt; read a session as soon as it ends |
 | Skill | no | `skill/SKILL.md`, the Agent Skills format all four tools load, for filing items by hand |
 
-Without hooks, the server's sweep reads each session 30 minutes after its last change, and the agent gets no
+Without a session-end hook, the sweep, which runs every 5 minutes, reads a session once its file has not changed for
+30 minutes, and the agent gets no
 Backtrail context unless it runs `bt brief` itself.
 
 ## Support by tool
@@ -18,7 +19,7 @@ Backtrail context unless it runs `bt brief` itself.
 | | Claude Code | Gemini CLI | Codex CLI | Antigravity |
 | --- | --- | --- | --- | --- |
 | Session reader | built in | built in | built in | converter needed |
-| Reading agent | `claude -p` | `gemini -p` | `codex exec --ephemeral` | `agy -p` |
+| Extraction model | `claude -p` | `gemini -p` | `codex exec --ephemeral` | `agy -p` |
 | Hooks file | `~/.claude/settings.json` | `~/.gemini/settings.json` | `~/.codex/hooks.json` | `~/.gemini/config/hooks.json` |
 | Session start | `SessionStart` | `SessionStart` | `SessionStart` | `SessionStart` |
 | Each prompt | `UserPromptSubmit` | `BeforeAgent` | `UserPromptSubmit` | `PreInvocation` |
@@ -49,7 +50,7 @@ Hook commands are `bt brief --hook <tool>` and `bt recall --hook <tool>`: the sa
 wrapped in the JSON each tool reads (`hookSpecificOutput.additionalContext` for Gemini CLI and Codex, `injectSteps`
 for Antigravity).
 
-## Reading agent
+## Extraction model
 
 Reading sessions, checking steps and writing how-to pages are prompts sent through `skill/ask.py`, using the CLI in
 `config.json`:
@@ -60,12 +61,21 @@ Reading sessions, checking steps and writing how-to pages are prompts sent throu
 
 | `cli` | Models |
 | --- | --- |
-| `claude` (default) | `BACKTRAIL_*_MODEL` variables, default haiku, sonnet, opus |
-| `gemini`, `codex`, `antigravity` | `small`, `medium`, `large`; unset uses the CLI default |
+| `claude` (default) | One model per job, below |
+| `gemini`, `codex`, `antigravity` | The `small`, `medium` and `large` keys; an unset tier falls back to another set tier, and with none set the CLI's default model runs every job |
 | `command` | the shell command in `command` reads the prompt on stdin and prints the answer |
 
-Reading a session uses `small`; checks use `medium` and `large`, falling back to whichever is set. `command` covers
-any tool with a headless mode, for example `"ollama run qwen3:32b"`. Prompts start with `BACKTRAIL-CALL`, so a
+For `small`, pick a fast, low-cost model: it reads every session. For `large`, pick the strongest model the CLI
+offers: it confirms reversals and finished steps, where a wrong yes changes the graph. `medium` can be either.
+
+| Job | Tier | Claude default | Claude override |
+| --- | --- | --- | --- |
+| Read a session | `small` | haiku | `BACKTRAIL_COMPILE_MODEL` |
+| Link claims to earlier ones | `medium` | sonnet | `BACKTRAIL_RESOLVE_MODEL` |
+| Find finished steps | `medium` | sonnet | `BACKTRAIL_FINISH_MODEL` |
+| Confirm a reversal or a finished step | `large` | opus | `BACKTRAIL_VERIFY_MODEL` |
+
+`command` covers any tool with a headless mode, for example `"ollama run qwen3:32b"`. Prompts start with `BACKTRAIL-CALL`, so a
 session a tool records for the call is left unread. `skill/ask.py --check` prints the CLI in use and fails when it
 is missing.
 
@@ -131,7 +141,7 @@ Steps for an agent working in this repository:
      and add it to `READERS` in `src/ingest/harness/mod.rs`. Codex and Gemini CLI are the examples.
 3. For hooks, add the tool to `Harness` in `src/hooks.rs`: its hooks file, events, skill folder, and the JSON its
    hooks read in `emit`.
-4. Check with a scratch store, so the real one stays untouched:
+4. Check with a scratch database, so the real one stays untouched:
 
    ```
    BACKTRAIL_HOME=/tmp/bt-try bt ingest

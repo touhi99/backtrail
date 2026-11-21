@@ -6,6 +6,14 @@ for tool in cargo npm; do
 done
 command -v rustc >/dev/null && [ "$(rustc --version | awk '{print $2}' | awk -F. '{print $1*1000+$2}')" -lt 1085 ] \
   && { echo "Rust 1.85 or newer is required (found $(rustc --version))." >&2; exit 1; }
+command -v ollama >/dev/null || {
+  echo "Ollama is required for embeddings: install it from https://ollama.com, then run ./install.sh again." >&2
+  exit 1
+}
+ollama list 2>/dev/null | grep -q '^embeddinggemma-2:270m' || ollama pull embeddinggemma-2:270m || {
+  echo "Could not pull embeddinggemma-2:270m. Start Ollama and run ./install.sh again." >&2
+  exit 1
+}
 (cd app && npm install && npm run build)
 cargo build --release
 bin_dir="${BT_BIN_DIR:-$HOME/.local/bin}"

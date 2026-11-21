@@ -69,3 +69,10 @@ SELECT
 FROM source_prs p
 JOIN sources s ON s.id=p.source_id
 LEFT JOIN pr_state g ON g.repo=p.repo AND g.number=p.number;
+
+-- A push to `main` or `master` a session made, with whether the commit is still there (`state` null: unchecked).
+CREATE TEMP VIEW IF NOT EXISTS session_push AS
+SELECT p.source_id, s.ref AS source, s.thread, p.repo, p.branch, p.sha, p.ts, g.state
+FROM source_pushes p
+JOIN sources s ON s.id=p.source_id
+LEFT JOIN push_state g ON g.repo=p.repo AND g.sha=p.sha;

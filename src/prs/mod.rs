@@ -101,6 +101,108 @@ pub fn refresh(c: &Connection, which: Repos) -> Refresh {
     report
 }
 
+fn push_due(c: &Connection) -> Vec<(String, String, String)> {
+    rows(
+        c,
+        "SELECT DISTINCT p.repo, p.sha, p.branch FROM source_pushes p
+           LEFT JOIN push_state g ON g.repo=p.repo AND g.sha=p.sha
+          WHERE g.state IS NULL OR (g.state='ON_MAIN' AND julianday('now') - julianday(g.checked_at) > 7)",
+        &[],
+    )
+    .iter()
+    .map(|r| (s(r, "repo").into(), s(r, "sha").into(), s(r, "branch").into()))
+    .collect()
+}
+
+fn on_branch(repo: &str, sha: &str, branch: &str) -> Option<&'static str> {
+    let out = Command::new("gh")
+        .args([
+            "api",
+            &format!("repos/{repo}/compare/{sha}...{branch}"),
+            "--jq",
+            ".status",
+        ])
+        .output()
+        .ok()?;
+    let body = String::from_utf8_lossy(&out.stdout);
+    let err = String::from_utf8_lossy(&out.stderr);
+    if out.status.success() {
+        return match body.trim() {
+            "ahead" | "identical" => Some("ON_MAIN"),
+            "behind" | "diverged" => Some("OFF_MAIN"),
+            _ => None,
+        };
+    }
+    if !(err.contains("404") || err.contains("No commit found")) {
+        return None;
+    }
+    let exists = Command::new("gh")
+        .args([
+            "api",
+            &format!("repos/{repo}/commits/{sha}"),
+            "--jq",
+            ".sha",
+        ])
+        .output()
+        .ok()?;
+    Some(if exists.status.success() {
+        "OFF_MAIN"
+    } else {
+        "GONE"
+    })
+}
+
+pub fn refresh_pushes(c: &Connection) -> (usize, usize) {
+    let (mut read, mut failed) = (0, 0);
+    for (repo, sha, branch) in push_due(c) {
+        match on_branch(&repo, &sha, &branch) {
+            Some(state) => {
+                c.execute(
+                    "INSERT INTO push_state(repo, sha, state, checked_at) VALUES(?1,?2,?3,?4)
+                     ON CONFLICT(repo, sha) DO UPDATE SET state=?3, checked_at=?4",
+                    params![repo, sha, state, now()],
+                )
+                .expect("write to database");
+                read += 1;
+            }
+            None => failed += 1,
+        }
+    }
+    (read, failed)
+}
+
+pub fn pushed_in(c: &Connection, homes: &[Home], source_ref: &str, thread: &str) -> Vec<Value> {
+    let family = family(c, thread);
+    rows(
+        c,
+        "SELECT repo, branch, sha, ifnull(state,'') AS state FROM session_push
+          WHERE source=?1 GROUP BY repo, sha ORDER BY ts",
+        &[&source_ref],
+    )
+    .into_iter()
+    .filter(|p| {
+        homes
+            .iter()
+            .any(|h| h.repo == s(p, "repo") && family.contains(&h.thread))
+    })
+    .collect()
+}
+
+pub fn describe_push(p: &Value) -> String {
+    let name = format!(
+        "{} {} {}",
+        s(p, "repo").rsplit('/').next().unwrap_or(""),
+        s(p, "branch"),
+        s(p, "sha")
+    );
+    match s(p, "state") {
+        "ON_MAIN" => format!("{name} on {}", s(p, "branch")),
+        "OFF_MAIN" => format!("{name} no longer on {}", s(p, "branch")),
+        "GONE" => format!("{name} not on GitHub"),
+        _ => format!("{name} unchecked"),
+    }
+}
+
 pub fn describe(p: &Value) -> String {
     let name = format!(
         "{}#{}",
@@ -115,7 +217,7 @@ pub fn describe(p: &Value) -> String {
     }
 }
 
-pub const PROOF_MARK: &str = "; PR opened in that session";
+pub const PROOF_MARK: &str = "; PRs and pushes from that session";
 
 #[derive(Debug)]
 pub struct Home {
@@ -233,12 +335,21 @@ pub fn opened_in(c: &Connection, homes: &[Home], source_ref: &str, thread: &str)
 }
 
 pub fn proof_note(c: &Connection, source_ref: &str, thread: &str) -> String {
-    let prs = opened_in(c, &homes(c), source_ref, thread);
-    if prs.is_empty() {
+    let homes = homes(c);
+    let mut named: Vec<String> = opened_in(c, &homes, source_ref, thread)
+        .iter()
+        .map(describe)
+        .collect();
+    named.extend(
+        pushed_in(c, &homes, source_ref, thread)
+            .iter()
+            .map(describe_push),
+    );
+    if named.is_empty() {
         return String::new();
     }
-    let named: Vec<String> = prs.iter().take(3).map(describe).collect();
-    let more = prs.len().saturating_sub(3);
+    let more = named.len().saturating_sub(3);
+    named.truncate(3);
     format!(
         "{PROOF_MARK} for this project, state when the step closed: {}{}",
         named.join(", "),

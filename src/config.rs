@@ -157,9 +157,6 @@ fn checked_parents(mut rules: Vec<ThreadRule>) -> Vec<ThreadRule> {
 }
 
 fn embeddings(v: &Value) -> Embeddings {
-    if v == &Value::Bool(false) {
-        return Embeddings::default();
-    }
     let get = |key: &str| v[key].as_str().map(String::from);
     let model = get("model").unwrap_or_else(|| DEFAULT_EMBED_MODEL.into());
     let (query, document) = prefixes(&model);
