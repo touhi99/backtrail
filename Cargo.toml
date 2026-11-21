@@ -14,8 +14,8 @@ serde_json = { version = "1.0.154", features = ["preserve_order"] }
 tiny_http = "0.12.0"
 ureq = { version = "3", default-features = false, features = ["json"] }
 
-# Lints from BeautifulRust (lints/lints.toml), without the library-only ones (missing docs,
-# print_stdout and print_stderr, exhaustive_enums, unreachable_pub): both crates are command-line binaries.
+# Lint policy: the library-only lints (missing docs, print_stdout, print_stderr,
+# exhaustive_enums, unreachable_pub) are left out because both crates are command-line binaries.
 [lints.rust]
 unsafe_op_in_unsafe_fn = "warn"          # each unsafe op needs its own unsafe block
 missing_debug_implementations = "warn"   # every public type implements Debug

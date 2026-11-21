@@ -181,7 +181,7 @@ struct TrailPage: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Every thread on one timeline, how each one ended, and what came out of it").font(.system(size: 13)).foregroundStyle(Color.mut)
+                    Text("All threads on one timeline, grouped by state, with the artifacts and commits each produced").font(.system(size: 13)).foregroundStyle(Color.mut)
                     HStack(spacing: 16) {
                         Text("Graph").font(.system(size: 28, weight: .semibold)).tracking(-0.4)
                         tabs

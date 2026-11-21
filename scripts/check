@@ -40,6 +40,8 @@ slop="${SLOP_CHECK:-$HOME/.claude/hooks/slop_check.py}"
 if [ -f "$slop" ]; then
   step "docs and comments"
   git ls-files -z --cached --others --exclude-standard | xargs -0 python3 -I "$slop"
+else
+  printf '== docs and comments (skipped; set SLOP_CHECK to run the local linter)\n'
 fi
 
 echo "all checks passed"

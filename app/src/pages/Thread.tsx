@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { Bug, Check, CheckCheck, CircleHelp, Copy, FileText, Lightbulb, Network, Plus, Sparkles } from 'lucide-react'
+import { Bug, Check, CheckCheck, CircleHelp, Copy, FileText, GitMerge, GitPullRequest, GitPullRequestClosed, Lightbulb, Network, Plus, Sparkles } from 'lucide-react'
 import { agoFmt, dayFmt, post, STALE_LABEL, staleOf, useApi } from '@/lib/api'
 import { useShell } from '@/components/Shell'
-import { buildStory, JourneyRail, Made, Milestones, Settled, Thumb } from '@/components/Story'
+import { AlsoConsidered, buildStory, JourneyRail, Made, Milestones, Settled, Thumb } from '@/components/Story'
 import ItemActions, { Who } from '@/components/ItemActions'
 import More from '@/components/More'
 import Paged from '@/components/Paged'
@@ -13,6 +13,13 @@ import { ts } from '@/components/Focus'
 import { STATE_HEX, STEP_STATUS } from '@/lib/next'
 import type { Item, SourceStat, ThreadDetail } from '@/lib/types'
 import '@/next.css'
+
+const PR_LOOK = {
+  MERGED: { Icon: GitMerge, color: 'var(--color-built)', label: 'merged' },
+  OPEN: { Icon: GitPullRequest, color: 'var(--color-open)', label: 'open' },
+  CLOSED: { Icon: GitPullRequestClosed, color: 'var(--color-dropped)', label: 'closed unmerged' },
+  '': { Icon: GitPullRequest, color: 'var(--color-mut)', label: 'unchecked' },
+} as const
 
 const SRC_COLOR: Record<string, string> = { session: '#60a5fa', note: '#8b8b95', artifact: '#c084fc', commit: '#34d399', owner: '#f4f4f5' }
 const HOW: Record<string, string> = { 'owner-stated': '#34d399', 'owner-accepted': '#60a5fa', 'from a note': '#8b8b95' }
@@ -108,11 +115,13 @@ export default function Thread() {
   const c = STATE_HEX[th.state] ?? '#8b8b95'
   const refresh = () => { reload(); reloadShell() }
   const steps = items.filter((i) => i.type === 'step' && !['proposed', 'rejected', 'parked', 'superseded'].includes(i.state))
+  const stepIds = new Set(steps.map((s) => s.id))
   const doneN = steps.filter((s) => s.state === 'done').length
   const checkN = steps.filter((s) => s.state === 'looks_done').length
   const todo = steps.filter((s) => s.state === 'open' || s.state === 'doing').sort((a, b) => Number(b.state === 'doing') - Number(a.state === 'doing') || b.created.localeCompare(a.created))
 
   const gains = lastGains(items)
+  const prs = d.prs ?? []
   const inCard = new Set(gains.shown.map((i) => i.id))
   const decidedRest = d.decided.filter((x) => !inCard.has(x.id))
   const prop = items.filter((i) => i.state === 'proposed')
@@ -133,6 +142,7 @@ export default function Thread() {
         {s.state !== 'done' && s.check_how && <More label="How to check" className="mr-3 mt-1 text-[12.5px] text-mut">{s.check_how}</More>}
         {s.state === 'looks_done' && s.answer && <p className="mr-3 mt-1 text-[13px] text-soft"><span className="text-mut">Claude says it built: </span>{s.answer}</p>}
         {s.body && s.state !== 'done' && <p className="mr-3 mt-1 text-[13px] text-soft">{s.body}</p>}
+        {s.blocked_by?.length ? <p className="mr-3 mt-1 text-[12.5px] text-mut">Blocked by {s.blocked_by.map((b, i) => <span key={b.id}>{i > 0 && ', '}{stepIds.has(b.id) ? <a href={`#item-${b.id}`} className="hover:text-ink">{b.title}</a> : b.title}</span>)}</p> : null}
         {s.state === 'done' && (s.body || s.answer) && <More label="Detail" className="mr-3 text-[12.5px] text-mut">{s.body}{s.state === 'done' && s.answer ? <span style={{ color: c }}> {s.answer}</span> : null}</More>}
         <Src i={s} />
         {s.origin === 'owner' && s.state !== 'done' && <div className="mt-1.5"><ItemActions i={s} done={refresh} /></div>}
@@ -186,6 +196,22 @@ export default function Thread() {
 
         <LeftOff sources={d.sources} gains={gains} next={todo[0]} onNext={(s) => { setView('steps'); setTimeout(() => document.getElementById(`item-${s.id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 120) }} />
 
+        {prs.length > 0 && (
+          <section className="nx-in flex flex-wrap items-center gap-2">
+            <span className="text-[12px] text-mut">Pull requests</span>
+            {prs.slice(0, 6).map((p) => {
+              const look = PR_LOOK[p.state]
+              return (
+                <a key={`${p.repo}#${p.number}`} href={p.url} target="_blank" rel="noreferrer" className="btn ghost" title={`${p.title || p.repo} · ${look.label}${p.merged_on ? ` ${dayFmt(p.merged_on)}` : ''}`}>
+                  <look.Icon size={13} style={{ color: look.color }} />{p.repo.split('/').pop()}#{p.number}
+                  {p.state !== 'MERGED' && <span className="text-[11px]" style={{ color: look.color }}>{look.label}</span>}
+                </a>
+              )
+            })}
+            {prs.length > 6 && <span className="text-[12px] text-mut">+{prs.length - 6} more</span>}
+          </section>
+        )}
+
         <div className="flex flex-wrap items-stretch gap-5">
           <section className="nx-panel nx-in min-w-0 overflow-hidden !rounded-2xl" style={{ flex: '999 1 520px' }}>
             <div className="flex items-baseline justify-between px-5 pb-2 pt-4"><h3 className="text-[15px] font-semibold">Earlier decisions</h3><button className="text-[13px] text-mut hover:text-ink" onClick={() => setView('decisions')}>All decisions</button></div>
@@ -193,7 +219,7 @@ export default function Thread() {
             {decidedRest.map((x) => (
               <Link key={x.id} to={x.source_id ? `/source/${x.source_id}${x.chunk_id ? `?c=${x.chunk_id}` : ''}` : '#'} className="nx-row" style={{ gridTemplateColumns: '60px minmax(0,1fr) auto' }} title="Open the source">
                 <span className="text-[12.5px] tabular-nums text-mut">{x.day === 'undated' ? '' : dayFmt(x.day)}</span>
-                <span className="text-[14px]">{x.title}</span>
+                <span className="min-w-0"><span className="block text-[14px]">{x.title}</span>{x.also?.length ? <AlsoConsidered also={x.also} /> : null}</span>
                 <span className="size-2 rounded-full" title={x.how === 'owner-stated' ? 'You said it' : x.how === 'owner-accepted' ? 'You confirmed it' : 'From a note'} style={{ background: HOW[x.how] ?? '#8b8b95' }} />
               </Link>
             ))}

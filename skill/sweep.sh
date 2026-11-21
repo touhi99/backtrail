@@ -39,6 +39,7 @@ mkdir -p "$HOME_DIR/logs"
     [ -z "$("$TM" resolve-queue --reverses --limit 1)" ] && break
     "$DIR/resolve.sh" --reverses --limit 1000
   done
+  "$TM" prs >/dev/null 2>&1
   "$DIR/finish.sh" --limit 15
   "$TM" ingest >/dev/null 2>&1
   "$TM" status | head -1

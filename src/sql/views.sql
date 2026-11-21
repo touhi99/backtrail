@@ -12,7 +12,7 @@ FROM claims n
 LEFT JOIN sources s ON s.id=n.source_id
 WHERE n.type IN ('decision','step','question','turn');
 
--- A fact about named entities, as the graph shows it: a decision, state or rationale claim, or a relation.
+-- The `fact` view: claims about named entities, as the graph shows them — a decision, state or rationale claim, or a relation.
 -- `entities` lists the entity names, subject before object (then by entity id), separated by char(31).
 CREATE TEMP VIEW IF NOT EXISTS fact AS
 SELECT
@@ -56,3 +56,16 @@ SELECT
   (SELECT group_concat(alias, ', ') FROM entity_aliases a WHERE a.entity_id=e.id AND a.alias!=lower(e.name)) AS aliases,
   (SELECT COUNT(*) FROM claim_about x WHERE x.entity_id=e.id) AS claims
 FROM entities e;
+
+-- A pull request a session linked, with its GitHub state. `opened_here` is 1 when GitHub dates the PR inside the
+-- session's span (10 minutes of slack either side). `state` is null when the repo was never read.
+CREATE TEMP VIEW IF NOT EXISTS session_pr AS
+SELECT
+  p.source_id, s.ref AS source, s.thread, p.repo, p.number, p.url, p.ts,
+  g.title, g.state, g.created_at, substr(g.merged_at,1,10) AS merged_on, g.head, g.base,
+  CASE WHEN g.created_at IS NOT NULL
+        AND julianday(g.created_at) BETWEEN julianday(s.first_ts) - 10.0/1440 AND julianday(s.last_ts) + 10.0/1440
+       THEN 1 ELSE 0 END AS opened_here
+FROM source_prs p
+JOIN sources s ON s.id=p.source_id
+LEFT JOIN pr_state g ON g.repo=p.repo AND g.number=p.number;

@@ -162,7 +162,7 @@ function Network({ tabs }: { tabs: React.ReactNode }) {
       </svg>
 
       <div className="absolute left-5 top-5 flex max-w-[calc(100%-420px)] flex-col gap-2.5">
-        <div><div className="text-[13px] text-mut">Things mentioned in the work and what was said about them</div><div className="flex items-center gap-4"><h2 className="text-[28px] font-semibold leading-tight tracking-tight">Graph</h2>{tabs}</div></div>
+        <div><div className="text-[13px] text-mut">Entities from sessions and notes, with the claims filed about each</div><div className="flex items-center gap-4"><h2 className="text-[28px] font-semibold leading-tight tracking-tight">Graph</h2>{tabs}</div></div>
         <div className="flex items-center gap-3 text-[11.5px] text-mut">{Object.entries(KIND_C).map(([k, c]) => <span key={k} className="flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: c }} />{k}</span>)}<span>· size = claims · line = claims about both</span></div>
       </div>
 

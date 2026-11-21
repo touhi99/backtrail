@@ -1,26 +1,26 @@
 ---
 name: backtrail
-description: File decisions, steps and questions into the Backtrail store from real sessions and notes, as suggestions the user accepts or rejects. Use when asked to update Backtrail, compile recent sessions, or review what a thread is waiting on.
+description: File decisions, steps and questions into the Backtrail store from real sessions and notes, as suggestions the user accepts or rejects. Use when asked to update Backtrail, read recent sessions, or review what a thread is waiting on.
 ---
 
 # Backtrail thinking job
 
 Backtrail indexes coding-agent sessions (Claude Code, Codex CLI, Gemini CLI, and any tool with a converter), notes
-and artifact snapshots. Facts are filed against threads and must
+and artifact snapshots. Claims are filed against threads and must
 cite an indexed source with a verbatim quote. The store is read through the `backtrail` binary
 (`target/release/backtrail` in the project folder). Never write status into notes.
 
 ## Cheap path (default)
 
-Extraction is overview work and does not need a large model. `skill/extract.sh <session ref>...` (or `--session ID`,
+Extraction is one single-shot call per session, so a small model is enough. `skill/extract.sh <session ref>...` (or `--session ID`,
 `--limit N`, `--entity NAME`) runs one single-shot call per session on a small model through `skill/ask.py`, which uses the agent CLI set with
 `bt agent` (`claude` by default, with `BACKTRAIL_COMPILE_MODEL`, default `haiku`), with no tools and no saved session. It pipes `backtrail extract-input <ref>` in and
 `backtrail import -` out, then records the cost with `extract-log`. One call returns decisions, steps, questions,
 state and rationale claims, and relations, so a session is read once. `skill/session-end.sh` is the SessionEnd hook
 body: it runs `ingest`, marks the session ended and starts `skill/sweep.sh` in the background unless
 `BACKTRAIL_COMPILE_ON_END=0`. The sweep reads every queued session (`bt status` lists them) and checks every proposed item.
-While `BACKTRAIL_COMPILE` is set, `brief` and the hook exit at once, so an extraction run cannot start another. Main
-sessions do not file facts themselves.
+While `BACKTRAIL_COMPILE` is set, `brief` and the hook exit at once, so an extraction run cannot start another. The
+coding session does not file claims; the session-end sweep does.
 
 `skill/finish.sh [--dry] [--limit N] [id...]` closes open steps, answered questions and proposed decisions that a later
 session, note or commit shows finished. A model names a passage and a verbatim quote, a second model confirms it, and
@@ -42,7 +42,7 @@ Other commands for keeping the store accurate without raw SQL:
 3. `backtrail show <ref>` prints a source. Read it before filing anything.
 4. File each finding with
    `backtrail add <decision|step|question|turn> --thread "<thread>" --title "<=110 chars" --body "<=320 chars" --entities "<main subject>,<others>" --source "<ref>" --quote "<verbatim text from that source>" --origin suggested --state proposed`
-   or several at once with `backtrail import facts.json` (also takes `state`, `rationale` and `relation` items with `entities`). Every item names at least one entity (`bt kg entity` lists them) and the thread follows the entity. Add `--valid-to YYYY-MM-DD` for an item that names a relative day. After filing, the command lists existing items that may already settle the new one; if one does, run `backtrail resolve <new id> --by <existing id> --reason "..."`. The command rejects a missing source, a quote not
+   or several at once with `backtrail import facts.json` (also takes `state`, `rationale` and `relation` items with `entities`, and `alternative`/`depends` items that become graph edges). Every item names at least one entity (`bt kg entity` lists them) and the thread follows the entity. Add `--valid-to YYYY-MM-DD` for an item that names a relative day. After filing, the command lists existing items that may already settle the new one; if one does, run `backtrail resolve <new id> --by <existing id> --reason "..."`. The command rejects a missing source, a quote not
    found in the source, or text over the limit.
 5. Close a step only with evidence: `backtrail done <id> --by claude --proof "<what shows it>"`.
    Check the claim first (run the command, read the code, list the git tags). The SessionEnd pass also closes steps a
@@ -64,7 +64,7 @@ Other commands for keeping the store accurate without raw SQL:
 ## Rules
 
 - File suggestions as `--state proposed`. The binary keeps a decision, rationale or state claim on its own when the quote
-  is a turn the user typed and says it directly, and it is not a likely repeat of an earlier fact; everything else stays
+  is a turn the user typed and says it directly, and it is not a likely repeat of an earlier claim; everything else stays
   `proposed` until the user accepts it in the app.
 - Cite a session as `session:<session id>`, or a unique prefix of it (`session:<first 8 characters>`).
 - A step the user must confirm by hand carries `--check "<where to look and what a good result is>"` (a screen, URL, file path or command). The app shows it as "How to check".

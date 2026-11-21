@@ -1,6 +1,11 @@
+mod parse;
+mod prs;
+
 use super::threads::SessionRules;
-use super::{Source, add_chunk, begin, finish, home_dir, mtime, redact, slug};
+use super::{Source, add_chunk, begin, finish, home_dir, mtime, slug};
 use crate::db::id64;
+use parse::parse_session;
+use prs::{backfill_prs, insert_prs};
 use rusqlite::{Connection, params};
 use serde_json::Value;
 use std::fmt::Write;
@@ -62,44 +67,6 @@ fn tail_of(p: &Path, at: u64) -> Option<String> {
     Some(id64(&String::from_utf8_lossy(&buf)))
 }
 
-fn parse_session(raw: &str) -> (String, Vec<(String, String, String)>) {
-    let mut title = String::new();
-    let mut turns = vec![];
-    for l in raw.lines() {
-        let Ok(v) = serde_json::from_str::<Value>(l) else {
-            continue;
-        };
-        let t = v["type"].as_str().unwrap_or("");
-        let ts = v["timestamp"].as_str().unwrap_or("").to_string();
-        if t == "ai-title" {
-            title = v["aiTitle"].as_str().unwrap_or("").to_string();
-        } else if t == "user" || t == "assistant" {
-            if v["isMeta"].as_bool() == Some(true) {
-                continue;
-            }
-            let mut text = String::new();
-            match &v["message"]["content"] {
-                Value::String(s) => text.clone_from(s),
-                Value::Array(a) => {
-                    for b in a {
-                        if b["type"] == "text" {
-                            text.push_str(b["text"].as_str().unwrap_or(""));
-                            text.push('\n');
-                        }
-                    }
-                }
-                _ => {}
-            }
-            let tt = text.trim();
-            if !worth_keeping(tt) {
-                continue;
-            }
-            turns.push((t.to_string(), ts, redact(tt).into_owned()));
-        }
-    }
-    (title, turns)
-}
-
 pub(super) fn worth_keeping(text: &str) -> bool {
     text.len() >= 15
         && ![
@@ -138,13 +105,21 @@ pub(super) fn add_turns(
     turns: &[(String, String, String)],
 ) {
     let mut seq = seq0;
-    for (i, (role, ts, text)) in turns.iter().enumerate() {
+    let mut turn = turn0;
+    for (role, ts, text) in turns {
+        let tool = (role == "tool").then_some(
+            text.strip_prefix("tool ")
+                .and_then(|r| r.split_once(" failed"))
+                .map_or("a tool", |(name, _)| name),
+        );
+        if tool.is_none() {
+            turn += 1;
+        }
         for (k, part) in split_turn(text, TURN_CHUNK).iter().enumerate() {
-            let mut loc = format!(
-                "turn {} · {}",
-                turn0 + crate::db::sql_int(i) + 1,
-                ts.get(..16).unwrap_or("")
-            );
+            let mut loc = match tool {
+                Some(name) => format!("tool {name} · {}", ts.get(..16).unwrap_or("")),
+                None => format!("turn {turn} · {}", ts.get(..16).unwrap_or("")),
+            };
             if k > 0 {
                 let _ = write!(loc, " · part {}", k + 1);
             }
@@ -152,6 +127,10 @@ pub(super) fn add_turns(
             seq += 1;
         }
     }
+}
+
+fn conversation_turns(turns: &[(String, String, String)]) -> usize {
+    turns.iter().filter(|t| t.0 != "tool").count()
 }
 
 fn untitled_count(c: &Connection, sid: i64, proj: &str) {
@@ -191,6 +170,7 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
             }
         }
     }
+    backfill_prs(c);
     c.execute_batch("BEGIN").expect("write to database");
     for d in dirs.flatten() {
         let dn = d.file_name().to_string_lossy().to_string();
@@ -246,7 +226,7 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
             let Some((raw, upto)) = read_lines(&p, from) else {
                 continue;
             };
-            let (title, turns) = parse_session(&raw);
+            let (title, turns, prs) = parse_session(&raw);
             let tail = tail_of(&p, upto);
             if let Some(&(sid, _, _, _, _, nturns)) = append {
                 if !title.is_empty() {
@@ -285,14 +265,15 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
                     }
                     n += 1;
                 }
+                insert_prs(c, sid, &prs);
                 c.execute(
-                    "UPDATE sources SET mtime=?2, bytes=?3, tail=?4, nturns=nturns+?5 WHERE id=?1",
+                    "UPDATE sources SET mtime=?2, bytes=?3, tail=?4, nturns=nturns+?5, prs_read=1 WHERE id=?1",
                     params![
                         sid,
                         mt,
                         i64::try_from(upto).unwrap_or(i64::MAX),
                         tail,
-                        crate::db::sql_int(turns.len())
+                        crate::db::sql_int(conversation_turns(&turns))
                     ],
                 )
                 .expect("write to database");
@@ -307,7 +288,11 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
                 continue;
             }
             let users = turns.iter().filter(|t| t.0 == "user").count();
-            let thread = rules.thread_for(&proj, &title, crate::db::sql_int(turns.len()));
+            let thread = rules.thread_for(
+                &proj,
+                &title,
+                crate::db::sql_int(conversation_turns(&turns)),
+            );
             let disp = if title.is_empty() {
                 format!("Untitled session ({proj} · {users} turns)")
             } else {
@@ -327,6 +312,7 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
                 continue;
             };
             add_turns(c, sid, 0, 0, &turns);
+            insert_prs(c, sid, &prs);
             finish(
                 c,
                 sid,
@@ -334,12 +320,12 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
                 &turns.last().expect("turns checked non-empty above").1,
             );
             c.execute(
-                "UPDATE sources SET bytes=?2, tail=?3, nturns=?4 WHERE id=?1",
+                "UPDATE sources SET bytes=?2, tail=?3, nturns=?4, prs_read=1 WHERE id=?1",
                 params![
                     sid,
                     i64::try_from(upto).unwrap_or(i64::MAX),
                     tail,
-                    crate::db::sql_int(turns.len())
+                    crate::db::sql_int(conversation_turns(&turns))
                 ],
             )
             .expect("write to database");

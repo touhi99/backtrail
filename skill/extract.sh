@@ -52,6 +52,7 @@ for i in items:
         continue
     out.append({"type": i.get("type"), "title": i.get("title") or i.get("text", ""), "body": i.get("body", ""), "source": ref,
                 "quote": i.get("quote", ""), "entities": i.get("entities", []), "valid_to": i.get("valid_to", ""), "kind": i.get("kind", ""),
+                "of": i.get("of", ""), "step": i.get("step", ""), "on": i.get("on", ""),
                 "stated": i.get("stated", "inferred"), "state": "proposed", "origin": "suggested"})
 r = subprocess.run([tm, "import", "-"], input=json.dumps(out), capture_output=True, text=True)
 fin = f" finished={len(closed)}" if closed else ""

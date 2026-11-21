@@ -59,6 +59,7 @@ pub fn run(c: &Connection, dir: &Path) -> anyhow::Result<()> {
     add_column(c, "claims", "check_how TEXT")?;
     add_column(c, "sources", "harness TEXT")?;
     add_column(c, "threads", "parent TEXT")?;
+    add_column(c, "sources", "prs_read INTEGER NOT NULL DEFAULT 0")?;
     sql(c, "CREATE INDEX IF NOT EXISTS chunks_hash ON chunks(hash)")?;
     if old_layout {
         unify(c)?;

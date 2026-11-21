@@ -163,7 +163,7 @@ struct MentionsGraph: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Things mentioned in the work and what was said about them").font(.system(size: 13)).foregroundStyle(Color.mut).allowsHitTesting(false)
+            Text("Entities from sessions and notes, with the claims filed about each").font(.system(size: 13)).foregroundStyle(Color.mut).allowsHitTesting(false)
             HStack(spacing: 16) { Text("Graph").font(.system(size: 28, weight: .semibold)).tracking(-0.4).allowsHitTesting(false); tabs }
             HStack(spacing: 12) {
                 ForEach(["project", "service", "tool", "model", "site", "topic"], id: \.self) { kd in

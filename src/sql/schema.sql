@@ -21,9 +21,43 @@ CREATE TABLE IF NOT EXISTS sources(
   bytes INTEGER NOT NULL DEFAULT 0,
   tail TEXT,
   nturns INTEGER NOT NULL DEFAULT 0,
+  prs_read INTEGER NOT NULL DEFAULT 0,
   -- sessions from a tool other than Claude Code: codex, gemini, or the name in an inbox file
   harness TEXT
 );
+
+CREATE TABLE IF NOT EXISTS source_prs(
+  source_id INTEGER NOT NULL,
+  repo TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  url TEXT NOT NULL,
+  ts TEXT,
+  PRIMARY KEY(source_id, url)
+);
+
+-- Pull request state as GitHub reports it through `gh pr list`. A PR with no row here is unchecked.
+CREATE TABLE IF NOT EXISTS pr_state(
+  repo TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  title TEXT,
+  state TEXT NOT NULL,
+  created_at TEXT,
+  merged_at TEXT,
+  closed_at TEXT,
+  head TEXT,
+  base TEXT,
+  checked_at TEXT NOT NULL,
+  PRIMARY KEY(repo, number)
+);
+
+-- The last `gh pr list` call per repo and its error, if it failed.
+CREATE TABLE IF NOT EXISTS pr_repos(
+  repo TEXT PRIMARY KEY,
+  checked_at TEXT NOT NULL,
+  error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS sources_thread ON sources(thread, last_ts);
 
 -- Sessions the owner or Claude read and decided hold nothing to file. They leave the pending list.
 CREATE TABLE IF NOT EXISTS source_review(
@@ -55,10 +89,10 @@ CREATE TABLE IF NOT EXISTS vec(
 
 CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(text, tokenize='porter unicode61');
 
--- One table of facts: decisions, steps, questions, turns (items) and rationale, state and relation claims.
--- `thread` is the project the fact came from. `state` is the review and work state in one column:
+-- One table of claims: decisions, steps, questions, turns (items) and rationale, state and relation claims.
+-- `thread` is the project the claim came from. `state` is the review and work state in one column:
 -- proposed, settled, rejected, superseded (any type); open, doing, looks_done, done, parked (steps);
--- open, answered (questions). One quote from one source supports each fact.
+-- open, answered (questions). One quote from one source supports each claim.
 -- `text` and `status` are read-only names the knowledge-graph queries use: text is title, status is state
 -- as proposed, active, retracted or superseded.
 CREATE TABLE IF NOT EXISTS claims(
@@ -179,6 +213,22 @@ CREATE TABLE IF NOT EXISTS claim_links(
 );
 
 CREATE INDEX IF NOT EXISTS claim_links_b ON claim_links(b);
+
+-- Claim-to-claim edges beyond changed/restates/because: a considered alternative and step dependencies.
+CREATE TABLE IF NOT EXISTS claim_edges(
+  a TEXT NOT NULL,
+  b TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  reason TEXT,
+  source_id INTEGER,
+  chunk_id INTEGER,
+  quote TEXT,
+  actor TEXT,
+  created TEXT,
+  PRIMARY KEY(a, b, kind)
+);
+
+CREATE INDEX IF NOT EXISTS claim_edges_b ON claim_edges(b);
 
 CREATE TABLE IF NOT EXISTS kg_overrides(
   target TEXT NOT NULL,
