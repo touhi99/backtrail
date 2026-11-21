@@ -62,6 +62,12 @@ struct ThreadView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(th["name"].str).font(.system(size: 26, weight: .semibold)).tracking(-0.4)
                     if let s = th["summary"].s { Text(s).font(.system(size: 13.5)).foregroundStyle(Color.mut).lineLimit(1) }
+                    if let p = th["parent"].s, !p.isEmpty {
+                        Button { store.go(.thread(p)) } label: {
+                            Text("Sub-thread of \(p)").font(.system(size: 12.5)).foregroundStyle(Color.mut)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
                 Spacer()
                 Button { store.go(.decisions(name)) } label: { Label("Decisions", systemImage: "point.3.connected.trianglepath.dotted") }
@@ -70,6 +76,23 @@ struct ThreadView: View {
                     .buttonStyle(BtnStyle(kind: .ghost))
                 Button { store.capture = .some(name) } label: { Label("Add", systemImage: "plus") }
                     .buttonStyle(BtnStyle())
+            }
+
+            if !d["children"].arr.isEmpty {
+                ScrollView(.horizontal) { HStack(spacing: 8) {
+                    Text("Sub-threads").font(.system(size: 12)).foregroundStyle(Color.mut)
+                    ForEach(d["children"].arr, id: \.["name"].str) { k in
+                        Button { store.go(.thread(k["name"].str)) } label: {
+                            HStack(spacing: 6) {
+                                Circle().fill(STATE_COLOR[k["state"].str] ?? .mut).frame(width: 7, height: 7)
+                                Text(k["name"].str)
+                                Text("\(k["open_s"].int) open · \(k["done_s"].int) done").foregroundStyle(Color.mut)
+                            }
+                        }
+                        .buttonStyle(BtnStyle(kind: .ghost))
+                    }
+                } }
+                .scrollIndicators(.never)
             }
 
             LeftOffCard(sources: d["sources"].arr, gains: gains, next: todo.first) { s in

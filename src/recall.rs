@@ -26,6 +26,18 @@ pub struct Hit {
     pub score: f64,
 }
 
+const TOP: &str = "COALESCE(NULLIF((SELECT parent FROM threads WHERE name=thread),''), thread)";
+
+fn top(c: &Connection, thread: &str) -> String {
+    rows(
+        c,
+        &format!("SELECT {TOP} AS top FROM (SELECT ?1 AS thread)"),
+        &[&thread],
+    )
+    .first()
+    .map_or_else(|| thread.to_string(), |r| s(r, "top").to_string())
+}
+
 pub fn scope(c: &Connection, session: &str, cwd: &str) -> Option<String> {
     let usable = |t: &str| {
         !t.is_empty()
@@ -40,7 +52,7 @@ pub fn scope(c: &Connection, session: &str, cwd: &str) -> Option<String> {
         "SELECT IFNULL(thread,'') AS thread FROM sources WHERE ref=?1",
         &[&format!("session:{session}")],
     );
-    if let Some(t) = own.first().map(|r| s(r, "thread").to_string())
+    if let Some(t) = own.first().map(|r| top(c, s(r, "thread")))
         && usable(&t)
     {
         return Some(t);
@@ -54,8 +66,10 @@ pub fn scope(c: &Connection, session: &str, cwd: &str) -> Option<String> {
         .collect();
     let split = rows(
         c,
-        "SELECT thread, COUNT(*) AS n FROM sources WHERE kind='session' AND path LIKE ?1 AND thread IS NOT NULL
-         GROUP BY thread ORDER BY n DESC",
+        &format!(
+            "SELECT {TOP} AS thread, COUNT(*) AS n FROM sources WHERE kind='session' AND path LIKE ?1 AND thread IS NOT NULL
+             GROUP BY 1 ORDER BY n DESC"
+        ),
         &[&format!("%/{folder}/%")],
     );
     let total: i64 = split.iter().map(|r| r["n"].as_i64().unwrap_or(0)).sum();
@@ -65,6 +79,7 @@ pub fn scope(c: &Connection, session: &str, cwd: &str) -> Option<String> {
 }
 
 pub fn matches(c: &Connection, prompt: &str, scope: Option<&str>) -> Vec<Hit> {
+    let scope = scope.map(|t| top(c, t));
     let words = stems(prompt);
     if words.len() < 2 {
         return vec![];
@@ -83,11 +98,11 @@ pub fn matches(c: &Connection, prompt: &str, scope: Option<&str>) -> Vec<Hit> {
     let today = now()[..10].to_string();
     let decisions = rows(
         c,
-        "SELECT c.id, c.thread, c.title, IFNULL(c.quote,'') AS quote, substr(IFNULL(c.asserted_at, c.created),1,10) AS day,
+        &format!("SELECT c.id, {TOP} AS thread, c.title, IFNULL(c.quote,'') AS quote, substr(IFNULL(c.asserted_at, c.created),1,10) AS day,
                 (SELECT group_concat(a.entity_id, char(31)) FROM claim_about a WHERE a.claim_id=c.id) AS ents
          FROM claims c
          WHERE c.type='decision' AND c.state='settled' AND IFNULL(c.superseded_by,'')=''
-           AND IFNULL(c.stale,'') NOT LIKE 'superseded%' AND (IFNULL(c.valid_to,'')='' OR c.valid_to>=?1)",
+           AND IFNULL(c.stale,'') NOT LIKE 'superseded%' AND (IFNULL(c.valid_to,'')='' OR c.valid_to>=?1)"),
         &[&today],
     );
     let docs: Vec<HashSet<String>> = decisions.iter().map(|d| stems(s(d, "title"))).collect();
@@ -123,7 +138,7 @@ pub fn matches(c: &Connection, prompt: &str, scope: Option<&str>) -> Vec<Hit> {
                 .map(|e| idf(entity_df.get(e).copied().unwrap_or(1)))
                 .fold(0.0, f64::max);
             score += same_subject;
-            let in_scope = scope.is_some_and(|t| t == s(d, "thread"));
+            let in_scope = scope.as_deref() == Some(s(d, "thread"));
             if same_subject == 0.0 && !in_scope {
                 return None;
             }

@@ -94,7 +94,8 @@ pub fn check(c: &Connection) {
     let orphans = rows(
         c,
         "SELECT name FROM threads t WHERE t.state NOT IN ('dropped','unsorted')
-           AND NOT EXISTS (SELECT 1 FROM item i WHERE i.thread=t.name)",
+           AND NOT EXISTS (SELECT 1 FROM item i WHERE i.thread=t.name)
+           AND NOT EXISTS (SELECT 1 FROM threads k WHERE k.parent=t.name)",
         &[],
     );
     println!("threads with no filed items (orphans): {}", orphans.len());

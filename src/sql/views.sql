@@ -29,7 +29,7 @@ WHERE c.type IN ('decision','state','rationale') OR c.type LIKE 'relation:%';
 -- A thread (project) with its counts. `first` and `last` span every source; the `session_` pair spans sessions only.
 CREATE TEMP VIEW IF NOT EXISTS thread_stat AS
 SELECT
-  t.name, t.area, t.state, t.kind, t.body AS summary,
+  t.name, t.area, t.state, t.kind, t.body AS summary, t.parent,
   (SELECT COUNT(*) FROM sources s WHERE s.thread=t.name) AS sources,
   (SELECT MIN(s.first_ts) FROM sources s WHERE s.thread=t.name AND s.first_ts>'2000') AS first,
   (SELECT MAX(s.last_ts) FROM sources s WHERE s.thread=t.name) AS last,

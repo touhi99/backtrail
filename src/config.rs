@@ -12,6 +12,7 @@ pub struct ThreadRule {
     pub summary: String,
     pub kind: String,
     pub regex: String,
+    pub parent: String,
 }
 
 #[derive(Default)]
@@ -125,7 +126,34 @@ fn thread_rule(v: &Value) -> ThreadRule {
         },
         summary: text(v, "summary"),
         kind: text(v, "kind"),
+        parent: text(v, "parent"),
     }
+}
+
+fn checked_parents(mut rules: Vec<ThreadRule>) -> Vec<ThreadRule> {
+    let declared: HashMap<String, String> = rules
+        .iter()
+        .map(|t| (t.name.clone(), t.parent.clone()))
+        .collect();
+    for t in &mut rules {
+        if t.parent.is_empty() {
+            continue;
+        }
+        let reason = match declared.get(&t.parent) {
+            None => Some("no thread has that name"),
+            Some(_) if t.parent == t.name => Some("a thread cannot be its own parent"),
+            Some(grand) if !grand.is_empty() => Some("the parent has a parent itself"),
+            Some(_) => None,
+        };
+        if let Some(reason) = reason {
+            eprintln!(
+                "config.json: ignoring the parent of thread '{}' ({:?}): {reason}",
+                t.name, t.parent
+            );
+            t.parent.clear();
+        }
+    }
+    rules
 }
 
 fn embeddings(v: &Value) -> Embeddings {
@@ -165,10 +193,12 @@ fn load() -> Config {
         workspace: PathBuf::from(text(&v, "workspace")),
         note_dirs: strings(&v["note_dirs"]),
         screens_dir: text(&v, "screens_dir"),
-        threads: threads
-            .as_array()
-            .map(|a| a.iter().map(thread_rule).collect())
-            .unwrap_or_default(),
+        threads: checked_parents(
+            threads
+                .as_array()
+                .map(|a| a.iter().map(thread_rule).collect())
+                .unwrap_or_default(),
+        ),
         note_rules: regex_pairs(&v, "note_rules"),
         artifact_rules: regex_pairs(&v, "artifact_rules"),
         repos: pairs(&v["repos"]),

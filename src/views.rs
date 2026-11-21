@@ -56,7 +56,31 @@ fn stale(c: &Connection) -> Vec<Value> {
 }
 
 fn threads(c: &Connection) -> Vec<Value> {
-    rows(c, "SELECT * FROM thread_stat ORDER BY last DESC", &[])
+    rows(
+        c,
+        "SELECT *, (SELECT MAX(k.last) FROM thread_stat k WHERE k.name=f.top OR k.parent=f.top) AS family_last
+         FROM (SELECT *, COALESCE(NULLIF(parent,''), name) AS top FROM thread_stat) f
+         ORDER BY family_last DESC, top, parent IS NOT NULL, last DESC",
+        &[],
+    )
+}
+
+fn top_of<'a>(all: &'a [Value], name: &'a str) -> &'a str {
+    all.iter()
+        .find(|t| s(t, "name") == name)
+        .map(|t| s(t, "parent"))
+        .filter(|p| !p.is_empty())
+        .unwrap_or(name)
+}
+
+fn next_step(c: &Connection, thread: &str) -> Option<String> {
+    rows(
+        c,
+        "SELECT title FROM item WHERE type='step' AND state='open' AND thread=?1 ORDER BY created LIMIT 1",
+        &[&thread],
+    )
+    .first()
+    .map(|r| s(r, "title").to_string())
 }
 
 pub fn today(c: &Connection) -> Value {
@@ -169,30 +193,50 @@ fn brief_short(c: &Connection) -> String {
         out,
         "Projects in motion (detail for one: `bt brief --thread \"<name>\"`, everything: `bt brief --all`):"
     );
-    for t in threads(c).iter().filter(|t| s(t, "state") == "moving") {
-        let name = s(t, "name");
-        let mut line = format!("  - {name}: {} open, {} done", t["open_s"], t["done_s"]);
-        let n = count(&waiting, name);
+    let all = threads(c);
+    let moving: HashSet<&str> = all
+        .iter()
+        .filter(|t| s(t, "state") == "moving")
+        .map(|t| top_of(&all, s(t, "name")))
+        .collect();
+    let line = |name: &str, members: &[&Value]| {
+        let total = |key: &str| {
+            members
+                .iter()
+                .map(|t| t[key].as_i64().unwrap_or(0))
+                .sum::<i64>()
+        };
+        let mut line = format!("{name}: {} open, {} done", total("open_s"), total("done_s"));
+        let n: usize = members.iter().map(|t| count(&waiting, s(t, "name"))).sum();
         if n > 0 {
             let _ = write!(line, ", {n} waiting on the owner");
         }
-        let next = rows(
-            c,
-            "SELECT title FROM item WHERE type='step' AND state='open' AND thread=?1 ORDER BY created LIMIT 1",
-            &[&name],
-        );
-        if let Some(step) = next.first() {
-            let _ = write!(line, " · next: {}", s(step, "title"));
+        if let Some(step) = next_step(c, name) {
+            let _ = write!(line, " · next: {step}");
         }
-        say!(out, "{line}");
+        line
+    };
+    let mut order: Vec<&str> = vec![];
+    for t in &all {
+        let top = top_of(&all, s(t, "name"));
+        if moving.contains(top) && !order.contains(&top) {
+            order.push(top);
+        }
     }
-    let moving: HashSet<String> = threads(c)
-        .iter()
-        .filter(|t| s(t, "state") == "moving")
-        .map(|t| s(t, "name").to_string())
-        .collect();
+    for top in order {
+        let children: Vec<&Value> = all.iter().filter(|t| s(t, "parent") == top).collect();
+        let mut members: Vec<&Value> = all.iter().filter(|t| s(t, "name") == top).collect();
+        members.extend(children.iter().copied());
+        say!(out, "  - {}", line(top, &members));
+        for child in children.iter().filter(|t| s(t, "state") == "moving") {
+            say!(out, "      - {}", line(s(child, "name"), &[child]));
+        }
+    }
     let mut elsewhere: BTreeMap<String, usize> = BTreeMap::new();
-    for q in waiting.iter().filter(|q| !moving.contains(s(q, "thread"))) {
+    for q in waiting
+        .iter()
+        .filter(|q| !moving.contains(top_of(&all, s(q, "thread"))))
+    {
         *elsewhere.entry(s(q, "thread").to_string()).or_default() += 1;
     }
     if !elsewhere.is_empty() {
@@ -235,7 +279,10 @@ pub fn brief(c: &Connection, only: Option<&str>, detail: Detail) -> String {
     if only.is_none() && detail == Detail::Short {
         return brief_short(c);
     }
-    let wanted = |row: &Value, key: &str| only.is_none_or(|thread| s(row, key) == thread);
+    let all = threads(c);
+    let wanted = |row: &Value, key: &str| {
+        only.is_none_or(|thread| s(row, key) == thread || top_of(&all, s(row, key)) == thread)
+    };
     say!(out, "Backtrail brief · {}", &now()[..10]);
 
     let waiting: Vec<Value> = waiting_on_owner(c)
@@ -278,25 +325,43 @@ pub fn brief(c: &Connection, only: Option<&str>, detail: Detail) -> String {
     }
 
     say!(out, "\nThreads in motion:");
-    for t in threads(c)
+    for t in all
         .iter()
         .filter(|t| s(t, "state") == "moving" && wanted(t, "name"))
     {
         let name = s(t, "name");
+        let parent = s(t, "parent");
         say!(
             out,
-            "  - {name}: {} open steps, {} done; last activity {}",
+            "  - {name}{}: {} open steps, {} done; last activity {}",
+            if parent.is_empty() {
+                String::new()
+            } else {
+                format!(" (in {parent})")
+            },
             t["open_s"],
             t["done_s"],
-            s(t, "last").get(..10).unwrap_or("?")
+            s(
+                t,
+                if parent.is_empty() {
+                    "family_last"
+                } else {
+                    "last"
+                }
+            )
+            .get(..10)
+            .unwrap_or("?")
         );
-        let next = rows(
-            c,
-            "SELECT title FROM item WHERE type='step' AND state='open' AND thread=?1 ORDER BY created LIMIT 1",
-            &[&name],
-        );
-        if let Some(step) = next.first() {
-            say!(out, "      next: {}", s(step, "title"));
+        let children: Vec<&str> = all
+            .iter()
+            .filter(|x| s(x, "parent") == name)
+            .map(|x| s(x, "name"))
+            .collect();
+        if !children.is_empty() {
+            say!(out, "      sub-threads: {}", children.join(", "));
+        }
+        if let Some(step) = next_step(c, name) {
+            say!(out, "      next: {step}");
         }
         let answered = rows(
             c,
@@ -358,7 +423,12 @@ pub fn thread(c: &Connection, name: &str) -> Value {
          ORDER BY f.asserted_at",
         &[&name],
     );
-    json!({"thread": thread.first(), "items": items, "sources": sources, "claims": claims, "decided": decided(c, name, 8),
+    let children = rows(
+        c,
+        "SELECT * FROM thread_stat WHERE parent=?1 ORDER BY last DESC",
+        &[&name],
+    );
+    json!({"thread": thread.first(), "children": children, "items": items, "sources": sources, "claims": claims, "decided": decided(c, name, 8),
            "artifacts": thread_artifacts(c, name), "agent": agent_start(name)})
 }
 

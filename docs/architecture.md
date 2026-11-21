@@ -173,6 +173,11 @@ The source carries no comments. The reasons behind rules that the code alone doe
   under the thread of its main entity. Every other configured thread gets a topic entity, so an item on an idea or
   discussion thread that names no known entity still reaches the graph. A short untitled session stays unsorted. A session pinned with `bt assign` keeps its
   thread on every rescan.
+- Sub-threads: a thread with `parent` in config sits under that thread, one level deep. Sessions and items stay on the
+  sub-thread. The brief lists a parent with its family's open and done counts and its moving sub-threads indented
+  under it, `bt brief --thread <parent>` includes the sub-threads, and recall counts a decision on any member of the
+  family as inside the session's project. A parent with an empty `regex` takes no sessions of its own and is left out
+  of the orphan report.
 - `items.rs`: the thread follows the first named project entity; mentions alone move an item only off a topic thread,
   so a passing mention leaves an item on its project. Each rescan runs `rehome`: an item on a discussion, idea or
   untyped thread whose entities name exactly one project with its own thread moves there (log action `rehome`), which

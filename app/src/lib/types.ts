@@ -42,6 +42,7 @@ export type ThreadStat = {
   open_q: number
   open_s: number
   done_s: number
+  parent: string | null
 }
 
 export type SourceStat = {
@@ -91,6 +92,7 @@ export type ArtifactLink = {
 
 export type ThreadDetail = {
   thread: ThreadStat | null
+  children: ThreadStat[]
   items: Item[]
   sources: SourceStat[]
   claims: ThreadClaim[]

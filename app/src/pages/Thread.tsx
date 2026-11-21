@@ -165,11 +165,24 @@ export default function Thread() {
           <div className="min-w-0 flex-1">
             <h2 className="text-[26px] font-semibold leading-tight tracking-tight">{th.name}</h2>
             {th.summary && <p className="truncate text-[13.5px] text-mut">{th.summary}</p>}
+            {th.parent && <p className="text-[12.5px] text-mut">Sub-thread of <Link className="text-soft hover:text-ink" to={`/thread/${encodeURIComponent(th.parent)}`}>{th.parent}</Link></p>}
           </div>
           <Link className="btn ghost" to={`/graph?p=${encodeURIComponent(th.name)}`}><Network size={14} />Decisions</Link>
           <Link className="btn ghost" to={`/map?thread=${encodeURIComponent(th.name)}`}>Map</Link>
           <button className="btn" onClick={() => capture(th.name)}><Plus size={14} />Add</button>
         </header>
+
+        {d.children.length > 0 && (
+          <section className="nx-in flex flex-wrap items-center gap-2">
+            <span className="text-[12px] text-mut">Sub-threads</span>
+            {d.children.map((k) => (
+              <Link key={k.name} to={`/thread/${encodeURIComponent(k.name)}`} className="btn ghost">
+                <span className="size-2 rounded-full" style={{ background: STATE_HEX[k.state] ?? '#8b8b95' }} />{k.name}
+                <span className="tabular-nums text-mut">{k.open_s} open · {k.done_s} done</span>
+              </Link>
+            ))}
+          </section>
+        )}
 
         <LeftOff sources={d.sources} gains={gains} next={todo[0]} onNext={(s) => { setView('steps'); setTimeout(() => document.getElementById(`item-${s.id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 120) }} />
 

@@ -97,7 +97,7 @@ indexed. It holds custom thread rules, note folders and repositories:
 | `workspace` | Root folder that note paths are relative to |
 | `note_dirs` | Folders of Markdown notes to index |
 | `screens_dir` | Folder of HTML design files to index |
-| `threads` | Thread definitions: `name`, `area`, `state`, `summary`, `kind`, `regex` (matches session titles and project folders). When set, one thread per project folder is no longer created |
+| `threads` | Thread definitions: `name`, `area`, `state`, `summary`, `kind`, `regex` (matches session titles and project folders), `parent` (the name of another thread, one level deep). When set, one thread per project folder is no longer created |
 | `note_rules`, `artifact_rules` | Lists of `[thread name, regex]` pairs that assign notes and artifacts to threads |
 | `generic_projects` | Project folder names left out when choosing a thread (default `["home"]`) |
 | `repos` | Repository path to thread table, used for commit matching |
