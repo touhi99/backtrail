@@ -372,6 +372,7 @@ private struct ClaimsPanel: View {
             det = try? await API.get("/api/kg/claims?entity=\(API.q(sel))&q=\(API.q(q))&status=\(status)&speaker=\(speaker)")
         }
         .task { if let l = try? await API.get("/api/kg/lineage") { lineage = l.arr } }
+        .onAppear { if store.openTopics { tab = "topics"; store.openTopics = false } }
         .task(id: store.tick) { sug = try? await API.get("/api/kg/suggest") }
     }
 

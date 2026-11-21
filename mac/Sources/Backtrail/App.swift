@@ -9,6 +9,9 @@ enum Snapshot {
         let p = env["BACKTRAIL_PAGE"] ?? "home"
         if p == "graph" { return .graph }
         if p == "trail" { return .trail }
+        if p == "items" { return .items }
+        if p == "log" { return .log }
+        if p.hasPrefix("map:") { return .map(String(p.dropFirst(4))) }
         if p.hasPrefix("thread:") { return .thread(String(p.dropFirst(7))) }
         if p.hasPrefix("decisions:") { return .decisions(String(p.dropFirst(10))) }
         if p.hasPrefix("search:") { return .search(String(p.dropFirst(7))) }

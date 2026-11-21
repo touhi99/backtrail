@@ -34,7 +34,10 @@ struct RootView: View {
                 case .decisions(let name): GraphView(project: name).id(name)
                 case .trail: TrailPage()
                 case .thread(let name): ThreadView(name: name).id(name)
-                case .search(let q): SearchView(initial: q).id(q)
+                case .search(let q, let t): SearchView(initial: q, scope: t).id("\(q)|\(t)")
+                case .items: ItemsPage()
+                case .log: LogPage()
+                case .map(let name): MapView(thread: name).id(name)
                 case .source(let id, let c): SourceView(id: id, chunk: c).id("\(id)-\(c ?? 0)")
                 }
                 if !store.back.isEmpty {
@@ -78,10 +81,13 @@ struct Sidebar: View {
             .padding(.horizontal, 8).padding(.top, 30).padding(.bottom, 14)
 
             NavRow(icon: "house", label: "Home", active: store.page == .home) { store.go(.home) }
-            NavRow(icon: "point.3.connected.trianglepath.dotted", label: "Graph", active: store.page == .graph) { store.go(.graph) }
+            NavRow(icon: "point.3.connected.trianglepath.dotted", label: "Graph", active: store.page == .graph,
+                   badge: store.toReview > 0 ? "\(store.toReview)" : nil, onBadge: { store.openTopics = true; store.go(.graph) }) { store.go(.graph) }
             NavRow(icon: "magnifyingglass", label: "Search", active: { if case .search = store.page { return true } else { return false } }()) {
                 store.go(.search(""))
             }
+            NavRow(icon: "checklist", label: "Items", active: store.page == .items) { store.go(.items) }
+            NavRow(icon: "scroll", label: "Log", active: store.page == .log) { store.go(.log) }
 
             Text("Threads").font(.system(size: 12)).foregroundStyle(Color.mut)
                 .padding(.horizontal, 10).padding(.top, 18).padding(.bottom, 4)
@@ -133,6 +139,8 @@ struct NavRow: View {
     var active: Bool
     var small = false
     var external = false
+    var badge: String? = nil
+    var onBadge: (() -> Void)? = nil
     var action: () -> Void
     @State private var hover = false
 
@@ -143,6 +151,11 @@ struct NavRow: View {
                 if let dot { Circle().fill(dot).frame(width: 7, height: 7).frame(width: 16) }
                 Text(label).lineLimit(1)
                 Spacer(minLength: 0)
+                if let badge {
+                    Text(badge).font(.system(size: 11)).monospacedDigit().foregroundStyle(Color.open)
+                        .padding(.horizontal, 6).background(Color.open.opacity(0.15), in: Capsule())
+                        .onTapGesture { onBadge?() }.help("Topics to review")
+                }
                 if external && hover {
                     Image(systemName: "arrow.up.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.mut)
                 }

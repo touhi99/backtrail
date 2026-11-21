@@ -81,6 +81,7 @@ private func drawStars(_ ctx: GraphicsContext, _ sz: CGSize) {
 }
 
 struct GraphView: View {
+    @EnvironmentObject var store: Store
     @State private var mode = "decisions"
     var project: String?
 
@@ -89,6 +90,7 @@ struct GraphView: View {
             MentionsGraph(tabs: AnyView(GraphTabs(mode: $mode)))
         } else {
             DecisionsView(tabs: AnyView(GraphTabs(mode: $mode)), initialProject: project).id(project ?? "")
+                .onAppear { if store.openTopics { mode = "mentions" } }
         }
     }
 }

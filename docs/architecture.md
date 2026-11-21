@@ -39,7 +39,7 @@ JSON API. The binary writes the database; sources (session logs, notes, git hist
 | `demo.rs` | The demo store. |
 | `src/sql/` | `schema.sql` (tables), `views.sql` (the `item`, `fact`, `thread_stat`, `source_stat` and `entity_stat` read views that pages filter) and `migrate_unify.sql`. Other statements are inline next to the code that runs them. |
 | `app/` | React and Vite web app, built to `app/dist/` and embedded into the binary. |
-| `mac/` | SwiftUI Mac app, a client of the `/api` routes on `127.0.0.1:8799`. Keeps the last answer per route in memory, so a page shows it at once and refreshes. Built by `mac/build.sh`. |
+| `mac/` | SwiftUI Mac app, a client of the `/api` routes on `127.0.0.1:8799`. Keeps the last answer per route in memory, so a page shows it at once and refreshes. Built by `mac/build.sh`. Has the same pages and actions as the web app; `scripts/check` fails when an `/api` route is called by only one of the two apps. |
 
 ## Data
 

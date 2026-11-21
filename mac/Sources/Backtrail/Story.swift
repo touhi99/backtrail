@@ -7,7 +7,7 @@ struct Story {
     struct Event: Identifiable { let id: String; let day: String; let text: String; let quote: String?; let you: Bool; let type: String }
     struct Turn { let day: String; let old: String; let new: String }
     struct Milestone: Identifiable { var id: String { name }; let name: String; let items: [J]; let done: Int; let check: Int; let d0: String?; let d1: String? }
-    struct Settled: Identifiable { let id = UUID(); let text: String; let quote: String?; let you: Bool; let ok: Bool; let day: String; let answer: Bool }
+    struct Settled: Identifiable { let id = UUID(); let text: String; let quote: String?; let you: Bool; let ok: Bool; let day: String; let answer: Bool; var item: J? = nil }
 
     var sessions: [Session] = []
     var made: [Made] = []
@@ -81,7 +81,7 @@ struct Story {
         var seen = Set<String>()
         func add(_ x: Settled) { if seen.insert(x.text.lowercased()).inserted { settled.append(x) } }
         for i in live where i["type"].str == "decision" && !(i["stale"].s ?? "").hasPrefix("superseded") {
-            add(Settled(text: i["title"].str, quote: i["quote"].s, you: i["origin"].str == "owner", ok: true, day: String(i["created"].str.prefix(10)), answer: false))
+            add(Settled(text: i["title"].str, quote: i["quote"].s, you: i["origin"].str == "owner", ok: true, day: String(i["created"].str.prefix(10)), answer: false, item: i))
         }
         for i in live where i["type"].str == "question" && i["state"].str != "open" && i["answer"].s != nil {
             add(Settled(text: i["title"].str, quote: i["answer"].s, you: i["origin"].str != "owner", ok: true, day: String(i["created"].str.prefix(10)), answer: true))
@@ -372,6 +372,7 @@ struct SettledView: View {
                                  color: x.you ? .accent : .moving)
                             if x.ok { Text("✓ confirmed").foregroundStyle(Color.accent) }
                             Text(dayFmt(x.day))
+                            if let it = x.item { Spacer(minLength: 0); ItemActions(i: it) }
                         }
                         .font(.system(size: 11.5)).foregroundStyle(Color.mut)
                     }

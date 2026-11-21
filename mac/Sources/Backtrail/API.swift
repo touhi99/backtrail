@@ -56,7 +56,10 @@ enum Page: Hashable {
     case decisions(String)
     case trail
     case thread(String)
-    case search(String)
+    case search(String, thread: String = "")
+    case items
+    case log
+    case map(String)
     case source(Int, chunk: Int?)
 }
 
@@ -78,11 +81,14 @@ final class Store: ObservableObject {
     }
     @Published var capture: String?? = nil
     @Published var tick = 0
+    var openTopics = Snapshot.env["BACKTRAIL_TAB"] == "topics"
+    @Published var toReview = 0
 
     func reload() async {
         do {
             let first = today == nil
             today = try await API.get("/api/today")
+            if let s = try? await API.get("/api/kg/suggest") { toReview = s["entities"].arr.count + s["aliases"].arr.count }
             offline = false
             if first { prefetch() }
         } catch {
