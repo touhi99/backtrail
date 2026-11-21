@@ -123,7 +123,7 @@ export default function Trail({ tabs }: { tabs: ReactNode }) {
   const made = ps.reduce((a, p) => a + p.made.length, 0)
   return (
     <div className="nx-page">
-      <div className="nx-in"><div className="text-[13px] text-mut">Every thread on one timeline, how each one ended, and what came out of it</div>
+      <div className="nx-in"><div className="text-[13px] text-mut">All threads on one timeline, grouped by state, with the artifacts and commits each produced</div>
         <div className="flex items-center gap-4"><h2 className="text-[28px] font-semibold leading-tight tracking-tight">Graph</h2>{tabs}</div></div>
 
       <div className="mt-5 grid grid-cols-5 gap-3 max-[1100px]:grid-cols-3">

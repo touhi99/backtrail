@@ -99,6 +99,32 @@ struct ThreadView: View {
                 if let sid = Optional(s["source_id"].int), sid > 0 { store.go(.source(sid, chunk: s["chunk_id"].int > 0 ? s["chunk_id"].int : nil)) }
             }
 
+            let prs = d["prs"].arr
+            if !prs.isEmpty {
+                HStack(spacing: 8) {
+                    Text("Pull requests").font(.system(size: 12.5)).foregroundStyle(Color.mut)
+                    ForEach(Array(prs.prefix(6).enumerated()), id: \.offset) { _, p in
+                        let repo = p["repo"].str
+                        let short = repo.split(separator: "/").last.map(String.init) ?? repo
+                        let look = prLook(p["state"].str)
+                        Button { if let u = URL(string: p["url"].str) { openURL(u) } } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: look.icon).foregroundStyle(look.color)
+                                Text("\(short)#\(p["number"].int)")
+                                if p["state"].str != "MERGED" {
+                                    Text(look.label).font(.system(size: 11)).foregroundStyle(look.color)
+                                }
+                            }
+                        }
+                        .buttonStyle(BtnStyle(kind: .ghost))
+                        .help("\(p["title"].str.isEmpty ? repo : p["title"].str) · \(look.label) \(p["merged_on"].str)")
+                    }
+                    if prs.count > 6 {
+                        Text("+\(prs.count - 6) more").font(.system(size: 12)).foregroundStyle(Color.mut)
+                    }
+                }
+            }
+
             HStack(alignment: .top, spacing: 20) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Earlier decisions").font(.system(size: 15, weight: .semibold))
@@ -349,6 +375,15 @@ func staleOf(_ i: J) -> (label: String, reason: String)? {
     return (l, parts.dropFirst().joined(separator: "|"))
 }
 
+func alsoText(_ items: [J]) -> String {
+    items.compactMap { a -> String? in
+        let t = a["title"].str
+        guard !t.isEmpty else { return nil }
+        guard let note = [a["reason"].s, a["body"].s].compactMap({ $0 }).first(where: { !$0.isEmpty }) else { return t }
+        return "\(t) (\(note))"
+    }.joined(separator: ", ")
+}
+
 struct DecisionRow: View {
     @EnvironmentObject var store: Store
     let x: J
@@ -362,8 +397,16 @@ struct DecisionRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
                 Text(x["day"].str == "undated" ? "undated" : dayFmt(x["day"].s))
                     .font(.system(size: 12.5)).monospacedDigit().foregroundStyle(Color.mut).frame(width: 52, alignment: .leading)
-                Text(x["title"].str).font(.system(size: 14)).frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(x["title"].str).font(.system(size: 14))
+                        .fixedSize(horizontal: false, vertical: true)
+                    let also = x["also"].arr
+                    if !also.isEmpty {
+                        Text("Also considered: " + alsoText(also))
+                            .font(.system(size: 12.5)).foregroundStyle(Color.mut).lineLimit(2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 let how = x["how"].str
                 Circle().fill(HOW_COLOR[how] ?? .mut).frame(width: 8, height: 8).help(HOW_NAME[how] ?? how)
             }
@@ -415,6 +458,11 @@ struct StepRow: View {
                 }
                 if !done, let b = s["body"].s, !b.isEmpty {
                     Text(b).font(.system(size: 13)).foregroundStyle(Color.soft).lineLimit(3)
+                }
+                let blocked = s["blocked_by"].arr
+                if !blocked.isEmpty {
+                    Text("Blocked by " + blocked.map { $0["title"].str }.joined(separator: ", "))
+                        .font(.system(size: 12.5)).foregroundStyle(Color.mut).lineLimit(2)
                 }
                 if s["source_id"].int > 0 {
                     Button { store.go(.source(s["source_id"].int, chunk: s["chunk_id"].int > 0 ? s["chunk_id"].int : nil)) } label: {
@@ -544,5 +592,14 @@ struct LeftOffCard: View {
             .background(LinearGradient(colors: [Color.accent.opacity(0.07), .clear], startPoint: .topLeading, endPoint: .center))
             .panel(radius: 18)
         }
+    }
+}
+
+func prLook(_ state: String) -> (icon: String, color: Color, label: String) {
+    switch state {
+    case "MERGED": return ("arrow.triangle.merge", .accent, "merged")
+    case "OPEN": return ("arrow.triangle.pull", .open, "open")
+    case "CLOSED": return ("xmark.circle", .dropped, "closed unmerged")
+    default: return ("questionmark.circle", .mut, "unchecked")
     }
 }

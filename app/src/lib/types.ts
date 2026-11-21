@@ -1,5 +1,13 @@
 export type ItemType = 'decision' | 'step' | 'question' | 'turn'
 
+export type ClaimEdge = {
+  id: string
+  title: string
+  body: string
+  state: string
+  reason: string
+}
+
 export type Item = {
   id: string
   type: ItemType
@@ -25,6 +33,8 @@ export type Item = {
   source_kind: string
   source_ts: string
   by_actor: string | null
+  blocked_by?: ClaimEdge[]
+  also?: ClaimEdge[]
 }
 
 export type ThreadStat = {
@@ -79,6 +89,7 @@ export type Decided = {
   chunk_id: number | null
   day: string
   how: string
+  also?: ClaimEdge[]
 }
 
 export type ArtifactLink = {
@@ -90,6 +101,18 @@ export type ArtifactLink = {
   url: string
 }
 
+export type PullRequest = {
+  repo: string
+  number: number
+  url: string
+  ts: string
+  source: string
+  state: '' | 'MERGED' | 'CLOSED' | 'OPEN'
+  merged_on: string
+  title: string
+  opened_here: number
+}
+
 export type ThreadDetail = {
   thread: ThreadStat | null
   children: ThreadStat[]
@@ -98,6 +121,7 @@ export type ThreadDetail = {
   claims: ThreadClaim[]
   decided: Decided[]
   artifacts: ArtifactLink[]
+  prs: PullRequest[]
   agent: { name: string; start: string }
 }
 

@@ -18,7 +18,7 @@ const TYPE: Record<string, { icon: LucideIcon; c: string }> = {
   question: { icon: CircleHelp, c: '#fbbf24' }, step: { icon: ListTodo, c: '#60a5fa' }, decision: { icon: Scale, c: '#c084fc' }, turn: { icon: Sparkles, c: '#8b8b95' },
 }
 const HELP: Record<string, string> = {
-  all: 'Every decision, step and question filed across threads. The tag shows who filed it, You or Claude. Filter to narrow it; open a title for its thread, or act on a row at the right.',
+  all: 'Every decision, step and question filed across threads. The tag shows who filed it, You or Claude. Open a title for its thread. Row buttons accept, reject, mark not valid now, mark replaced, or move it.',
   decision: 'Choices made in sessions. A suggested decision is accepted to keep it or rejected to drop it. A kept decision stays standing until marked replaced.',
   step: 'Todos and bugs. Open the thread to start, tick or confirm them.',
   question: 'Questions that wait for an answer. Answer them on Today or on the thread page.',

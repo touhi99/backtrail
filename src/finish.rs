@@ -93,11 +93,11 @@ pub fn finish(
         anyhow::bail!("{id}: not confirmed by a second model; left open");
     }
     let proof = format!(
-        "\"{}\" ({}, {}){}",
+        "\"{}\" ({}, {}); confirmed by a second model{}",
         clip(quote, 180),
         if speaker == "owner" { "you" } else { "Claude" },
         clip(&title, 60),
-        "; confirmed by a second model"
+        crate::prs::proof_note(c, source, s(step, "thread"))
     );
     let verdict = "done";
     if run == Run::Apply {
@@ -120,7 +120,7 @@ pub fn finish(
                 logw(c, "check", "finish", id, &format!("done: {source}"));
             }
             _ => {
-                items::done(c, id, "evidence", &clip(&proof, 300))?;
+                items::done(c, id, "evidence", &clip(&proof, 420))?;
                 logw(c, "check", "finish", id, &format!("done: {source}"));
             }
         }

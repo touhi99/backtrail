@@ -134,6 +134,7 @@ pub fn check(c: &Connection) {
             &[]
         )
     );
+    crate::prs::audit::report(c);
     crate::kg::lint::lint(c);
 }
 

@@ -6,7 +6,7 @@ let TOPIC_KINDS: [(String, String)] = [
     ("tool", "software that gets used"),
     ("service", "something that runs in the background, own or hosted"),
     ("model", "a named AI model, like Haiku or Qwen"),
-    ("site", "a website or company, like Google or Rivalsmeta"),
+    ("site", "a website or company, like Google or Wikipedia"),
 ]
 
 private struct Added {

@@ -111,8 +111,9 @@ UTF-8 JSON Lines for the inbox. The first line is the header; each further line 
 
 - One file per session. Rewrite the whole file when the session grows; a file is read again when its modification
   time changes, and its stored turns are replaced.
-- Leave out tool calls, tool output, system prompts, injected context and hidden reasoning. Turns shorter than 15
-  characters are dropped.
+- Leave out tool calls, tool output, system prompts, injected context and hidden reasoning. The converter format
+  carries typed text only; the Claude Code reader also keeps failed tool calls. Turns shorter than 15 characters are
+  dropped.
 - Timestamps increase through the file; decision reading resumes from the last turn it read by timestamp.
 - Other roles and malformed lines are skipped.
 

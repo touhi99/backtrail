@@ -62,7 +62,7 @@ export default function Home() {
         </section>
 
         <p className="nx-in text-[12.5px] text-mut">
-          Dot colour: green is the owner's own words, blue is accepted in the app, grey is from a note. Search above covers sessions, notes and artifacts.
+          Dot colour: green is your own words, blue is accepted in the app, grey is from a note.
         </p>
       </div>
     </div>

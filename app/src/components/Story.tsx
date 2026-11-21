@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Check, RotateCcw } from 'lucide-react'
 import { dayFmt, useApi } from '@/lib/api'
 import ItemActions from '@/components/ItemActions'
-import type { Item, SourceRaw, ThreadClaim, ThreadDetail } from '@/lib/types'
+import type { ClaimEdge, Item, SourceRaw, ThreadClaim, ThreadDetail } from '@/lib/types'
 
 type Session = { d: string; t: string; id: number }
 type Made = { d: string; t: string; id: number; kind: string; n: number }
@@ -23,6 +23,12 @@ const wclip = (s: string, n: number) => s.length <= n ? s : s.slice(0, s.lastInd
 const words = (s: string) => new Set(s.toLowerCase().split(/\W+/).filter((w) => w.length > 2))
 const similar = (a: string, b: string) => { const A = words(a), B = words(b); const i = [...A].filter((w) => B.has(w)).length; return i / Math.max(1, Math.min(A.size, B.size)) }
 const DONE = (s: string) => s === 'done' || s === 'looks_done'
+
+export function AlsoConsidered({ also }: { also: ClaimEdge[] }) {
+  return (
+    <span className="block text-[12.5px] leading-snug text-mut">Also considered {also.map((a, i) => <span key={a.id}>{i > 0 && ', '}{a.title}{a.reason || a.body ? ` (${a.reason || a.body})` : ''}</span>)}</span>
+  )
+}
 
 function useWidth<T extends HTMLElement>() {
   const ref = useRef<T>(null)
@@ -255,6 +261,7 @@ export function Settled({ s, done }: { s: Story; done: () => void }) {
         {(all ? s.settled : s.settled.slice(0, 8)).map((x, i) => (
           <div key={i} className="flex flex-col gap-2 rounded-2xl border bg-white/[.035] p-3.5" style={{ borderColor: x.ok ? '#34d39944' : 'transparent' }}>
             <div className="text-[14.5px] font-semibold leading-snug" style={{ textWrap: 'balance' }}>{x.t}</div>
+            {x.item?.also?.length ? <AlsoConsidered also={x.item.also} /> : null}
             {x.q && <div className="border-l-2 border-line pl-2.5 text-[12.5px] italic text-mut [overflow-wrap:anywhere]">{x.answer ? x.q : `“${wclip(x.q, 150)}”`}</div>}
             <div className="mt-auto flex flex-wrap items-center gap-2 text-[11.5px] text-mut">
               <span className="rounded-md px-1.5 py-px font-semibold" style={isYou(x.who) ? { background: '#34d39922', color: '#34d399' } : { background: '#60a5fa22', color: '#60a5fa' }}>{x.answer ? (isYou(x.who) ? 'You answered' : 'Claude answered') : isYou(x.who) ? 'You said' : 'Claude'}</span>

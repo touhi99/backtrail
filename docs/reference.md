@@ -1,81 +1,26 @@
 # Backtrail reference
 
-Details that the README leaves out: every command, every configuration key, search ranking, setup for embeddings and
-hooks, and the parts that do not scale unchanged.
+Details that the README leaves out: the everyday commands, every configuration key, search ranking, setup for
+embeddings and hooks, and the parts that do not scale unchanged.
 
 ## Commands
 
-Commands run as `bt <command>`.
+Everyday commands:
 
 | Command | Purpose |
 | --- | --- |
-| `ingest [--force]` | Read new or changed sources (new lines only, for a session file that grew) and re-link facts whose passage changed. `--force` reads every session again in full (after a change to the chunking rule); sessions whose file is gone are kept |
+| `build` | Ingest sources, create configured entities and embed on first run |
 | `serve [--port N]` | Run the app |
-| `brief [--thread T \| --all]` | Rescan, then print. With no flag: one line per thread in motion (open and done steps, what waits on the owner, the next step) and the questions the owner asked. `--thread T`: open questions, next step, recent answers, the latest five settled decisions still in force (each with its date and who confirmed it: `owner-stated`, `owner-accepted` or `from a note`) of one thread. `--all`: the same detail for every thread. A question the owner asked and Claude answered is labelled "owner asked, Claude answered" |
-| `recall [--text PROMPT [--thread T]]` | Without `--text`: the UserPromptSubmit hook; reads the hook JSON on stdin and prints up to two settled decisions that bear on the prompt. With `--text`: list every match and its score, for checking |
-| `add <type> --thread --title --entities A,B --source --quote [--body --state --origin --valid-to]` | File one decision, step, question or turn. At least one entity is required; the thread follows the entity. Lists existing items that may already settle it |
-| `resolve <id> --by <id> --reason T` | Settle an item with an existing one: a question becomes `answered`, a step or decision `superseded`, `superseded_by` names the settling item |
-| `unresolve <id>` | Put a resolved or expired item back to `proposed`; a settled decision that a reversal replaced goes back to `settled` |
-| `resolve --expired` | Items whose `valid_to` has passed leave the queue (also done by `resolve-queue`). Claude's proposals and open questions whose session is more than 14 days old and that are still unconfirmed are parked the same way: state `superseded`, reason in `answer`, `unresolve` brings one back. `bt serve` runs this every 5 minutes. Proposals on a thread whose state is `built`, `dropped` or `parked` are parked the same way. Parking applies to Claude's items; items the owner filed stay as they are |
-| `answer <question id> --text T` | Record the owner's reply to a question Claude asked; the brief lists open questions with their ids |
-| `keep` | Run the keep rule over every proposed fact |
-| `resolve-queue [--limit N]`, `resolve-packet <id>`, `resolve-apply <file\|->` | The three halves of `skill/resolve.sh`: unjudged proposed items, the text a model reads for one, and applying its verdict. With `--reverses` (`resolve-queue`, `resolve-packet`) they work on settled decisions: the packet lists the older settled decisions on the same subject (best word and passage matches, then those sharing the newest decision's most specific entities), and a verdict `{"id", "replaces": [..], "reason"}` marks each named older decision `superseded` by the new one. `resolve.sh --reverses` asks a second model to confirm each reversal before it is applied |
-| `import <facts.json>` or `import -` | File many facts through the same rule. Decisions, steps, questions and turns need a thread (taken from the source when missing); `state`, `rationale` and `relation` items name entities |
-| `done <step id> --by owner\|claude\|evidence --proof "..."` | Close a step; `claude` and `evidence` need proof |
-| `flag <id> --as live\|in_effect\|superseded\|done --reason "..."` | Label a proposed item |
-| `retire <id> [--by <id>] --reason "..."` | Retire an item; `--by` records the item that replaced it |
-| `set-thread <name> --state --summary` | Change a thread's state or summary |
-| `link <A> <B> <kind>` | Record a thread-to-thread relation by the owner, without a quote |
-| `assign <session ref> <thread>` | Pin a session to a thread |
-| `search <words> [--thread T] [--kind session\|note\|artifact\|commit] [--state S] [--from DATE] [--to DATE] [--text]` | Search with filters. `--state` keeps passages whose source has a filed item in that state. `--text` forces keyword-only |
-| `embed [--limit N]` | Embed passages that have no vector yet (needs the embedding server; see the `embeddings` key) |
-| `show <ref>` | Print a source's passages |
-| `check [--pairs]` | Report the last 7 days of filing (items filed, how many the owner moved to another project or retired, how many `rehome` moved), lost quotes, session files not indexed yet, orphan threads, stale work; `--pairs` lists candidate contradictions |
-| `match` | Mark open steps that a later commit seems to complete as `looks done?` (word-overlap heuristic; it marks unrelated steps that share a phrase, so it runs only when called) |
-| `status [--all]` | Session states and graph gaps; lists every session that is not complete or excluded (`--all`: every session). Exits 1 when a session failed or an item has no entity |
-| `ended <session id>` | Mark a session ended (the SessionEnd hook runs it) |
-| `home` | Print the data directory |
-| `artifacts [--manifest list.json]` | Record publish dates and report missing or stale snapshots |
-| `extract-input <ref>` | Print one session for a model: the thread's existing items, the open steps of every thread with their ids, the entity names, and the turns |
-| `finish <step> --source REF --quote Q [--verified] [--dry]` | Close an open step from a quote found in the source. It closes only with `--verified` (a second model agreed the passage shows the step finished); without, it is refused. `--dry` prints the verdict only |
-| `finish-input <step>` | Print a step and the ten passages written after it that are most like it, for `skill/finish.sh` |
-| `finish-evidence <step> --source REF --quote Q` | Print a step and the passage holding the quote, for the confirming model |
-| `finish-queue` | List steps open for more than a day |
-| `extract-queue [--session ID] [--limit N] [--entity E] [--no-cap]` | List unread and behind sessions (at most `daily_cap` a day when set, unless `--no-cap`) |
-| `extract-log <ref> [--failed 1] --detail "..."` | Record one extraction run and its cost |
-| `log [--n N]` | Print the append-only change log |
-| `backup` | Copy the store to `<data dir>/backups` (also daily on rescan, newest 3 kept) |
-| `kg` | Print claim and entity counts |
-| `kg find "<question>"` | Router for history questions: lineage trace, entity page, claims matched by their own words, then the hybrid search (claims that cite the best passages, else the passages). Prints "no record" on a miss. When claims about an entity are newer than any shown, a line gives the latest date |
-| `kg page <entity> [--budget N]` | Entity page within a token budget: newest claims in full, older ones rolled up by month |
-| `--as-of YYYY-MM-DD` on `kg find`, `page`, `trace` and `neighbors` | Answer from the claims in force that day: said by then, not ended yet. A claim ends on the earliest of its `valid_to`, the day its replacement was said and its `retire` log entry. Claims show as `in force then`; "newer claims exist" notes and passages dated after the day are left out. A claim marked superseded with none of those ends on its last update (proposals parked after 14 days) or on the day of the resolver's `stale` check: the day the system noticed, not the day the world changed |
-| `kg trace <entity>` / `kg why <words>` / `kg neighbors <entity>` / `kg passage <words>` | Dated lineage, claim lookup by words, shared-claim neighbours (`neighbors --depth 1-3`, default 1; fan-out capped per hop, hubs ranked down, about 2500 tokens, cuts counted; logged as `kg-query`), the hybrid search routed to claims |
-| `kg path <entity A> <entity B>` | Shortest chain of claims between two entities (up to 5 links; the strongest link first among equal chains), each link with its newest claim, date, speaker and quote. Takes `--as-of`; prints "no record" when no chain exists |
-| `kg suggest` / `kg entity add <name> [--kind K --alias A]` | Suggest new entities and alias spellings (nothing is written); add one by hand |
-| `kg state` | Thread state suggested from session activity alone (nothing is changed) |
-| `kg merge <keep id> <drop id>` | Merge a duplicate claim into another: its entities move over and the duplicate is closed as superseded |
-| `kg lint` | Graph checks (also part of `check`) |
-| `kg export --graph <file>` | Entity graph, not a backup: nodes are entities with kind and claims in force; a link joins two entities when a claim in force names both (weight, first and last day, newest claim). `.graphml` writes GraphML, any other name JSON in NetworkX node-link form. Takes `--as-of` |
-| `kg export <file>` / `kg restore <file>` | Backup of entities and all claims as JSONL; each quote is re-located by source on restore |
-| `build` | Ingest all sources, create the configured entities (`config.json` key `entities`) and embed (first run); in a terminal, offers to read the newest 20 unread sessions |
-| `demo` | Write a demo store (requires `BACKTRAIL_HOME`) |
-| `hooks [status\|install\|remove] [--harness claude,gemini,codex,antigravity]` | Show, add or remove each agent's hooks and skill link (default `claude`; `status` shows all); the old hooks file is copied to `<name>.bak-backtrail` first. Paths and events: [`harnesses.md`](harnesses.md) |
-| `agent [claude\|gemini\|codex\|antigravity\|command]` | Print or set the CLI that reads sessions (`config.json` key `agent.cli`) |
+| `brief [--thread T \| --all]` | Print what was decided and what is next |
+| `search <words>` | Search with cited sources |
+| `show <ref>` | Print one source's passages |
+| `status [--all]` | Session states and graph gaps |
+| `check [--pairs]` | Filing, quote and stale-work checks |
+| `hooks [...]`, `agent [...]` | Connect agents or change the reading CLI |
+| `home`, `backup` | Data directory and a store backup |
 
-`relate <A> <B> <kind> --source <ref> --quote "..." [--state proposed]` files a relation between two threads
-(`spun out of`, `forked from`, `built on`, `replaced by`) with a quote from a source. It is stored as a relation claim.
-`extract.sh` proposes relations in the same pass as decisions and steps.
-
-App screens: Home (the trail of the last two weeks, and one card per project in motion with its next step and latest
-decisions, and a link to each project with open questions), project page (latest decisions with who confirmed each,
-open questions to answer, steps, a search limited to the project; proposed
-items sit under the Archive view as "Unconfirmed suggestions"), source (cited passage highlighted), search, items, log,
-and the graph. The graph shows
-entities as nodes (size is the number of claims, a line means claims about both). Selecting a node opens its
-lineage, shared-claim neighbours and claims, each with date, speaker, quote and a link to the source passage. The
-panel also lists suggested entities and aliases that can be added with one click. A project page still has a map of
-its own notes. The app can tick a step, confirm or dismiss `looks done?`, answer a question, add an idea, and accept
-or reject suggested items. Thread lineage drawn on the graph comes from relation claims (`relate`, `link` and `extract.sh` write them).
+Every other command is called by hooks, `skill/*.sh` or an agent, not typed by hand. The full list, including the
+queue and packet steps and the knowledge-graph commands, is in [`commands.md`](commands.md).
 
 ## Install options
 
@@ -102,7 +47,7 @@ indexed. It holds custom thread rules, note folders and repositories:
 | `generic_projects` | Project folder names left out when choosing a thread (default `["home"]`) |
 | `repos` | Repository path to thread table, used for commit matching |
 | `aliases` | Alternative names used for mention edges |
-| `compile` | `daily_cap`: extraction runs a day; unset means no limit |
+| `compile` | Extraction settings (the key keeps its old name): `daily_cap`, extraction runs a day; unset means no limit |
 | `agent` | The CLI that reads sessions: `cli` is `claude` (default), `gemini`, `codex`, `antigravity` or `command`; `small`, `medium`, `large` name the models for the CLIs other than `claude`; `command` is a shell command that reads the prompt on stdin and prints the answer. `BACKTRAIL_AGENT` overrides `cli`. See [`harnesses.md`](harnesses.md#reading-agent) |
 | `port` | Server port (8799) |
 | `embeddings` | On by default with `url` `http://127.0.0.1:11434` and `model` `embeddinggemma-2:270m`. Keys: `url` (an Ollama-compatible server, `http://` only), `model`, and optionally `query_prefix`, `document_prefix` (default to `task: search result | query: ` and `title: none | text: ` for `embeddinggemma` models, `search_query: ` and `search_document: ` for `nomic` models, empty otherwise) and `batch_cap` (passages per background run, default 2000). `false` turns embeddings off. Changing `model` discards stored vectors and re-embeds. |
@@ -110,9 +55,9 @@ indexed. It holds custom thread rules, note folders and repositories:
 ## Search ranking
 
 Search ranks passages by keyword (BM25) and, when the embedding server answers, by vector similarity. Otherwise keyword only, with a note in the result. The two rankings
-are merged by reciprocal rank fusion. Each passage's score is then adjusted by what the store knows about it: the
-thread's state (dropped or parked lowers it), and whether a kept, suggested or rejected item cites the passage or its
-source. The result lists these reasons. Filed items are searched in a separate index over title and body and listed
+are merged by reciprocal rank fusion. Each passage's score is then adjusted by its thread's state (dropped or parked
+lowers it) and by whether a kept, suggested or rejected item cites the passage or its source. The result lists these
+reasons. Filed items are searched in a separate index over title and body and listed
 kept states first (settled, done, open, answered, looks done, doing), then proposed and superseded ones, each group by
 text relevance. `kg find` orders claims the same way: active, then proposed, then superseded.
 
@@ -172,12 +117,6 @@ bt build
   across.
 - `bt hooks install` writes absolute paths to this checkout, so it is run on each machine.
 
-## Demo store
-
-A store with invented content: `BACKTRAIL_HOME=/tmp/bt-demo bt demo`, then
-`BACKTRAIL_HOME=/tmp/bt-demo bt serve --port 8800`. Screenshots from it are in `docs/demo/` (home, project page, search,
-graph, items).
-
 ## Scale limits
 
 Graph queries (entity lookup, claim filter, two-hop) were timed on a scratch store of up to 4 million passages and
@@ -188,44 +127,16 @@ Keyword search uses SQLite FTS5, which handles far more than the 11,800 passages
 Parts that do not scale unchanged: vectors are 8-bit (772 bytes each at 768 dimensions) and scanned
 from SQLite on each search without a copy in memory: 0.11 s and 14 MB peak at 15,600 passages, 0.28 s and 12 MB at
 188,000 (measured on repeated vectors); 8-bit top-10 results match 32-bit ones 98% of the time; `graph()` rebuilds the whole graph per
-request with one FTS query per thread; the item index is rebuilt in memory whenever facts change. None of these has
+request with one FTS query per thread; the item index is rebuilt in memory whenever claims change. None of these has
 been measured beyond that size.
-
-## Scripts
-
-| Script | Usage |
-| --- | --- |
-| `skill/session-end.sh` | SessionEnd hook; reads the hook JSON (`session_id`) on stdin, runs `ingest`, `ended <id>`, then `sweep.sh` in the background |
-| `skill/sweep.sh` | One sweep under `<data dir>/sweep.lock`: `ingest`, `embed`, extraction of every queued session, `resolve.sh` and `resolve.sh --reverses` until their queues are empty, `finish.sh --limit 15`. Logs to `<data dir>/logs/sweep.log`. `BACKTRAIL_COMPILE_ON_END=0` skips it |
-| `skill/extract.sh [--entity NAME] [--limit N] [--session ID] [--no-cap] \| <session ref>...` | One single-shot model call per session; the answer goes through `bt import -` |
-| `skill/resolve.sh [--dry] [--reverses] [--limit N] \| [--dry] [--reverses] <item id>...` | One call per proposed item (`BACKTRAIL_RESOLVE_MODEL`, default sonnet). `--reverses` judges settled decisions, and a second model confirms each reversal |
-| `skill/finish.sh [--dry] [--limit N] [step id...]` | Backlog sweep over items older than a day and not judged in the last 7 days |
-| `skill/close-step.sh <step id> <source ref> <quote> [--dry]` | Checks the quote with `bt finish --dry`, asks a second model, then closes the item with `--verified` |
-| `skill/howto.sh [--dry] [--again] [--limit N] \| [--dry] <step id>...` | Writes the check text for steps waiting on the owner; `--again` includes steps judged to need none |
-| `install.sh` | Builds the app and binary and links `bt`; `BT_NO_AGENT=1` skips the login agent, `BT_NO_MAC_APP=1` the Mac app |
-| `mac/build.sh` | Builds the Mac app and its icon into `mac/Backtrail.app` |
-
-`--dry` prints each verdict as a JSON line and applies nothing. The model scripts set `BACKTRAIL_COMPILE=1`, so the
-hooks of the sessions they start exit at once, and run in an empty temporary folder, so no project `CLAUDE.md` is
-loaded.
-
-## Source layout
-
-Rust code is formatted with `cargo fmt`. Tables are defined in `src/sql/schema.sql` and read through the views in
-`src/sql/views.sql`; a page or command filters a view instead of repeating its joins. Statements stay inline next to
-the code that runs them. A change to existing tables is a migration in `src/migrate.rs`.
-
-Source files carry no comments; `// SAFETY:` is the exception. Names and types say what code does, and the reasons
-behind non-obvious rules are in `architecture.md`, section "Rules in the code". `scripts/check` runs every check
-(format, Clippy, tests, TypeScript, ESLint, Swift build, docs and comment lint) and CI runs the same script.
 
 ## Other limits
 
 - Thread assignment is regular-expression based; unmatched sources stay in `Unsorted`.
 - One extraction run of a session on a small model took 3,100 to 6,200 input tokens in three runs.
-- Only the text of user and assistant turns is stored, in chunks of at most 2,400 characters. Tool calls, tool output,
-  thinking and images are not. On one store this was about 0.5% of the bytes in the transcript files (5.9 MB of
-  1.8 GB over 26 days).
+- User and assistant text is stored in chunks of at most 2,400 characters, and a failed tool call is stored with its
+  tool name, input summary and error excerpt. Other tool output, thinking and images are not. On one store this was
+  about 0.5% of the bytes in the transcript files (5.9 MB of 1.8 GB over 26 days).
 - Claude Code removes session transcripts after 30 days by default (setting `cleanupPeriodDays`). A session is indexed
   when it ends and the store keeps its text, but a session that was never indexed before its file was removed is lost.
   The data directory then holds the only copy of the text, so it needs its own backup.

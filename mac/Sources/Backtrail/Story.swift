@@ -366,6 +366,12 @@ struct SettledView: View {
                                 .padding(.leading, 10).overlay(alignment: .leading) { Rectangle().fill(Color.line2).frame(width: 2) }
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        let also = x.item?["also"].arr ?? []
+                        if !also.isEmpty {
+                            Text("Also considered: " + alsoText(also))
+                                .font(.system(size: 12.5)).foregroundStyle(Color.mut).lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         Spacer(minLength: 0)
                         HStack(spacing: 8) {
                             Chip(text: x.answer ? (x.you ? "You answered" : "Claude answered") : x.you ? "You said" : "Claude",
