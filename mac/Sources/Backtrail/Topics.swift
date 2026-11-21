@@ -163,7 +163,7 @@ struct TopicsPanel: View {
             Text("Should this be in the graph?").font(.system(size: 12)).foregroundStyle(Color.mut)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(term).font(.system(size: 26, weight: .semibold)).tracking(-0.4).lineLimit(1)
-                Button { store.go(.search(term)) } label: {
+                Button { store.sheet = .search(term, thread: "") } label: {
                     Label("all mentions", systemImage: "magnifyingglass").font(.system(size: 12))
                 }
                 .buttonStyle(.plain).foregroundStyle(Color.mut).help("Search every mention")

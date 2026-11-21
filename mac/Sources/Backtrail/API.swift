@@ -54,11 +54,7 @@ enum Page: Hashable {
     case home
     case graph
     case decisions(String)
-    case trail
     case thread(String)
-    case search(String, thread: String = "")
-    case items
-    case log
     case map(String)
     case source(Int, chunk: Int?)
 }
@@ -69,8 +65,24 @@ final class Store: ObservableObject {
     @Published var offline = false
     @Published var page: Page = .home
     @Published var back: [Page] = []
+    @Published var sheet: Sheet?
+    var graphMode: String?
+
+    enum Sheet: Identifiable, Equatable {
+        case search(String, thread: String)
+        case items
+        case log
+        var id: String {
+            switch self {
+            case .search(let q, let t): "search|\(q)|\(t)"
+            case .items: "items"
+            case .log: "log"
+            }
+        }
+    }
 
     func go(_ p: Page) {
+        sheet = nil
         guard p != page else { return }
         back.append(page)
         page = p
@@ -112,6 +124,7 @@ final class Store: ObservableObject {
     }
 
     var threads: [J] { today?["threads"].arr ?? [] }
+    var scope: String { if case .thread(let n) = page { n } else { "" } }
     var moving: [J] { threads.filter { $0["state"].str == "moving" } }
 }
 

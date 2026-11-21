@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { Search as SearchIcon } from 'lucide-react'
 import { dayFmt, get } from '@/lib/api'
 import { useShell } from '@/components/Shell'
@@ -12,9 +12,9 @@ const STATE = [['', 'Any item state'], ['open', 'Open'], ['done', 'Done'], ['set
 const STATE_C: Record<string, string> = { open: '#fbbf24', doing: '#60a5fa', done: '#34d399', looks_done: '#34d399', settled: '#c084fc', answered: '#34d399', proposed: '#8b8b95', rejected: '#fb7185' }
 const KEYS = ['thread', 'kind', 'state', 'from', 'to', 'mode'] as const
 
-export default function Search() {
+export default function Search({ initial, scope }: { initial: string; scope: string }) {
   const { today } = useShell()
-  const [sp, setSp] = useSearchParams()
+  const [sp, setSp] = useState(() => new URLSearchParams(Object.entries({ q: initial, thread: scope }).filter(([, v]) => v)))
   const q = sp.get('q') ?? ''
   const [text, setText] = useState(q)
   const [r, setR] = useState<SearchResult | null>(null)
@@ -23,7 +23,6 @@ export default function Search() {
   useEffect(() => {
     const url = new URLSearchParams(qs)
     const query = url.get('q') ?? ''
-    setText(query)
     if (!query) { setR(null); return }
     const p = new URLSearchParams({ q: query })
     for (const k of KEYS) { const v = url.get(k); if (v) p.set(k, v) }
@@ -33,7 +32,7 @@ export default function Search() {
   const submit = () => { const n = new URLSearchParams(sp); n.set('q', text); setSp(n) }
   const active = KEYS.some((k) => k !== 'mode' && f[k])
   return (
-    <div className="nx-page flex flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <form onSubmit={(e) => { e.preventDefault(); submit() }} className="relative">
         <SearchIcon size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-mut" /><input autoFocus className="input !h-14 !rounded-2xl !pl-12 !text-[16px]" placeholder="Search notes, artifacts, conversations and commits" value={text} onChange={(e) => setText(e.target.value)} />
       </form>

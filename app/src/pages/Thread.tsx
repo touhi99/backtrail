@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Bug, Check, CheckCheck, CircleHelp, Copy, FileText, Lightbulb, Network, Plus, Sparkles } from 'lucide-react'
 import { agoFmt, dayFmt, post, STALE_LABEL, staleOf, useApi } from '@/lib/api'
 import { useShell } from '@/components/Shell'
@@ -87,7 +87,6 @@ export default function Thread() {
   const { data: d, reload } = useApi<ThreadDetail>(`/api/thread?name=${encodeURIComponent(name)}`)
   const { capture, reload: reloadShell } = useShell()
   const [sp] = useSearchParams()
-  const nav = useNavigate()
   const focus = sp.get('item')
   const [view, setView] = useState<View | null>(null)
   useEffect(() => { setView(null) }, [name])
@@ -167,9 +166,6 @@ export default function Thread() {
             <h2 className="text-[26px] font-semibold leading-tight tracking-tight">{th.name}</h2>
             {th.summary && <p className="truncate text-[13.5px] text-mut">{th.summary}</p>}
           </div>
-          <form className="order-last w-full md:order-none md:w-64" onSubmit={(e) => { e.preventDefault(); const q = String(new FormData(e.currentTarget).get('q') ?? '').trim(); if (q) nav(`/search?q=${encodeURIComponent(q)}&thread=${encodeURIComponent(th.name)}`) }}>
-            <input name="q" className="input" placeholder={`Search ${th.name}`} aria-label="Search this project" />
-          </form>
           <Link className="btn ghost" to={`/graph?p=${encodeURIComponent(th.name)}`}><Network size={14} />Decisions</Link>
           <Link className="btn ghost" to={`/map?thread=${encodeURIComponent(th.name)}`}>Map</Link>
           <button className="btn" onClick={() => capture(th.name)}><Plus size={14} />Add</button>

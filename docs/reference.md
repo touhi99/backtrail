@@ -39,7 +39,7 @@ Commands run as `bt <command>`.
 | `finish-input <step>` | Print a step and the ten passages written after it that are most like it, for `skill/finish.sh` |
 | `finish-evidence <step> --source REF --quote Q` | Print a step and the passage holding the quote, for the confirming model |
 | `finish-queue` | List steps open for more than a day |
-| `extract-queue [--session ID] [--limit N] [--entity E] [--no-cap]` | List sessions worth extracting (at most `daily_cap` a day unless `--no-cap`) |
+| `extract-queue [--session ID] [--limit N] [--entity E] [--no-cap]` | List sessions worth extracting (at most `daily_cap` a day when set, unless `--no-cap`) |
 | `extract-log <ref> [--failed 1] --detail "..."` | Record one extraction run and its cost |
 | `log [--n N]` | Print the append-only change log |
 | `backup` | Copy the store to `<data dir>/backups` (also daily on rescan, newest 3 kept) |
@@ -99,7 +99,7 @@ indexed. It holds custom thread rules, note folders and repositories:
 | `generic_projects` | Project folder names left out when choosing a thread (default `["home"]`) |
 | `repos` | Repository path to thread table, used for commit matching |
 | `aliases` | Alternative names used for mention edges |
-| `compile` | `daily_cap` (8): extraction runs a day |
+| `compile` | `daily_cap`: extraction runs a day; unset means no limit |
 | `port` | Server port (8799) |
 | `embeddings` | On by default with `url` `http://127.0.0.1:11434` and `model` `embeddinggemma-2:270m`. Keys: `url` (an Ollama-compatible server, `http://` only), `model`, and optionally `query_prefix`, `document_prefix` (default to `task: search result | query: ` and `title: none | text: ` for `embeddinggemma` models, `search_query: ` and `search_document: ` for `nomic` models, empty otherwise) and `batch_cap` (passages per background run, default 2000). `false` turns embeddings off. Changing `model` discards stored vectors and re-embeds. |
 

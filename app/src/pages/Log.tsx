@@ -8,7 +8,7 @@ const ACTOR: Record<string, string> = { owner: 'You', claude: 'Claude' }
 export default function Log() {
   const { data } = useApi<LogEntry[]>('/api/log')
   return (
-    <div className="nx-page">
+    <div>
       <div className="nx-in"><div className="text-[13px] text-mut">Every change, newest first</div><h2 className="text-[30px] font-semibold leading-tight tracking-tight">Log</h2></div>
       <section className="nx-panel nx-in mt-5 overflow-hidden" style={{ '--d': '60ms' }}>
         <Paged items={data ?? []} size={20}>{(pageRows) => pageRows.map((x, i) => (

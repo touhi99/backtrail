@@ -21,7 +21,6 @@ struct ThreadView: View {
     @State private var shown = 10
     @State private var tab = Tab(rawValue: Snapshot.env["BACKTRAIL_TAB"] ?? "") ?? .steps
     @State private var story: Story?
-    @State private var query = ""
     @State private var showRejected = false
 
     enum Tab: String, CaseIterable { case steps = "Steps", journey = "Journey", decisions = "Decisions", made = "Made", artifacts = "Artifacts", sources = "Sources", archive = "Archive", claude = "Claude Code" }
@@ -67,14 +66,6 @@ struct ThreadView: View {
                 Spacer()
                 Button { store.go(.decisions(name)) } label: { Label("Decisions", systemImage: "point.3.connected.trianglepath.dotted") }
                     .buttonStyle(BtnStyle(kind: .ghost))
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").font(.system(size: 12)).foregroundStyle(Color.mut)
-                    TextField("Search \(name)", text: $query).textFieldStyle(.plain).font(.system(size: 13))
-                        .onSubmit { let q = query.trimmingCharacters(in: .whitespaces); if !q.isEmpty { store.go(.search(q, thread: name)) } }
-                }
-                .padding(.horizontal, 10).frame(width: 220, height: 32)
-                .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.line2, lineWidth: 1))
                 Button { store.go(.map(name)) } label: { Text("Map") }
                     .buttonStyle(BtnStyle(kind: .ghost))
                 Button { store.capture = .some(name) } label: { Label("Add", systemImage: "plus") }

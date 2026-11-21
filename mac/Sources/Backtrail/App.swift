@@ -8,13 +8,9 @@ enum Snapshot {
     static func page() -> Page {
         let p = env["BACKTRAIL_PAGE"] ?? "home"
         if p == "graph" { return .graph }
-        if p == "trail" { return .trail }
-        if p == "items" { return .items }
-        if p == "log" { return .log }
         if p.hasPrefix("map:") { return .map(String(p.dropFirst(4))) }
         if p.hasPrefix("thread:") { return .thread(String(p.dropFirst(7))) }
         if p.hasPrefix("decisions:") { return .decisions(String(p.dropFirst(10))) }
-        if p.hasPrefix("search:") { return .search(String(p.dropFirst(7))) }
         if p.hasPrefix("source:") {
             let n = p.dropFirst(7).split(separator: ":").compactMap { Int($0) }
             return .source(n.first ?? 0, chunk: n.count > 1 ? n[1] : nil)
@@ -31,6 +27,13 @@ enum Snapshot {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let store = Store()
         store.page = page()
+        switch env["BACKTRAIL_PAGE"] ?? "" {
+        case "trail": store.page = .graph; store.graphMode = "trail"
+        case "items": store.sheet = .items
+        case "log": store.sheet = .log
+        case let p where p.hasPrefix("search:"): store.sheet = .search(String(p.dropFirst(7)), thread: "")
+        default: break
+        }
         let size = size()
         let host = NSHostingView(rootView: RootView().environmentObject(store).preferredColorScheme(.dark))
         host.frame = NSRect(origin: .zero, size: size)
@@ -91,7 +94,7 @@ struct BacktrailApp: App {
             }
             CommandGroup(after: .toolbar) {
                 Button("Reload") { store.changed() }.keyboardShortcut("r")
-                Button("Search") { store.go(.search("")) }.keyboardShortcut("f")
+                Button("Search") { store.sheet = .search("", thread: store.scope) }.keyboardShortcut("f")
                 Button("Back") { store.goBack() }.keyboardShortcut("[")
                 Button("Home") { store.go(.home) }.keyboardShortcut("1")
             }

@@ -86,11 +86,18 @@ struct GraphView: View {
     var project: String?
 
     var body: some View {
-        if mode == "mentions" {
-            MentionsGraph(tabs: AnyView(GraphTabs(mode: $mode)))
-        } else {
-            DecisionsView(tabs: AnyView(GraphTabs(mode: $mode)), initialProject: project).id(project ?? "")
-                .onAppear { if store.openTopics { mode = "mentions" } }
+        Group {
+            if mode == "mentions" {
+                MentionsGraph(tabs: AnyView(GraphTabs(mode: $mode)))
+            } else if mode == "trail" {
+                TrailPage(tabs: AnyView(GraphTabs(mode: $mode)))
+            } else {
+                DecisionsView(tabs: AnyView(GraphTabs(mode: $mode)), initialProject: project).id(project ?? "")
+            }
+        }
+        .onAppear {
+            if store.openTopics { mode = "mentions" }
+            if let m = store.graphMode { mode = m; store.graphMode = nil }
         }
     }
 }
@@ -99,7 +106,7 @@ struct GraphTabs: View {
     @Binding var mode: String
     var body: some View {
         HStack(spacing: 6) {
-            ForEach([("decisions", "Decisions"), ("mentions", "Mentions")], id: \.0) { key, label in
+            ForEach([("decisions", "Decisions"), ("mentions", "Mentions"), ("trail", "Trail")], id: \.0) { key, label in
                 Button { mode = key } label: {
                     Text(label).font(.system(size: 12.5, weight: .medium)).padding(.horizontal, 12).frame(height: 28)
                         .background(mode == key ? GREEN.opacity(0.15) : .white.opacity(0.04), in: Capsule())
