@@ -3,7 +3,8 @@ use crate::db::{id64, logw};
 use anyhow::Context;
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
-use std::sync::Mutex;
+use std::cmp::{Ordering, Reverse};
+use std::collections::BinaryHeap;
 use std::time::{Duration, Instant};
 
 const BATCH: usize = 32;
@@ -78,15 +79,63 @@ fn call(texts: &[String], prefix: &str, secs: u64) -> anyhow::Result<Vec<Vec<f32
         .collect())
 }
 
-fn blob(f: &[f32]) -> Vec<u8> {
-    f.iter().flat_map(|x| x.to_le_bytes()).collect()
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "each value is scaled into -127..=127 before the cast"
+)]
+pub fn blob(f: &[f32]) -> Vec<u8> {
+    let scale = f.iter().fold(0.0_f32, |m, x| m.max(x.abs()));
+    let mut out = scale.to_le_bytes().to_vec();
+    out.extend(f.iter().map(|x| {
+        let q = if scale > 0.0 {
+            (x / scale * 127.0).round()
+        } else {
+            0.0
+        };
+        (q as i8).to_le_bytes()[0]
+    }));
+    out
 }
-fn unblob(b: &[u8]) -> Vec<f32> {
+
+pub fn unblob_f32(b: &[u8]) -> Vec<f32> {
     b.as_chunks::<4>()
         .0
         .iter()
         .map(|x| f32::from_le_bytes([x[0], x[1], x[2], x[3]]))
         .collect()
+}
+
+fn score(b: &[u8], q: &[f32]) -> Option<f32> {
+    let (head, vals) = b.split_at_checked(4)?;
+    if vals.len() != q.len() {
+        return None;
+    }
+    let scale = f32::from_le_bytes(head.try_into().ok()?);
+    let dot: f32 = vals
+        .iter()
+        .zip(q)
+        .map(|(v, x)| f32::from(i8::from_le_bytes([*v])) * x)
+        .sum();
+    Some(dot * scale)
+}
+
+struct Hit(f32, String);
+
+impl PartialEq for Hit {
+    fn eq(&self, o: &Self) -> bool {
+        self.0.total_cmp(&o.0) == Ordering::Equal
+    }
+}
+impl Eq for Hit {}
+impl PartialOrd for Hit {
+    fn partial_cmp(&self, o: &Self) -> Option<Ordering> {
+        Some(self.cmp(o))
+    }
+}
+impl Ord for Hit {
+    fn cmp(&self, o: &Self) -> Ordering {
+        self.0.total_cmp(&o.0)
+    }
 }
 
 pub fn coverage(c: &Connection) -> (i64, i64) {
@@ -173,9 +222,6 @@ pub fn run_cli(c: &Connection, limit: usize) {
     }
 }
 
-type Cache = Option<(String, Vec<(i64, Vec<f32>)>)>;
-static CACHE: Mutex<Cache> = Mutex::new(None);
-
 pub fn nearest(c: &Connection, q: &str, k: usize) -> anyhow::Result<Vec<(i64, f32)>> {
     if !enabled() {
         anyhow::bail!("off");
@@ -183,28 +229,28 @@ pub fn nearest(c: &Connection, q: &str, k: usize) -> anyhow::Result<Vec<(i64, f3
     let qv = call(&[q.to_string()], &cfg().embeddings.query_prefix, 4)?
         .pop()
         .context("empty reply")?;
-    let sig: String = c.query_row(
-        "SELECT (SELECT COUNT(*) FROM vec)||'-'||(SELECT COUNT(*) FROM chunks)",
-        [],
-        |r| r.get(0),
-    )?;
-    let mut g = CACHE.lock().map_err(|_| anyhow::anyhow!("cache lock"))?;
-    if g.as_ref().is_none_or(|x| x.0 != sig) {
-        let all: Vec<(i64, Vec<f32>)> = c
-            .prepare("SELECT ch.id, v.v FROM chunks ch JOIN vec v ON v.hash=ch.hash")?
-            .query_map([], |r| Ok((r.get(0)?, unblob(&r.get::<_, Vec<u8>>(1)?))))?
-            .collect::<rusqlite::Result<_>>()?;
-        *g = Some((sig, all));
+    let mut best: BinaryHeap<Reverse<Hit>> = BinaryHeap::with_capacity(k + 1);
+    let mut st = c.prepare("SELECT hash, v FROM vec")?;
+    let mut rows = st.query([])?;
+    while let Some(r) = rows.next()? {
+        let Some(s) = score(r.get_ref(1)?.as_blob()?, &qv) else {
+            continue;
+        };
+        if best.len() < k || best.peek().is_some_and(|w| s > w.0.0) {
+            best.push(Reverse(Hit(s, r.get_ref(0)?.as_str()?.to_string())));
+            if best.len() > k {
+                best.pop();
+            }
+        }
     }
-    let mut scored: Vec<(i64, f32)> = g
-        .as_ref()
-        .expect("cache filled above")
-        .1
-        .iter()
-        .filter(|(_, v)| v.len() == qv.len())
-        .map(|(id, v)| (*id, v.iter().zip(&qv).map(|(a, b)| a * b).sum()))
-        .collect();
-    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut lookup = c.prepare_cached("SELECT id FROM chunks WHERE hash=?1")?;
+    let mut scored = vec![];
+    for Reverse(Hit(s, hash)) in best {
+        for id in lookup.query_map(params![hash], |r| r.get::<_, i64>(0))? {
+            scored.push((id?, s));
+        }
+    }
+    scored.sort_by(|a, b| b.1.total_cmp(&a.1));
     scored.truncate(k);
     Ok(scored)
 }

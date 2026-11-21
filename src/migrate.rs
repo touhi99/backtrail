@@ -58,12 +58,16 @@ pub fn run(c: &Connection, dir: &Path) -> anyhow::Result<()> {
     add_column(c, "chunks", "hash TEXT")?;
     add_column(c, "claims", "check_how TEXT")?;
     add_column(c, "sources", "harness TEXT")?;
+    add_column(c, "threads", "parent TEXT")?;
     sql(c, "CREATE INDEX IF NOT EXISTS chunks_hash ON chunks(hash)")?;
     if old_layout {
         unify(c)?;
     }
     if count(c, "PRAGMA user_version", &[]) < 1 {
         version_1(c, dir)?;
+    }
+    if count(c, "PRAGMA user_version", &[]) < 2 {
+        version_2(c, dir)?;
     }
     Ok(())
 }
@@ -117,6 +121,38 @@ fn unify(c: &Connection) -> anyhow::Result<()> {
         bare.len()
     );
     logw(c, "migrate", "unify", "claims", &detail);
+    Ok(())
+}
+
+fn version_2(c: &Connection, dir: &Path) -> anyhow::Result<()> {
+    let n = count(c, "SELECT COUNT(*) FROM vec", &[]);
+    if n > 0 {
+        backup(c, dir, "backtrail.pre-v2.db")?;
+    }
+    transaction(c, || {
+        let rows: Vec<(String, Vec<u8>)> = c
+            .prepare("SELECT hash, v FROM vec")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut put = c.prepare("UPDATE vec SET v=?2 WHERE hash=?1")?;
+        for (hash, v) in rows {
+            put.execute(params![
+                hash,
+                crate::embed::blob(&crate::embed::unblob_f32(&v))
+            ])?;
+        }
+        sql(c, "PRAGMA user_version=2")
+    })?;
+    if n > 0 {
+        sql(c, "VACUUM")?;
+        logw(
+            c,
+            "migrate",
+            "v2",
+            "vec",
+            &format!("{n} vectors stored as 8-bit"),
+        );
+    }
     Ok(())
 }
 

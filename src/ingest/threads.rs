@@ -41,6 +41,18 @@ pub fn seed(c: &Connection) {
         crate::kg::entities::ensure(c, &t.name, kind, &ts);
     }
     c.execute(
+        "UPDATE threads SET parent=NULL WHERE parent IS NOT NULL",
+        [],
+    )
+    .expect("write to database");
+    for t in cfg().threads.iter().filter(|t| !t.parent.is_empty()) {
+        c.execute(
+            "UPDATE threads SET parent=?2 WHERE name=?1",
+            params![t.name, t.parent],
+        )
+        .expect("write to database");
+    }
+    c.execute(
         UPSERT_THREAD,
         params![
             UNSORTED,

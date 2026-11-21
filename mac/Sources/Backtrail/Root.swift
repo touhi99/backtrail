@@ -117,7 +117,7 @@ struct Sidebar: View {
                 .padding(.horizontal, 10).padding(.top, 18).padding(.bottom, 4)
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(store.moving, id: \.["name"].str) { t in threadRow(t) }
+                    ForEach(store.moving, id: \.["name"].str) { t in threadRow(t, in: store.moving) }
                     let others = store.threads.filter { $0["state"].str != "moving" && $0["name"].str != "Unsorted" }
                     if !others.isEmpty {
                         Button { withAnimation(.easeOut(duration: 0.15)) { showOthers.toggle() } } label: {
@@ -131,7 +131,7 @@ struct Sidebar: View {
                         }
                         .buttonStyle(.plain)
                         if showOthers {
-                            ForEach(others, id: \.["name"].str) { t in threadRow(t) }
+                            ForEach(others, id: \.["name"].str) { t in threadRow(t, in: others) }
                         }
                     }
                 }
@@ -162,11 +162,14 @@ struct Sidebar: View {
         .buttonStyle(.plain).help(help)
     }
 
-    private func threadRow(_ t: J) -> some View {
+    private func threadRow(_ t: J, in list: [J]) -> some View {
         let name = t["name"].str
+        let parent = t["parent"].str
+        let nested = !parent.isEmpty && list.contains { $0["name"].str == parent }
         return NavRow(dot: STATE_COLOR[t["state"].str] ?? .mut, label: name, active: store.page == .thread(name), small: true) {
             store.go(.thread(name))
         }
+        .padding(.leading, nested ? 14 : 0)
     }
 }
 

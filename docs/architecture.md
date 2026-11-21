@@ -38,7 +38,7 @@ JSON API. The binary writes the database; sources (session logs, notes, git hist
 | `hooks.rs` | `bt hooks` for each agent (hooks file, events, skill link) and `emit`, which wraps brief and recall text in the JSON each agent reads. |
 | `resolve.rs` | Candidates for a proposed item (shared entities, rarity-weighted words, nearest passages), the model packet, applying a verdict (entities, thread, `valid_to`, settling item), `resolve`, `unresolve`, expiry. |
 | `kg/` | Knowledge graph: claim write rule and relations (`claims.rs`), entities (`entities.rs`), history queries (`query.rs`), extraction queue and packet (`extract.rs`), graph pages (`screen.rs`), lint, export and restore. |
-| `embed.rs` | Embedding client, vector table and brute-force nearest-neighbour lookup. |
+| `embed.rs` | Embedding client, vector table (8-bit values with one scale per vector) and a nearest-neighbour scan that reads vectors from SQLite row by row and keeps only the best `k`. |
 | `config.rs`, `clock.rs` | `config.json`, read once per process; UTC timestamps. |
 | `demo.rs` | The demo store. |
 | `src/sql/` | `schema.sql` (tables), `views.sql` (the `item`, `fact`, `thread_stat`, `source_stat` and `entity_stat` read views that pages filter) and `migrate_unify.sql`. Other statements are inline next to the code that runs them. |
@@ -173,6 +173,11 @@ The source carries no comments. The reasons behind rules that the code alone doe
   under the thread of its main entity. Every other configured thread gets a topic entity, so an item on an idea or
   discussion thread that names no known entity still reaches the graph. A short untitled session stays unsorted. A session pinned with `bt assign` keeps its
   thread on every rescan.
+- Sub-threads: a thread with `parent` in config sits under that thread, one level deep. Sessions and items stay on the
+  sub-thread. The brief lists a parent with its family's open and done counts and its moving sub-threads indented
+  under it, `bt brief --thread <parent>` includes the sub-threads, and recall counts a decision on any member of the
+  family as inside the session's project. A parent with an empty `regex` takes no sessions of its own and is left out
+  of the orphan report.
 - `items.rs`: the thread follows the first named project entity; mentions alone move an item only off a topic thread,
   so a passing mention leaves an item on its project. Each rescan runs `rehome`: an item on a discussion, idea or
   untyped thread whose entities name exactly one project with its own thread moves there (log action `rehome`), which

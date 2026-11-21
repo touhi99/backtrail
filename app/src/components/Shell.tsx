@@ -6,7 +6,7 @@ import Capture from '@/components/Capture'
 import Search from '@/pages/Search'
 import Items from '@/pages/Items'
 import Log from '@/pages/Log'
-import type { KgSuggest, Today } from '@/lib/types'
+import type { KgSuggest, ThreadStat, Today } from '@/lib/types'
 
 function TrailMark({ size = 17, className = '' }: { size?: number; className?: string }) {
   return (
@@ -54,6 +54,7 @@ export default function Shell({ children }: { children: ReactNode }) {
   const scope = loc.pathname.startsWith('/thread/') ? decodeURIComponent(loc.pathname.slice(8)) : ''
   useEffect(() => { setSheet(null) }, [loc.pathname, loc.search])
   const live = (today?.threads ?? []).filter((t) => t.state === 'moving')
+  const nested = (t: ThreadStat, list: ThreadStat[]) => !!t.parent && list.some((p) => p.name === t.parent)
   const others = (today?.threads ?? []).filter((t) => t.state !== 'moving' && t.name !== 'Unsorted')
   const [showOthers, setShowOthers] = useState(false)
   const toggleOthers = () => setShowOthers((v) => !v)
@@ -73,7 +74,7 @@ export default function Shell({ children }: { children: ReactNode }) {
           ))}
           <div className="mt-5 px-2.5 pb-1 text-[12px] text-mut" title="Threads whose state is In development.">Threads</div>
           {live.map((t) => (
-            <Link key={t.name} to={`/thread/${encodeURIComponent(t.name)}`} className="row-hover flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] text-soft">
+            <Link key={t.name} to={`/thread/${encodeURIComponent(t.name)}`} className={`row-hover flex items-center gap-2.5 rounded-lg py-1.5 pr-2.5 text-[13px] text-soft ${nested(t, live) ? 'pl-6' : 'pl-2.5'}`}>
               <span className="size-2 rounded-full" style={{ background: STATE.moving.color }} />
               <span className="truncate">{t.name}</span>
             </Link>
@@ -89,7 +90,7 @@ export default function Shell({ children }: { children: ReactNode }) {
                   <div key={st}>
                     <div className="px-2.5 pb-0.5 pt-2.5 text-[11px] uppercase tracking-wide text-mut">{STATE[st]?.label ?? st} <span className="tabular-nums">{g.length}</span></div>
                     {g.map((t) => (
-                      <Link key={t.name} to={`/thread/${encodeURIComponent(t.name)}`} className="row-hover flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] text-soft">
+                      <Link key={t.name} to={`/thread/${encodeURIComponent(t.name)}`} className={`row-hover flex items-center gap-2.5 rounded-lg py-1.5 pr-2.5 text-[13px] text-soft ${nested(t, g) ? 'pl-6' : 'pl-2.5'}`}>
                         <span className="size-2 shrink-0 rounded-full" style={{ background: STATE[st]?.color ?? '#52525b' }} />
                         <span className="truncate">{t.name}</span>
                       </Link>

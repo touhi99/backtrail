@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS threads(
   area TEXT,
   kind TEXT,
   body TEXT,
+  parent TEXT,
   origin TEXT NOT NULL DEFAULT 'seed',
   created TEXT,
   updated TEXT
