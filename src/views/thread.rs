@@ -7,33 +7,50 @@ use std::collections::{HashMap, HashSet};
 
 pub fn thread(c: &Connection, name: &str) -> Value {
     let thread = rows(c, "SELECT * FROM thread_stat WHERE name=?1", &[&name]);
-    let mut items = rows(
-        c,
-        "SELECT * FROM item WHERE thread=?1 ORDER BY created",
-        &[&name],
-    );
-    let sources = rows(
-        c,
-        "SELECT * FROM source_stat WHERE thread=?1 ORDER BY last_ts DESC",
-        &[&name],
-    );
-    let claims = rows(
-        c,
-        "SELECT f.id, f.type, f.status, f.speaker, substr(f.asserted_at,1,10) AS d, f.text, f.quote AS q,
-                (SELECT title FROM claims WHERE id=f.superseded_by) AS newer
-         FROM fact f
-         WHERE f.type NOT LIKE 'relation:%' AND f.status!='retracted'
-           AND f.id IN (SELECT a.claim_id FROM claim_about a JOIN entities e ON e.id=a.entity_id WHERE e.name=?1)
-           AND f.source_id IN (SELECT id FROM sources WHERE thread=?1)
-         ORDER BY f.asserted_at",
-        &[&name],
-    );
     let children = rows(
         c,
         "SELECT * FROM thread_stat WHERE parent=?1 ORDER BY last DESC",
         &[&name],
     );
     let kids: Vec<String> = children.iter().map(|k| s(k, "name").to_string()).collect();
+    let family: Vec<&str> = std::iter::once(name)
+        .chain(kids.iter().map(String::as_str))
+        .collect();
+    let tag = |t: &str, mut v: Vec<Value>| {
+        if t != name {
+            for r in &mut v {
+                r["sub"] = json!(t);
+            }
+        }
+        v
+    };
+    let gather = |sql: &str| -> Vec<Value> {
+        family
+            .iter()
+            .flat_map(|t| tag(t, rows(c, sql, &[t])))
+            .collect()
+    };
+    let mut items = gather("SELECT * FROM item WHERE thread=?1");
+    items.sort_by(|a, b| s(a, "created").cmp(s(b, "created")));
+    let mut sources = gather("SELECT * FROM source_stat WHERE thread=?1");
+    sources.sort_by(|a, b| s(b, "last_ts").cmp(s(a, "last_ts")));
+    let mut claims = gather(
+        "SELECT f.id, f.type, f.status, f.speaker, substr(f.asserted_at,1,10) AS d, f.text, f.quote AS q,
+                (SELECT title FROM claims WHERE id=f.superseded_by) AS newer
+         FROM fact f
+         WHERE f.type NOT LIKE 'relation:%' AND f.status!='retracted'
+           AND f.id IN (SELECT a.claim_id FROM claim_about a JOIN entities e ON e.id=a.entity_id WHERE e.name=?1)
+           AND f.source_id IN (SELECT id FROM sources WHERE thread=?1)",
+    );
+    claims.sort_by(|a, b| s(a, "d").cmp(s(b, "d")));
+    let mut decisions: Vec<Value> = family
+        .iter()
+        .flat_map(|t| tag(t, decided(c, t, 8)))
+        .collect();
+    decisions.sort_by(|a, b| s(b, "day").cmp(s(a, "day")));
+    decisions.truncate(8);
+    let mut artifacts: Vec<Value> = family.iter().flat_map(|t| thread_artifacts(c, t)).collect();
+    artifacts.sort_by(|a, b| s(b, "ts").cmp(s(a, "ts")));
     let owned: HashSet<String> = crate::prs::homes(c)
         .into_iter()
         .filter(|h| h.thread == name || kids.contains(&h.thread))
@@ -55,15 +72,13 @@ pub fn thread(c: &Connection, name: &str) -> Value {
     .collect();
     let mut also: HashMap<String, Vec<Value>> = HashMap::new();
     let mut blocked: HashMap<String, Vec<Value>> = HashMap::new();
-    for e in rows(
-        c,
+    for e in gather(
         "SELECT k.a AS a, k.kind AS kind, k.reason AS reason, b.id AS id, b.title AS title,
                 b.body AS body, b.state AS state
          FROM claim_edges k JOIN claims b ON b.id=k.b
          WHERE k.a IN (SELECT id FROM claims WHERE thread=?1)
            AND k.kind IN ('considered','depends_on')
          ORDER BY b.title",
-        &[&name],
     ) {
         let a = s(&e, "a").to_string();
         let v = json!({"id": s(&e, "id"), "title": s(&e, "title"), "body": s(&e, "body"),
@@ -85,8 +100,8 @@ pub fn thread(c: &Connection, name: &str) -> Value {
             it["blocked_by"] = json!(v);
         }
     }
-    json!({"thread": thread.first(), "children": children, "items": items, "sources": sources, "claims": claims, "decided": decided(c, name, 8),
-           "artifacts": thread_artifacts(c, name), "prs": prs, "agent": agent_start(name)})
+    json!({"thread": thread.first(), "children": children, "items": items, "sources": sources, "claims": claims, "decided": decisions,
+           "artifacts": artifacts, "prs": prs, "agent": agent_start(name)})
 }
 
 fn agent_start(thread: &str) -> Value {

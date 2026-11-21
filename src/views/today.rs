@@ -78,7 +78,7 @@ pub fn decided(c: &Connection, thread: &str, limit: i64) -> Vec<Value> {
     let today = now()[..10].to_string();
     let mut found = rows(
         c,
-        "SELECT c.id, c.title, c.review, k.role AS role, c.source_id, c.chunk_id,
+        "SELECT c.id, c.title, c.thread, c.review, k.role AS role, c.source_id, c.chunk_id,
                 substr(COALESCE(NULLIF(c.asserted_at,''), s.first_ts, ''), 1, 10) AS day
          FROM claims c LEFT JOIN chunks k ON k.id=c.chunk_id LEFT JOIN sources s ON s.id=c.source_id
          WHERE c.type='decision' AND c.state='settled' AND c.thread=?1

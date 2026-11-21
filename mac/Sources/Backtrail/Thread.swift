@@ -169,8 +169,11 @@ struct ThreadView: View {
                     HStack(alignment: .top, spacing: 12) {
                         ForEach(Array(todo.prefix(3).enumerated()), id: \.offset) { n, s in
                             VStack(alignment: .leading, spacing: 10) {
-                                Circle().fill(n == 0 ? Color.accent : Color(hex: 0x3f3f46)).frame(width: 8, height: 8)
-                                    .shadow(color: n == 0 ? Color.accent : .clear, radius: 5)
+                                HStack(spacing: 8) {
+                                    Circle().fill(n == 0 ? Color.accent : Color(hex: 0x3f3f46)).frame(width: 8, height: 8)
+                                        .shadow(color: n == 0 ? Color.accent : .clear, radius: 5)
+                                    if let sub = s["sub"].s { Text(sub).font(.system(size: 12)).foregroundStyle(Color.mut) }
+                                }
                                 Text(s["title"].str).font(.system(size: 15, weight: .semibold)).lineLimit(3)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -398,6 +401,7 @@ struct DecisionRow: View {
                 Text(x["day"].str == "undated" ? "undated" : dayFmt(x["day"].s))
                     .font(.system(size: 12.5)).monospacedDigit().foregroundStyle(Color.mut).frame(width: 52, alignment: .leading)
                 VStack(alignment: .leading, spacing: 3) {
+                    if let sub = x["sub"].s { Text(sub).font(.system(size: 12)).foregroundStyle(Color.mut) }
                     Text(x["title"].str).font(.system(size: 14))
                         .fixedSize(horizontal: false, vertical: true)
                     let also = x["also"].arr
@@ -444,6 +448,7 @@ struct StepRow: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if let sub = s["sub"].s { Chip(text: sub, color: .mut) }
                     if s["tag"].str == "bug" { Image(systemName: "ladybug").font(.system(size: 12)).foregroundStyle(Color.dropped) }
                     Text(s["title"].str)
                         .font(.system(size: 15, weight: done ? .regular : .medium))

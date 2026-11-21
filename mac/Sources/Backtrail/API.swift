@@ -57,6 +57,15 @@ enum Page: Hashable {
     case thread(String)
     case map(String)
     case source(Int, chunk: Int?)
+
+    var label: String {
+        switch self {
+        case .home: "Home"
+        case .graph: "Graph"
+        case .decisions(let name), .thread(let name), .map(let name): name
+        case .source: "Source"
+        }
+    }
 }
 
 @MainActor

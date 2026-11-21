@@ -27,6 +27,7 @@ enum Snapshot {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let store = Store()
         store.page = page()
+        if env["BACKTRAIL_BACK"] != nil { store.back = [.home] }
         switch env["BACKTRAIL_PAGE"] ?? "" {
         case "trail": store.page = .graph; store.graphMode = "trail"
         case "items": store.sheet = .items
