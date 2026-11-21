@@ -100,7 +100,6 @@ hand, for Claude Code:
 
 ```
 ./install.sh
-bt hooks install
 bt build
 ```
 
@@ -115,7 +114,7 @@ bt build
 - The model scripts call the agent CLI set in `agent`, so their usage counts against the account that is logged in on that machine.
   A second machine or account sees only its own sessions; `bt kg export <file>` and `bt kg restore <file>` carry claims
   across.
-- `bt hooks install` writes absolute paths to this checkout, so it is run on each machine.
+- The hooks hold absolute paths to this checkout, so `install.sh` runs on each machine.
 
 ## Scale limits
 

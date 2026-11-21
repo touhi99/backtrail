@@ -219,21 +219,27 @@ fn add(v: &mut Value, h: Harness, hook: &Hook) {
     v["hooks"][hook.event] = Value::Array(groups);
 }
 
-fn drop_hook(v: &mut Value, h: Harness, hook: &Hook) {
+fn drop_hook(v: &mut Value, h: Harness, hook: &Hook) -> bool {
     if h == Harness::Antigravity {
-        if let Some(o) = v.as_object_mut() {
-            o.remove(GROUP);
-        }
-        return;
+        return v.as_object_mut().is_some_and(|o| o.remove(GROUP).is_some());
     }
-    if let Some(groups) = v["hooks"][hook.event].as_array_mut() {
-        for g in groups.iter_mut() {
-            if let Some(list) = g["hooks"].as_array_mut() {
-                list.retain(|x| !ours(x["command"].as_str().unwrap_or(""), &hook.command));
-            }
+    let Some(groups) = v
+        .get_mut("hooks")
+        .and_then(|e| e.get_mut(hook.event))
+        .and_then(Value::as_array_mut)
+    else {
+        return false;
+    };
+    let mut dropped = false;
+    for g in groups.iter_mut() {
+        if let Some(list) = g.get_mut("hooks").and_then(Value::as_array_mut) {
+            let before = list.len();
+            list.retain(|x| !ours(x["command"].as_str().unwrap_or(""), &hook.command));
+            dropped |= list.len() != before;
         }
-        groups.retain(|g| g["hooks"].as_array().is_none_or(|l| !l.is_empty()));
     }
+    groups.retain(|g| g["hooks"].as_array().is_none_or(|l| !l.is_empty()));
+    dropped
 }
 
 fn skill_state(link: &Path, skill: &Path) -> &'static str {
@@ -327,6 +333,7 @@ fn one(h: Harness, action: &str) -> anyhow::Result<()> {
         );
         return Ok(());
     }
+    let mut changed = false;
     for hook in &hooks {
         if action == "install" {
             if has(&v, h, hook) {
@@ -334,11 +341,18 @@ fn one(h: Harness, action: &str) -> anyhow::Result<()> {
                 continue;
             }
             add(&mut v, h, hook);
+            changed = true;
             println!("  {}: added `{}`", hook.event, hook.command);
-        } else {
-            drop_hook(&mut v, h, hook);
+        } else if drop_hook(&mut v, h, hook) {
+            changed = true;
             println!("  {}: removed", hook.event);
+        } else {
+            println!("  {}: not installed", hook.event);
         }
+    }
+    if !changed {
+        link_skill(h, &skill, action);
+        return Ok(());
     }
     if let Some(r) = &raw {
         let name = path
