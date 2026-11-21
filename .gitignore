@@ -17,3 +17,4 @@ __pycache__/
 /artifacts/
 /screenshots/
 *.bak-backtrail
+/promo/
