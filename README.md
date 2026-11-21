@@ -1,18 +1,23 @@
 # Backtrail
 
-Backtrail reads sessions and notes from coding agents. It files decisions, open steps, questions, reasons, facts about
-how something is, and relations as claims. Each claim keeps the exact line it came from and names the projects, tools or models it is about.
+Backtrail builds a knowledge graph from coding-agent sessions, notes and git history. It holds decisions, steps,
+questions and facts, each referencing the session that stated it. Decisions link to the projects, tools and models they
+are about, to the reasons behind them and to the decisions they replace. Agents propose claims; a decision is settled
+when the user states it in a session, accepts it in an app or writes it in a note.
+
+Agents read the graph through hooks. A session starts with the open steps of the projects in motion, and each prompt
+receives the settled decisions that bear on it. The web and Mac apps show the graph, the trail and the decisions per
+project, over time.
 
 ## Problem
 
-Coding agents make it easy to start more projects than one person can follow.
+Coding agents make it easy to work on many projects in parallel, and faster.
 
 - Each agent keeps its own transcripts. Notes live in other files.
 - A project left alone for a couple of weeks takes time to pick up again.
-- Search returns matches, not what was decided, why, or what it replaced.
-
-Backtrail keeps what was decided, what is still open, and where each claim came from. A session starts with that
-brief. The web and Mac apps show the same trail per project, over time.
+- Search returns matches, not what was decided, why, or what it replaced. Reading notes or session history instead is
+  more than one person can follow across many long-running projects.
+- A new session does not know what earlier sessions settled, so the agent asks again or undoes it.
 
 | | |
 | --- | --- |
@@ -20,26 +25,30 @@ brief. The web and Mac apps show the same trail per project, over time.
 
 ## How it works
 
-![Architecture](docs/architecture-overview.svg)
+1. When a session ends, Backtrail indexes it and a model reads it. The model proposes decisions,
+   steps and questions, each with the line it came from; a claim whose line is not in the session is refused.
+2. A model links each new claim to earlier ones: repeats, answers to open questions, and decisions it reverses. A
+   second model call must confirm each reversal.
+3. The user settles decisions. Claims nobody confirms are parked after 14 days.
+4. A step is marked done when a model finds it finished in a session and a second model call confirms it. The proof
+   names that session's pull requests and pushes to `main`, with their state on GitHub.
+5. The next session starts with the open steps of the projects in motion, and each prompt gets up to two settled
+   decisions that match it.
 
-- Each agent's sessions are indexed. A session is read when it ends, or by the sweep every 5 minutes. `bt status` shows
-  each session's state.
-- Each item keeps the exact line it came from. The line is checked against the source.
-- Each prompt is checked against settled decisions. Up to two that fit are added to the agent's context.
-- A decision is settled when the user says it, accepts it in an app, or a note says it. A step closes when a session
-  shows it finished and a second model agrees. The proof also names each PR opened in that session and its GitHub state.
-- Unconfirmed items are parked after 14 days, or when their project is built, dropped or parked.
-- Projects, tools and models are entities. Claims point at them. The graph traces a decision back to its reason and
-  shows the projects connected through the same entities.
+![Components](docs/architecture.svg)
 
-Detail: [`docs/architecture.md`](docs/architecture.md). Per-agent support: [`docs/harnesses.md`](docs/harnesses.md).
+Detail: [`docs/architecture.md`](docs/architecture.md). Per-agent setup: [`docs/harnesses.md`](docs/harnesses.md).
 
 ## Requirements
 
 - Rust 1.88+ and Node.js 22+ to build.
-- One coding agent CLI to read sessions: `claude`, `gemini`, `codex` or `agy`, or any command with a headless mode.
-- Optional: Ollama (`embeddinggemma-2:270m`) for semantic search; without it, search is keyword only. Swift (Xcode
-  command line tools) for the Mac app.
+- A coding agent CLI for the model that reads sessions: `claude`, `gemini`, `codex`, `agy`, or any command with a
+  headless mode. Reading takes about 6 model calls per session, billed to that CLI's plan or API key.
+- GitHub CLI (`gh`), logged in, to check the state of pull requests and pushes.
+- Ollama with `embeddinggemma-2:270m`. Its embeddings drive semantic search, finding the earlier claims a new claim
+  repeats, answers or reverses, and finding where an open step was finished. `install.sh` pulls the model. While
+  Ollama is not running, all three fall back to keyword search.
+- Swift, for the Mac app (macOS only).
 
 ## Install
 
@@ -48,35 +57,30 @@ Detail: [`docs/architecture.md`](docs/architecture.md). Per-agent support: [`doc
 bt build
 ```
 
-`install.sh` asks which agents to connect, offering the ones on `PATH`. It sets up hooks and the skill for those
-agents only. On macOS it also installs a login agent that runs the server and builds the Mac app. Elsewhere, run
-`bt serve`. Options and first-run notes: [`docs/reference.md`](docs/reference.md).
+`install.sh` asks which agents to connect, adds Backtrail's hooks and skill to each, and on macOS installs a
+LaunchAgent that runs the server and builds the Mac app. Elsewhere, run `bt serve`. More:
+[`docs/reference.md`](docs/reference.md).
 
 ## Usage
 
-- `bt build` offers to read the newest 20 sessions, so the brief has content on day one.
-- Web app: `http://127.0.0.1:8799`. Mac app: `mac/Backtrail.app`.
-- `bt search <words>` searches with cited sources.
-- `bt brief` prints what was decided and what is next.
-- `bt hooks install --harness <agent>` and `bt agent <agent>` change the connected agents later.
+- Web app at `http://127.0.0.1:8799`, Mac app at `mac/Backtrail.app`.
+- `bt build` indexes all sessions and notes. The server then has the model read them in the background, and the brief
+  fills as it does.
+- `bt search <words>` searches with sources. `bt brief` prints what was decided and what is next.
+- `bt hooks install --harness <agent>` connects another agent. `bt agent <agent>` changes which CLI reads sessions.
 
 ## Data
 
-- Reads: Claude Code, Codex CLI and Gemini CLI session folders, inbox files, and the notes and git repos in
-  `config.json`.
-- Writes: the data directory (database, backups, logs), agent hooks and skill links, and the macOS login agent.
-- Sends: repo names to GitHub through `gh pr list`, to read each linked PR's state (`bt prs`, hourly in the sweep).
-- Sends: session text to the reading agent's CLI, about 6 model calls per session. Passage text goes to the embedding
-  server (`127.0.0.1:11434`). Calls count against that CLI's plan or API key.
+- Reads the session folders of Claude Code, Codex CLI and Gemini CLI, an inbox folder for other tools, and the notes
+  folders and git repos listed in `config.json`.
+- Writes the data directory (database, backups, logs), the hooks and skill of each connected agent, and on macOS a
+  LaunchAgent.
 
 ## Limits
 
-- Gemini CLI, Codex CLI and Antigravity support follows their docs, not real runs. Antigravity sessions need a
-  converter ([`docs/harnesses.md`](docs/harnesses.md#adding-a-tool)).
-- Semantic search scans every stored vector. At 190,000 passages it takes about 0.3 s per search, with flat memory.
-- The quote check only shows the quote exists. It does not show the title reads it fairly.
-- Pushes straight to `main` with no PR are not tracked as landed.
-- An item can land in the wrong project. `bt check` lists items moved or retired by hand in the last 7 days.
+- Gemini CLI, Codex CLI and Antigravity support follows their documentation and has not been run on real sessions.
+  Antigravity sessions need a converter ([`docs/harnesses.md`](docs/harnesses.md#adding-a-tool)).
+- The quote check confirms the quoted line exists, not that the claim's title reads it correctly.
 
 ## License
 

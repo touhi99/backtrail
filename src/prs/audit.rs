@@ -39,6 +39,24 @@ fn counts(c: &Connection) {
         n("open"),
         n("unchecked")
     );
+    let pushes = rows(
+        c,
+        "SELECT COUNT(*) AS n, SUM(state='ON_MAIN') AS on_main, SUM(state='OFF_MAIN') AS off,
+                SUM(state='GONE') AS gone, SUM(state IS NULL) AS unchecked
+         FROM (SELECT DISTINCT repo, sha, state FROM session_push)",
+        &[],
+    );
+    if let Some(p) = pushes.first() {
+        let n = |k: &str| p[k].as_i64().unwrap_or(0);
+        println!(
+            "pushes to main from sessions: {} ({} still on main, {} no longer on main, {} not on GitHub, {} unchecked)",
+            n("n"),
+            n("on_main"),
+            n("off"),
+            n("gone"),
+            n("unchecked")
+        );
+    }
     for f in rows(
         c,
         "SELECT repo, error FROM pr_repos WHERE error IS NOT NULL ORDER BY repo",

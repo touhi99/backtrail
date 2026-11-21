@@ -1,96 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" role="img" aria-label="Tables: indexed text (sources, chunks, fts, vec), facts (claims, threads) and entities (entities, entity_aliases, claim_about), with the keys that join them.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 510" width="1100" height="510" role="img" aria-label="Backtrail tables and the keys that join them">
 <style>
-  svg { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
-  .bg { fill: #ffffff; }
-  .s { fill: #e0f2e8; stroke: #23804f; stroke-width: 1.4; }
-  .n { fill: #e3edfa; stroke: #1d5fb8; stroke-width: 1.4; }
-  .k { fill: #fbefd6; stroke: #a86a08; stroke-width: 1.4; }
-  .hd { fill: #1b1f26; font-size: 12.5px; font-weight: 600; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
-  .c { fill: #4b5260; font-size: 11px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
-  .grp { fill: #626a77; font-size: 10.5px; font-weight: 600; letter-spacing: .08em; }
-  .r { fill: #626a77; font-size: 10.5px; font-style: italic; }
-  .rule { stroke: #8f98a6; stroke-width: 1; opacity: .5; }
-  .ln { stroke: #8f98a6; stroke-width: 1.5; fill: none; marker-end: url(#ah); }
-  .ah { fill: #8f98a6; }
-  @media (prefers-color-scheme: dark) {
-    .bg { fill: #0d1117; }
-    .s { fill: #1a3226; stroke: #5dbf8a; }
-    .n { fill: #1b2d45; stroke: #6aa8f5; }
-    .k { fill: #3a2e16; stroke: #e0a64a; }
-    .hd { fill: #e6edf3; } .c { fill: #b4bcc8; } .grp, .r { fill: #9aa2ae; }
-    .rule, .ln { stroke: #6a7380; } .ah { fill: #6a7380; }
-  }
+:root{--bg:#f7f7f8;--panel:#ffffff;--raised:#f0f0f3;--line:#d4d4dc;--ink:#111114;--soft:#3a3a42;--mut:#6b6b75;--accent:#059669;--blue:#2563eb;--amber:#b45309;--violet:#7c3aed}
+@media (prefers-color-scheme: dark){:root{--bg:#0d0d0f;--panel:#131315;--raised:#1a1a1e;--line:#2e2e35;--ink:#f4f4f5;--soft:#c4c4cc;--mut:#8b8b95;--accent:#34d399;--blue:#60a5fa;--amber:#fbbf24;--violet:#c084fc}}
+.bg{fill:var(--bg)}
+.box{fill:var(--raised);stroke:var(--line)}
+.core{fill:var(--panel);stroke:var(--accent);stroke-width:1.4}
+.chip{fill:var(--raised);stroke:var(--line)}
+.ext{fill:none;stroke:var(--mut);stroke-dasharray:4 4}
+.t{fill:var(--ink);font:600 13px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.s{fill:var(--mut);font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.c2{fill:var(--ink);font:500 12.5px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.c{fill:var(--soft);font:11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.l{fill:var(--mut);font:10.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.g{fill:var(--mut);font:600 10.5px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;letter-spacing:.08em}
+.edge{stroke:var(--mut);stroke-width:1.2;fill:none}
+.hot{stroke:var(--accent)}
+.head{fill:var(--mut)}
+.headhot{fill:var(--accent)}
+.tbl{fill:var(--panel);stroke:var(--c)}
+.bar{fill:var(--c)}
 </style>
-<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
-<rect class="bg" width="900" height="520"/>
-<text class="grp" x="30" y="28">INDEXED TEXT</text>
-<text class="grp" x="345" y="28">FACTS</text>
-<rect class="s" x="30" y="50" width="210" height="141" rx="8"/>
-<text class="hd" x="42" y="69">sources</text><line class="rule" x1="30" y1="77" x2="240" y2="77"/>
-<text class="c" x="42" y="94">id</text>
-<text class="c" x="42" y="109">ref (unique)</text>
-<text class="c" x="42" y="124">kind</text>
-<text class="c" x="42" y="139">title</text>
-<text class="c" x="42" y="154">project, thread</text>
-<text class="c" x="42" y="169">first_ts, last_ts</text>
-<text class="c" x="42" y="184">mtime, path</text>
-<rect class="s" x="30" y="250" width="210" height="111" rx="8"/>
-<text class="hd" x="42" y="269">chunks</text><line class="rule" x1="30" y1="277" x2="240" y2="277"/>
-<text class="c" x="42" y="294">id</text>
-<text class="c" x="42" y="309">source_id</text>
-<text class="c" x="42" y="324">seq, locator</text>
-<text class="c" x="42" y="339">role, ts</text>
-<text class="c" x="42" y="354">text</text>
-<rect class="s" x="30" y="430" width="95" height="66" rx="8"/>
-<text class="hd" x="42" y="449">fts</text><line class="rule" x1="30" y1="457" x2="125" y2="457"/>
-<text class="c" x="42" y="474">FTS5 over</text>
-<text class="c" x="42" y="489">chunks.text</text>
-<rect class="s" x="145" y="430" width="95" height="66" rx="8"/>
-<text class="hd" x="157" y="449">vec</text><line class="rule" x1="145" y1="457" x2="240" y2="457"/>
-<text class="c" x="157" y="474">hash, model</text>
-<text class="c" x="157" y="489">embedding</text>
-<rect class="n" x="345" y="50" width="210" height="198" rx="8"/>
-<text class="hd" x="357" y="69">claims</text><line class="rule" x1="345" y1="77" x2="555" y2="77"/>
-<text class="c" x="357" y="94">id</text>
-<text class="c" x="357" y="109">type, thread</text>
-<text class="c" x="357" y="124">title, body</text>
-<text class="c" x="357" y="139">state, origin</text>
-<text class="c" x="357" y="154">speaker, asserted_at</text>
-<text class="c" x="357" y="169">valid_to, superseded_by</text>
-<text class="c" x="357" y="184">done_by, answer, tag, stale</text>
-<text class="c" x="357" y="199">source_id, chunk_id</text>
-<text class="c" x="357" y="214">quote, stated</text>
-<text class="c" x="357" y="229">created, updated</text>
-<rect class="n" x="345" y="290" width="210" height="81" rx="8"/>
-<text class="hd" x="357" y="309">threads</text><line class="rule" x1="345" y1="317" x2="555" y2="317"/>
-<text class="c" x="357" y="334">name</text>
-<text class="c" x="357" y="349">state, area, kind</text>
-<text class="c" x="357" y="364">body, origin</text>
-<rect class="k" x="660" y="30" width="210" height="66" rx="8"/>
-<text class="hd" x="672" y="49">entity_aliases</text><line class="rule" x1="660" y1="57" x2="870" y2="57"/>
-<text class="c" x="672" y="74">alias</text>
-<text class="c" x="672" y="89">entity_id</text>
-<rect class="k" x="660" y="110" width="210" height="66" rx="8"/>
-<text class="hd" x="672" y="129">entities</text><line class="rule" x1="660" y1="137" x2="870" y2="137"/>
-<text class="c" x="672" y="154">id</text>
-<text class="c" x="672" y="169">name, kind</text>
-<rect class="k" x="660" y="215" width="210" height="66" rx="8"/>
-<text class="hd" x="672" y="234">claim_about</text><line class="rule" x1="660" y1="242" x2="870" y2="242"/>
-<text class="c" x="672" y="259">claim_id, entity_id</text>
-<text class="c" x="672" y="274">role</text>
-<path class="ln" d="M135,250 L135,191"/>
-<text class="r" x="143" y="236">source_id</text>
-<path class="ln" d="M60,361 L60,430"/>
-<path class="ln" d="M345,95 L240,95"/>
-<text class="r" x="250" y="86">cites source and quote</text>
-<path class="ln" d="M345,215 L240,310"/>
-<text class="r" x="262" y="248">chunk_id</text>
-<path class="ln" d="M450,248 L450,290"/>
-<text class="r" x="460" y="276">thread (name)</text>
-<path class="ln" d="M660,248 L555,200"/>
-<text class="r" x="580" y="240">claim_id</text>
-<path class="ln" d="M765,215 L765,176"/>
-<path class="ln" d="M765,110 L765,96"/>
-<text class="grp" x="660" y="18">ENTITIES</text>
-<text class="r" x="345" y="505">a fact cites one passage by id and a verbatim quote; the entity tables say what it is about</text>
+<defs>
+<marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+<marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="headhot" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<rect class="bg" width="1100" height="510" rx="14"/>
+<text class="g" x="24" y="34">TEXT</text><text class="g" x="324" y="34">CLAIMS</text><text class="g" x="634" y="34">GRAPH</text><text class="g" x="884" y="34">SHIPPED WORK</text><g style="--c:var(--blue)"><rect class="tbl" x="24" y="48" width="220" height="85" rx="8"/><rect class="bar" x="24" y="48" width="4" height="85" rx="2"/><text class="t" x="38" y="69">sources</text><text class="c" x="38" y="89">id, ref, kind, title</text><text class="c" x="38" y="106">thread, first_ts, last_ts</text><text class="c" x="38" y="123">path, bytes, harness</text></g><g style="--c:var(--blue)"><rect class="tbl" x="24" y="196" width="220" height="68" rx="8"/><rect class="bar" x="24" y="196" width="4" height="68" rx="2"/><text class="t" x="38" y="217">chunks</text><text class="c" x="38" y="237">id, source_id, seq</text><text class="c" x="38" y="254">role, ts, text, hash</text></g><g style="--c:var(--blue)"><rect class="tbl" x="24" y="316" width="104" height="51" rx="8"/><rect class="bar" x="24" y="316" width="4" height="51" rx="2"/><text class="t" x="38" y="337">fts</text><text class="c" x="38" y="357">chunks.text</text></g><g style="--c:var(--blue)"><rect class="tbl" x="140" y="316" width="104" height="51" rx="8"/><rect class="bar" x="140" y="316" width="4" height="51" rx="2"/><text class="t" x="154" y="337">vec</text><text class="c" x="154" y="357">hash, v</text></g><g style="--c:var(--accent)"><rect class="tbl" x="324" y="48" width="240" height="119" rx="8"/><rect class="bar" x="324" y="48" width="4" height="119" rx="2"/><text class="t" x="338" y="69">claims</text><text class="c" x="338" y="89">id, type, thread</text><text class="c" x="338" y="106">title, body, state</text><text class="c" x="338" y="123">speaker, asserted_at</text><text class="c" x="338" y="140">source_id, chunk_id, quote</text><text class="c" x="338" y="157">superseded_by, answer</text></g><g style="--c:var(--accent)"><rect class="tbl" x="324" y="262" width="240" height="68" rx="8"/><rect class="bar" x="324" y="262" width="4" height="68" rx="2"/><text class="t" x="338" y="283">threads</text><text class="c" x="338" y="303">name, state, kind</text><text class="c" x="338" y="320">area, parent, summary</text></g><g style="--c:var(--violet)"><rect class="tbl" x="634" y="48" width="210" height="51" rx="8"/><rect class="bar" x="634" y="48" width="4" height="51" rx="2"/><text class="t" x="648" y="69">entities</text><text class="c" x="648" y="89">id, name, kind</text></g><g style="--c:var(--violet)"><rect class="tbl" x="634" y="124" width="210" height="51" rx="8"/><rect class="bar" x="634" y="124" width="4" height="51" rx="2"/><text class="t" x="648" y="145">entity_aliases</text><text class="c" x="648" y="165">alias, entity_id</text></g><g style="--c:var(--violet)"><rect class="tbl" x="634" y="200" width="210" height="51" rx="8"/><rect class="bar" x="634" y="200" width="4" height="51" rx="2"/><text class="t" x="648" y="221">claim_about</text><text class="c" x="648" y="241">claim_id, entity_id, role</text></g><g style="--c:var(--violet)"><rect class="tbl" x="634" y="276" width="210" height="68" rx="8"/><rect class="bar" x="634" y="276" width="4" height="68" rx="2"/><text class="t" x="648" y="297">claim_links</text><text class="c" x="648" y="317">a, b, kind</text><text class="c" x="648" y="334">changed · restates · because</text></g><g style="--c:var(--violet)"><rect class="tbl" x="634" y="369" width="210" height="68" rx="8"/><rect class="bar" x="634" y="369" width="4" height="68" rx="2"/><text class="t" x="648" y="390">claim_edges</text><text class="c" x="648" y="410">a, b, kind, quote</text><text class="c" x="648" y="427">considered · depends_on</text></g><g style="--c:var(--amber)"><rect class="tbl" x="884" y="48" width="192" height="51" rx="8"/><rect class="bar" x="884" y="48" width="4" height="51" rx="2"/><text class="t" x="898" y="69">source_prs</text><text class="c" x="898" y="89">source_id, repo, number</text></g><g style="--c:var(--amber)"><rect class="tbl" x="884" y="124" width="192" height="68" rx="8"/><rect class="bar" x="884" y="124" width="4" height="68" rx="2"/><text class="t" x="898" y="145">pr_state</text><text class="c" x="898" y="165">repo, number, state</text><text class="c" x="898" y="182">merged_at, head</text></g><g style="--c:var(--amber)"><rect class="tbl" x="884" y="234" width="192" height="51" rx="8"/><rect class="bar" x="884" y="234" width="4" height="51" rx="2"/><text class="t" x="898" y="255">source_pushes</text><text class="c" x="898" y="275">source_id, repo, sha</text></g><g style="--c:var(--amber)"><rect class="tbl" x="884" y="310" width="192" height="51" rx="8"/><rect class="bar" x="884" y="310" width="4" height="51" rx="2"/><text class="t" x="898" y="331">push_state</text><text class="c" x="898" y="351">repo, sha, state</text></g><text class="g" x="24" y="420">CONTROL</text><g style="--c:var(--mut)"><rect class="tbl" x="24" y="434" width="170" height="51" rx="8"/><rect class="bar" x="24" y="434" width="4" height="51" rx="2"/><text class="t" x="38" y="455">overrides</text><text class="c" x="38" y="475">ref, thread</text></g><g style="--c:var(--mut)"><rect class="tbl" x="206" y="434" width="180" height="51" rx="8"/><rect class="bar" x="206" y="434" width="4" height="51" rx="2"/><text class="t" x="220" y="455">kg_overrides</text><text class="c" x="220" y="475">target, field, value</text></g><g style="--c:var(--mut)"><rect class="tbl" x="398" y="434" width="196" height="51" rx="8"/><rect class="bar" x="398" y="434" width="4" height="51" rx="2"/><text class="t" x="412" y="455">log</text><text class="c" x="412" y="475">ts, actor, action, target</text></g><path class="edge" d="M134,196 V150" marker-end="url(#a)"/><text class="l" x="142" y="178">source_id</text><path class="edge" d="M324,150 H284 V230 H248" marker-end="url(#a)"/><text class="l" x="252" y="222">chunk_id</text><path class="edge" d="M324,100 H248" marker-end="url(#a)"/><text class="l" x="256" y="92">source_id</text><path class="edge" d="M444,167 V258" marker-end="url(#a)"/><text class="l" x="452" y="216">thread</text><path class="edge" d="M739,124 V102" marker-end="url(#a)"/><path class="edge" d="M844,217 H862 V65 H848" marker-end="url(#a)"/><path class="edge" d="M634,217 H604"/><path class="edge" d="M634,293 H604"/><path class="edge" d="M634,386 H604 V130 H568" marker-end="url(#a)"/><text class="l" x="572" y="122">claim_id · a, b</text><path class="edge" d="M980,48 V18 H134 V44" marker-end="url(#a)"/><text class="l" x="600" y="14">source_id</text><path class="edge" d="M1076,251 H1090 V18 H980"/><path class="edge" d="M980,98 V120" marker-end="url(#a)"/><text class="l" x="988" y="112">repo, number</text><path class="edge" d="M980,284 V306" marker-end="url(#a)"/><text class="l" x="988" y="300">repo, sha</text>
 </svg>

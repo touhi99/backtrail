@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS sources(
   tail TEXT,
   nturns INTEGER NOT NULL DEFAULT 0,
   prs_read INTEGER NOT NULL DEFAULT 0,
+  pushes_read INTEGER NOT NULL DEFAULT 0,
   -- sessions from a tool other than Claude Code: codex, gemini, or the name in an inbox file
   harness TEXT
 );
@@ -48,6 +49,26 @@ CREATE TABLE IF NOT EXISTS pr_state(
   base TEXT,
   checked_at TEXT NOT NULL,
   PRIMARY KEY(repo, number)
+);
+
+-- A push to `main` or `master` seen in a session's tool output, with the repo from the `To` line.
+CREATE TABLE IF NOT EXISTS source_pushes(
+  source_id INTEGER NOT NULL,
+  repo TEXT NOT NULL,
+  branch TEXT NOT NULL,
+  sha TEXT NOT NULL,
+  ts TEXT,
+  PRIMARY KEY(source_id, repo, sha)
+);
+
+-- Whether a pushed commit is still on its branch, as GitHub's compare API reports it:
+-- ON_MAIN, OFF_MAIN (no longer an ancestor) or GONE (GitHub has no such commit). No row means unchecked.
+CREATE TABLE IF NOT EXISTS push_state(
+  repo TEXT NOT NULL,
+  sha TEXT NOT NULL,
+  state TEXT NOT NULL,
+  checked_at TEXT NOT NULL,
+  PRIMARY KEY(repo, sha)
 );
 
 -- The last `gh pr list` call per repo and its error, if it failed.

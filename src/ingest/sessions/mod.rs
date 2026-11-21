@@ -4,8 +4,8 @@ mod prs;
 use super::threads::SessionRules;
 use super::{Source, add_chunk, begin, finish, home_dir, mtime, slug};
 use crate::db::id64;
-use parse::parse_session;
-use prs::{backfill_prs, insert_prs};
+use parse::{parse_pushes, parse_session};
+use prs::{backfill_prs, backfill_pushes, insert_prs, insert_pushes};
 use rusqlite::{Connection, params};
 use serde_json::Value;
 use std::fmt::Write;
@@ -171,6 +171,7 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
         }
     }
     backfill_prs(c);
+    backfill_pushes(c);
     c.execute_batch("BEGIN").expect("write to database");
     for d in dirs.flatten() {
         let dn = d.file_name().to_string_lossy().to_string();
@@ -266,8 +267,9 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
                     n += 1;
                 }
                 insert_prs(c, sid, &prs);
+                insert_pushes(c, sid, &parse_pushes(&raw));
                 c.execute(
-                    "UPDATE sources SET mtime=?2, bytes=?3, tail=?4, nturns=nturns+?5, prs_read=1 WHERE id=?1",
+                    "UPDATE sources SET mtime=?2, bytes=?3, tail=?4, nturns=nturns+?5, prs_read=1, pushes_read=1 WHERE id=?1",
                     params![
                         sid,
                         mt,
@@ -313,6 +315,7 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
             };
             add_turns(c, sid, 0, 0, &turns);
             insert_prs(c, sid, &prs);
+            insert_pushes(c, sid, &parse_pushes(&raw));
             finish(
                 c,
                 sid,
@@ -320,7 +323,7 @@ pub fn read_all(c: &Connection) -> (usize, usize) {
                 &turns.last().expect("turns checked non-empty above").1,
             );
             c.execute(
-                "UPDATE sources SET bytes=?2, tail=?3, nturns=?4, prs_read=1 WHERE id=?1",
+                "UPDATE sources SET bytes=?2, tail=?3, nturns=?4, prs_read=1, pushes_read=1 WHERE id=?1",
                 params![
                     sid,
                     i64::try_from(upto).unwrap_or(i64::MAX),

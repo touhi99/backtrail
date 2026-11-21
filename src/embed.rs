@@ -10,11 +10,6 @@ use std::time::{Duration, Instant};
 const BATCH: usize = 32;
 const MAX_CHARS: usize = 3000;
 
-pub fn enabled() -> bool {
-    let e = &cfg().embeddings;
-    !e.url.is_empty() && !e.model.is_empty()
-}
-
 fn fill_hashes(c: &Connection) {
     let todo: Vec<(i64, String)> = c
         .prepare("SELECT id, text FROM chunks WHERE hash IS NULL")
@@ -153,9 +148,6 @@ pub fn coverage(c: &Connection) -> (i64, i64) {
 }
 
 pub fn run(c: &Connection, limit: usize) -> anyhow::Result<(usize, i64)> {
-    if !enabled() {
-        anyhow::bail!("embeddings are turned off in config.json (\"embeddings\": false)");
-    }
     let e = &cfg().embeddings;
     fill_hashes(c);
     c.execute("DELETE FROM vec WHERE model!=?1", params![e.model])
@@ -223,9 +215,6 @@ pub fn run_cli(c: &Connection, limit: usize) {
 }
 
 pub fn nearest(c: &Connection, q: &str, k: usize) -> anyhow::Result<Vec<(i64, f32)>> {
-    if !enabled() {
-        anyhow::bail!("off");
-    }
     let qv = call(&[q.to_string()], &cfg().embeddings.query_prefix, 4)?
         .pop()
         .context("empty reply")?;
