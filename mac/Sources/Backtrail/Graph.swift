@@ -288,6 +288,7 @@ private struct ClaimsPanel: View {
     let data: GraphData?
     let close: () -> Void
     private var nodes: [J] { data?.nodes ?? [] }
+    private var shownTab: String { !sel.isEmpty && tab == "topics" ? "claims" : tab }
     @State private var tab = "claims"
     @State private var q = ""
     @State private var status = ""
@@ -295,9 +296,11 @@ private struct ClaimsPanel: View {
     @State private var det: J?
     @State private var lineage: [J] = []
     @State private var shown = 8
+    @State private var sug: J?
 
     var body: some View {
         let cur = nodes.first { $0.id == sel }
+        let toReview = (sug?["entities"].arr.count ?? 0) + (sug?["aliases"].arr.count ?? 0)
         let byId = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
@@ -340,6 +343,7 @@ private struct ClaimsPanel: View {
                     HStack(spacing: 4) {
                         tabButton("claims", "Claims", det.map { "\($0["total"].int)" })
                         tabButton("lineage", "Lineage", lineageFor(cur).isEmpty ? nil : "\(lineageFor(cur).count)")
+                        if cur == nil { tabButton("topics", "Topics", toReview > 0 ? "\(toReview)" : nil, badge: .open) }
                     }
                     .padding(4).background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                     Button(action: close) { Image(systemName: "sidebar.right") }.buttonStyle(BtnStyle(kind: .ghost)).help("Hide panel")
@@ -350,7 +354,11 @@ private struct ClaimsPanel: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    if tab == "claims" { claims(cur: cur) } else { lineageList(cur) }
+                    switch shownTab {
+                    case "topics": TopicsPanel(sug: sug) { store.changed() }
+                    case "lineage": lineageList(cur)
+                    default: claims(cur: cur)
+                    }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12)
             }
@@ -364,6 +372,7 @@ private struct ClaimsPanel: View {
             det = try? await API.get("/api/kg/claims?entity=\(API.q(sel))&q=\(API.q(q))&status=\(status)&speaker=\(speaker)")
         }
         .task { if let l = try? await API.get("/api/kg/lineage") { lineage = l.arr } }
+        .task(id: store.tick) { sug = try? await API.get("/api/kg/suggest") }
     }
 
     private func neighbours(_ id: String) -> [(String, Int)] {
@@ -380,16 +389,20 @@ private struct ClaimsPanel: View {
         if let n = nodes.first(where: { $0["name"].str == name }) { sel = n.id; tab = "claims" }
     }
 
-    private func tabButton(_ id: String, _ label: String, _ n: String?) -> some View {
+    private func tabButton(_ id: String, _ label: String, _ n: String?, badge: Color? = nil) -> some View {
         Button { tab = id } label: {
             HStack(spacing: 5) {
                 Text(label)
-                if let n { Text(n).font(.system(size: 11)).monospacedDigit().foregroundStyle(Color.mut) }
+                if let n {
+                    Text(n).font(.system(size: 11)).monospacedDigit().foregroundStyle(badge ?? Color.mut)
+                        .padding(.horizontal, badge == nil ? 0 : 6)
+                        .background(badge.map { $0.opacity(0.15) } ?? .clear, in: Capsule())
+                }
             }
             .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(tab == id ? .white : Color.soft)
+            .foregroundStyle(shownTab == id ? .white : Color.soft)
             .frame(maxWidth: .infinity).frame(height: 30)
-            .background(tab == id ? Color(hex: 0x2a2a30) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(shownTab == id ? Color(hex: 0x2a2a30) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
