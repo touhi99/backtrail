@@ -1,6 +1,7 @@
 mod check;
 mod clock;
 mod config;
+mod coverage;
 mod db;
 mod demo;
 mod embed;
@@ -22,21 +23,22 @@ use serde_json::Value;
 
 const USAGE: &str = "backtrail ingest [--force] | build | check [--pairs] | match | resolve <id> --by <id> --reason T | resolve --expired | unresolve <id> | resolve-queue [--limit N] | resolve-packet <id> | resolve-apply <file|-> | howto-queue [--limit N] [--again] | howto-packet <id> | howto-apply | artifacts [--manifest FILE] | \
 search <q> [--thread --kind --state --from --to --text] | embed [--limit N] | log [--n N] | link A B kind | \
-relate A B kind --source REF --quote Q [--state S] | pending [--days N] | skip <session ref> | show <ref> | demo (needs BACKTRAIL_HOME) | \
+relate A B kind --source REF --quote Q [--state S] | status [--all] | ended <session id> | home | skip <session ref> | show <ref> | demo (needs BACKTRAIL_HOME) | \
 add <type> --thread --title --source --quote [--body --check --state --origin --date] | import <facts.json|-> | \
 set-thread NAME [--state S] [--summary X] | done <step> [--by B] [--proof P] | built <step> --evidence TEXT [--check TEXT] | \
 flag <id> --as live|in_effect|superseded|done --reason R | reply <q> --text TEXT | retire <id> [--by ID] --reason R | \
 assign <ref> <thread> | suggest-threads | extract-input <ref> | finish <step> --source REF --quote Q [--verified] [--dry] | finish-input <step> | finish-evidence <step> --source REF --quote Q | finish-queue | extract-queue [--limit N] [--session ID] [--entity NAME] | \
 extract-log <ref> [--failed 1] [--detail D] | kg [state|export|restore|lint|suggest|merge|entity|page|trace|why|neighbors|path|passage|find] | \
-brief [--thread T | --all] | recall [--text PROMPT [--thread T]] | backup | serve [--port N] | hooks";
+brief [--thread T | --all] [--hook H] | recall [--text PROMPT [--thread T]] [--hook H] | backup | serve [--port N] | hooks [status|install|remove] [--harness H] | agent [claude|gemini|codex|antigravity|command]";
 
-const HELP: &str = "Backtrail: the trail of work done with Claude Code.
+const HELP: &str = "Backtrail: the trail of work done with coding agents.
 
   bt build                    index sessions and notes; offers to read recent sessions
   bt brief [--thread T|--all] what was decided and what is next
   bt search <words>           search with cited sources
   bt serve [--port N]         web app on port 8799
-  bt hooks [status|install|remove]
+  bt hooks [status|install|remove] [--harness claude|gemini|codex|antigravity]
+  bt status [--all]           which sessions are read into the trail, and why not
   bt check                    lost quotes, orphan threads, stale work
 
 Every command: bt help all. Reference: docs/reference.md";
@@ -104,18 +106,66 @@ fn ingest(c: &Connection) {
         "items relinked {}, quote no longer found {}",
         r.quotes.0, r.quotes.1
     );
-    let read = r.sessions.0 + r.notes.0 + r.artifacts.0 + r.repos.0;
+    let read = r.sessions.0 + r.other_sessions.0 + r.notes.0 + r.artifacts.0 + r.repos.0;
     if read > 0 {
         let detail = format!(
             "sessions {}, notes {}, artifacts {}, git repos {}",
-            r.sessions.0, r.notes.0, r.artifacts.0, r.repos.0
+            r.sessions.0 + r.other_sessions.0,
+            r.notes.0,
+            r.artifacts.0,
+            r.repos.0
         );
         db::logw(c, "ingest", "ingest", "sources", &detail);
     }
     println!(
-        "sessions {} new/changed ({} unchanged), notes {} ({}), artifacts {} ({})",
-        r.sessions.0, r.sessions.1, r.notes.0, r.notes.1, r.artifacts.0, r.artifacts.1
+        "sessions {} new/changed ({} unchanged), other tools {} ({}), notes {} ({}), artifacts {} ({})",
+        r.sessions.0,
+        r.sessions.1,
+        r.other_sessions.0,
+        r.other_sessions.1,
+        r.notes.0,
+        r.notes.1,
+        r.artifacts.0,
+        r.artifacts.1
     );
+}
+
+fn agent(set: Option<&str>) {
+    let path = db::home().join("config.json");
+    let raw = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut v: Value = if raw.trim().is_empty() {
+        serde_json::json!({})
+    } else {
+        serde_json::from_str(&raw).unwrap_or_else(|e| {
+            fail(format!(
+                "{} is not valid JSON ({e}); nothing changed",
+                path.display()
+            ))
+        })
+    };
+    let Some(cli) = set else {
+        println!("{}", v["agent"]["cli"].as_str().unwrap_or("claude"));
+        return;
+    };
+    if !["claude", "gemini", "codex", "antigravity", "command"].contains(&cli) {
+        fail("agent CLI must be claude, gemini, codex, antigravity or command");
+    }
+    if !v["agent"].is_object() {
+        v["agent"] = serde_json::json!({});
+    }
+    v["agent"]["cli"] = Value::String(cli.to_string());
+    std::fs::create_dir_all(db::home()).ok();
+    if !raw.is_empty() {
+        std::fs::write(path.with_file_name("config.json.bak-backtrail"), &raw).ok();
+    }
+    let text = serde_json::to_string_pretty(&v).expect("a JSON value serializes");
+    std::fs::write(&path, format!("{text}\n")).unwrap_or_else(|e| fail(e));
+    println!("sessions are read through {cli} ({})", path.display());
+}
+
+fn hook_harness(a: &Args) -> Option<hooks::Harness> {
+    a.opt("--hook")
+        .map(|n| hooks::Harness::parse(&n).unwrap_or_else(|| fail(format!("unknown --hook '{n}'"))))
 }
 
 fn import(c: &Connection, file: &str) {
@@ -321,10 +371,10 @@ fn kg_command(c: &Connection, a: &Args) {
 
 fn offer_first_read(c: &rusqlite::Connection, unread: usize) {
     use std::io::{BufRead, IsTerminal, Write};
-    let each = kg::extract::usd_each(c);
+    let each = kg::extract::calls_each(c);
     let first = unread.min(20);
     println!(
-        "{unread} sessions have not been read for decisions yet (about ${each:.2} each: one small-model read, then one check per item filed)."
+        "{unread} sessions have not been read for decisions yet (about {each:.0} model calls each through the claude CLI: one small-model read, then one check per item filed)."
     );
     if db::count(c, "SELECT COUNT(*) FROM claims", &[]) == 0 {
         println!("Until some are read, the brief and the project pages stay empty.");
@@ -350,7 +400,7 @@ fn offer_first_read(c: &rusqlite::Connection, unread: usize) {
         return;
     }
     print!(
-        "Read the newest {first} now (about ${:.2})? [y/N] ",
+        "Read the newest {first} now (about {:.0} model calls)? [y/N] ",
         first as f64 * each
     );
     std::io::stdout().flush().ok();
@@ -402,7 +452,11 @@ fn main() {
     if cmd == "hooks" {
         return hooks::run(&a.0);
     }
-    if cmd == "brief" && std::env::var("BACKTRAIL_COMPILE").is_ok() {
+    if cmd == "agent" {
+        return agent(a.0.get(1).map(String::as_str));
+    }
+    let quiet = cmd == "brief" || cmd == "recall" && !a.has("--text");
+    if quiet && std::env::var("BACKTRAIL_COMPILE").is_ok() {
         return;
     }
     let c = db::open();
@@ -542,7 +596,15 @@ fn main() {
             db::logw(&c, "claude", "link", &format!("{from} -> {to}"), &kind);
             println!("ok");
         }
-        "extract-input" => kg::extract::input(&c, &a.at(1, "session ref")),
+        "extract-input" => kg::extract::input(
+            &c,
+            &a.at(1, "session ref"),
+            if a.has("--full") {
+                kg::extract::Turns::All
+            } else {
+                kg::extract::Turns::New
+            },
+        ),
         "finish" => match finish::finish(
             &c,
             &a.at(1, "step id"),
@@ -603,12 +665,12 @@ fn main() {
                 println!("{:5.1}  {}  {}  ({})", h.score, h.day, h.title, h.id);
             }
         }
-        "recall" => recall::hook(&c),
+        "recall" => recall::hook(&c, hook_harness(&a)),
         "brief" => {
             if !db::is_demo() {
                 ingest::rescan(&c);
             }
-            views::brief(
+            let text = views::brief(
                 &c,
                 a.opt("--thread").as_deref(),
                 if a.has("--all") {
@@ -617,6 +679,8 @@ fn main() {
                     views::Detail::Short
                 },
             );
+            let harness = hook_harness(&a);
+            hooks::emit(harness, "SessionStart", &text);
         }
         "backup" => println!(
             "{}",
@@ -662,7 +726,29 @@ fn main() {
         "resolve-queue" if a.has("--reverses") => resolve::reverse_queue(&c, a.num("--limit", 20)),
         "resolve-queue" => resolve::queue(&c, a.num("--limit", 20)),
         "artifacts" => check::artifacts(&c, a.opt("--manifest").as_deref()),
-        "pending" => check::pending(&c, a.num("--days", 3)),
+        "pending" | "status" => {
+            if !coverage::status(
+                &c,
+                if a.has("--all") {
+                    coverage::Show::All
+                } else {
+                    coverage::Show::Open
+                },
+            ) {
+                std::process::exit(1);
+            }
+        }
+        "ended" => {
+            let r = db::resolve_ref(
+                &c,
+                &format!(
+                    "session:{}",
+                    a.at(1, "session id").trim_start_matches("session:")
+                ),
+            );
+            db::logw(&c, "hook", "ended", &r, "");
+        }
+        "home" => println!("{}", db::home().display()),
         "skip" => {
             let r = db::resolve_ref(&c, &a.at(1, "session ref"));
             let id = db::source_id(&c, &r).unwrap_or(0);

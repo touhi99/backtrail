@@ -79,8 +79,8 @@ function LeftOff({ sources, gains, next, onNext }: { sources: SourceStat[]; gain
   )
 }
 
-type View = 'steps' | 'journey' | 'decisions' | 'made' | 'artifacts' | 'sources' | 'archive' | 'claude'
-const VIEWS: [View, string][] = [['steps', 'All steps'], ['journey', 'Journey'], ['decisions', 'Decisions'], ['made', 'Made'], ['artifacts', 'Artifacts'], ['sources', 'Sources'], ['archive', 'Archive'], ['claude', 'Claude Code']]
+type View = 'steps' | 'journey' | 'decisions' | 'made' | 'artifacts' | 'sources' | 'archive' | 'agent'
+const VIEWS: [View, string][] = [['steps', 'All steps'], ['journey', 'Journey'], ['decisions', 'Decisions'], ['made', 'Made'], ['artifacts', 'Artifacts'], ['sources', 'Sources'], ['archive', 'Archive'], ['agent', 'Coding agent']]
 
 export default function Thread() {
   const { name = '' } = useParams()
@@ -261,11 +261,11 @@ export default function Thread() {
             {rej.length > 0 && <section className="nx-panel nx-in overflow-hidden"><Fold label="Rejected or not valid now" count={rej.length}>{rej.map((i) => <div key={i.id} id={`item-${i.id}`} className="nx-row" style={{ gridTemplateColumns: 'minmax(0,1fr)', cursor: 'default', ...hl(i.id) }}><div><div className="text-[14px] text-mut line-through">{i.title}</div><More label={i.state === 'parked' ? 'Why not valid' : 'Why rejected'} className="text-[12.5px] text-mut">{i.answer || 'No reason given.'}</More></div></div>)}</Fold></section>}
           </div>
         )}
-        {view === 'claude' && (
-          <Panel title="Work on it in Claude Code">
+        {view === 'agent' && (
+          <Panel title={`Work on it in ${d.agent.name}`}>
             <div className="flex flex-wrap items-center gap-2 px-5 pb-4">
-              <code className="min-w-0 flex-1 truncate rounded-xl border border-line bg-[#0c0c0e] px-3.5 py-2.5 text-[12px] text-soft">claude "$(backtrail brief --thread '{th.name}')"</code>
-              <button className="btn" onClick={() => copy(`claude "$(backtrail brief --thread '${th.name}')"`)}><Copy size={13} />Copy</button>
+              <code className="min-w-0 flex-1 truncate rounded-xl border border-line bg-[#0c0c0e] px-3.5 py-2.5 text-[12px] text-soft">{d.agent.start}</code>
+              <button className="btn" onClick={() => copy(d.agent.start)}><Copy size={13} />Copy</button>
               {['Review', 'Extend', 'Explore'].map((v) => <button key={v} className="btn" onClick={() => copy(`${v} the Backtrail thread "${th.name}". Use backtrail brief, search and show; file proposed items with a source and a verbatim quote (skill/SKILL.md).`)}>{v}</button>)}
             </div>
           </Panel>

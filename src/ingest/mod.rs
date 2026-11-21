@@ -1,4 +1,5 @@
 pub mod git;
+pub mod harness;
 pub mod notes;
 pub mod sessions;
 pub mod threads;
@@ -11,6 +12,7 @@ use std::time::UNIX_EPOCH;
 
 pub struct Report {
     pub sessions: (usize, usize),
+    pub other_sessions: (usize, usize),
     pub notes: (usize, usize),
     pub artifacts: (usize, usize),
     pub repos: (usize, usize),
@@ -21,6 +23,7 @@ pub fn scan(c: &Connection) -> Report {
     threads::seed(c);
     let report = Report {
         sessions: sessions::read_all(c),
+        other_sessions: harness::read_all(c),
         notes: notes::read_notes(c),
         artifacts: notes::read_artifacts(c),
         repos: git::read_repos(c),
@@ -29,6 +32,7 @@ pub fn scan(c: &Connection) -> Report {
     threads::assign_sessions(c);
     crate::items::rehome(c);
     crate::resolve::label_replaced(c);
+    crate::kg::entities::relink_all(c);
     Report {
         quotes: relink(c),
         ..report

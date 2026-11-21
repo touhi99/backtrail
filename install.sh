@@ -12,6 +12,33 @@ bin_dir="${BT_BIN_DIR:-$HOME/.local/bin}"
 mkdir -p "$bin_dir"
 for name in backtrail bt; do ln -sf "$PWD/target/release/backtrail" "$bin_dir/$name"; done
 echo "Linked $bin_dir/backtrail and $bin_dir/bt"
+bt_bin="$PWD/target/release/backtrail"
+harnesses="${BT_HARNESSES:-}"
+if [ -z "$harnesses" ]; then
+  found=""
+  command -v claude >/dev/null && found="$found,claude"
+  command -v gemini >/dev/null && found="$found,gemini"
+  command -v codex >/dev/null && found="$found,codex"
+  command -v agy >/dev/null && found="$found,antigravity"
+  found="${found#,}"
+  harnesses="$found"
+  if [ -t 0 ]; then
+    printf 'Coding agents to connect (claude, gemini, codex, antigravity; comma-separated, or none) [%s]: ' "${found:-none}"
+    read -r answer
+    harnesses="${answer:-$found}"
+  fi
+fi
+harnesses=$(printf '%s' "$harnesses" | tr -d ' ')
+if [ -n "$harnesses" ] && [ "$harnesses" != none ]; then
+  [ "${BT_HOOKS:-1}" = 0 ] || "$bt_bin" hooks install --harness "$harnesses"
+  first="${harnesses%%,*}"
+  reader="${BT_AGENT:-}"
+  if [ -z "$reader" ] && [ -t 0 ] && [ "$first" != "$harnesses" ]; then
+    printf 'Which one reads sessions for decisions [%s]: ' "$first"
+    read -r reader
+  fi
+  "$bt_bin" agent "${reader:-$first}"
+fi
 if [ "$(uname)" = Darwin ] && [ -z "$BT_NO_AGENT" ]; then
   label=dev.backtrail.serve
   data="${BACKTRAIL_HOME:-$HOME/Library/Application Support/Backtrail}"

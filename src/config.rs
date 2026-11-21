@@ -43,6 +43,7 @@ pub struct Config {
     pub port: u16,
     pub embeddings: Embeddings,
     pub daily_cap: Option<i64>,
+    pub agent: String,
 }
 
 fn prefixes(model: &str) -> (&'static str, &'static str) {
@@ -202,6 +203,7 @@ fn load() -> Config {
             .unwrap_or(8799),
         embeddings: embeddings(&v["embeddings"]),
         daily_cap: v["compile"]["daily_cap"].as_i64(),
+        agent: v["agent"]["cli"].as_str().unwrap_or("claude").to_string(),
     }
 }
 

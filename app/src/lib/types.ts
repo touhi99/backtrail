@@ -96,6 +96,7 @@ export type ThreadDetail = {
   claims: ThreadClaim[]
   decided: Decided[]
   artifacts: ArtifactLink[]
+  agent: { name: string; start: string }
 }
 
 export type PendingSource = {
@@ -289,7 +290,7 @@ export type EntityAdded = {
   entity?: string
   linked?: number
   unread?: number
-  usd_each?: number
+  calls_each?: number
 }
 
 export type Trail = {

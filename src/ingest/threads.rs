@@ -33,9 +33,12 @@ pub fn seed(c: &Connection) {
             )
             .ok();
         }
-        if t.kind == "build" || t.kind == "plan" {
-            crate::kg::entities::ensure(c, &t.name, "project", &ts);
-        }
+        let kind = if t.kind == "build" || t.kind == "plan" {
+            "project"
+        } else {
+            "topic"
+        };
+        crate::kg::entities::ensure(c, &t.name, kind, &ts);
     }
     c.execute(
         UPSERT_THREAD,

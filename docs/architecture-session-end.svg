@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" viewBox="0 0 900 500" role="img" aria-label="Session end: Claude Code starts session-end.sh, which runs ingest and embed against the backtrail binary; embed calls the embedding server and results are written to backtrail.db.">
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" viewBox="0 0 900 500" role="img" aria-label="Session end: the coding agent starts session-end.sh, which runs ingest and embed against the backtrail binary; embed calls the embedding server and results are written to backtrail.db.">
 <style>
   svg { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
   .bg { fill: #ffffff; }
@@ -23,7 +23,7 @@
 <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
 <rect class="bg" width="900" height="500"/>
 <line class="life" x1="90" y1="64" x2="90" y2="480"/>
-<rect class="ext" x="20" y="20" width="140" height="44" rx="10"/><text class="t" x="90" y="47" text-anchor="middle">Claude Code</text>
+<rect class="ext" x="20" y="20" width="140" height="44" rx="10"/><text class="t" x="90" y="47" text-anchor="middle">Coding agent</text>
 <line class="life" x1="270" y1="64" x2="270" y2="480"/>
 <rect class="sys" x="200" y="20" width="140" height="44" rx="10"/><text class="t" x="270" y="47" text-anchor="middle">session-end.sh</text>
 <line class="life" x1="450" y1="64" x2="450" y2="480"/>
@@ -46,5 +46,5 @@
 <rect class="lb" x="515.4" y="291" width="49.199999999999996" height="14"/><text class="r" x="540.0" y="302" text-anchor="middle">vectors</text>
 <path class="ln" d="M450,350 L808,350"/>
 <rect class="lb" x="552.2" y="331" width="155.6" height="14"/><text class="r" x="630.0" y="342" text-anchor="middle">store vectors by text hash</text>
-<text class="r" x="30" y="494">Extraction (extract.sh) and resolution (resolve.sh) call a model; BACKTRAIL_COMPILE_ON_END=0 skips them.</text>
+<text class="r" x="30" y="494">Then sweep.sh reads every queued session and checks every proposed item; BACKTRAIL_COMPILE_ON_END=0 skips it.</text>
 </svg>

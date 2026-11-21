@@ -254,7 +254,7 @@ fn post(c: &Connection, path: &str, body: &Value) -> Option<Value> {
                     "entity": ename,
                     "linked": db::count(c, "SELECT COUNT(*) FROM claim_about WHERE entity_id=?1", &[&id]),
                     "unread": kg::extract::unread(c, &ename),
-                    "usd_each": kg::extract::usd_each(c),
+                    "calls_each": kg::extract::calls_each(c),
                 }),
             }
         }
@@ -304,7 +304,42 @@ fn background_scan() {
                 Err(_) => {}
             }
         }
+        start_sweep(&c);
         std::thread::sleep(Duration::from_secs(300));
+    }
+}
+
+fn start_sweep(c: &Connection) {
+    let queued = crate::coverage::sessions(c)
+        .iter()
+        .any(|x| x.state.queued())
+        || crate::coverage::graph(c).unresolved > 0;
+    if !queued {
+        return;
+    }
+    let script = std::env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .ok()
+        .and_then(|exe| {
+            exe.ancestors()
+                .map(|a| a.join("skill/sweep.sh"))
+                .find(|p| p.exists())
+        });
+    match script {
+        Some(path) => {
+            match std::process::Command::new(path)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            {
+                Ok(mut child) => {
+                    std::thread::spawn(move || child.wait());
+                }
+                Err(e) => eprintln!("sweep: cannot start: {e}"),
+            }
+        }
+        None => eprintln!("sweep: skill/sweep.sh not found next to the build"),
     }
 }
 

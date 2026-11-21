@@ -5,14 +5,15 @@ TM="$DIR/../target/release/backtrail"
 MODEL="${BACKTRAIL_COMPILE_MODEL:-haiku}"
 export BACKTRAIL_COMPILE=1
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-command -v claude >/dev/null 2>&1 || { echo "extract.sh: the claude CLI is not on PATH; nothing was run or logged" >&2; exit 1; }
-ENTITY=""; LIMIT=3; SESSION=""; NOCAP=""; REFS=()
+"$DIR/ask.py" --check >/dev/null || { echo "extract.sh: nothing was run or logged" >&2; exit 1; }
+ENTITY=""; LIMIT=3; SESSION=""; NOCAP=""; FULL=""; REFS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --entity) ENTITY="$2"; shift 2 ;;
     --limit) LIMIT="$2"; shift 2 ;;
     --session) SESSION="$2"; shift 2 ;;
     --no-cap) NOCAP=1; shift ;;
+    --full) FULL=1; shift ;;
     *) REFS+=("$1"); shift ;;
   esac
 done
@@ -25,10 +26,8 @@ if [ ${#REFS[@]} -eq 0 ]; then
 fi
 cd "$(mktemp -d)" || exit 1
 for ref in "${REFS[@]+"${REFS[@]}"}"; do
-  packet="$("$TM" extract-input "$ref")" || { echo "$ref: no packet"; continue; }
-  raw="$(printf '%s' "$packet" | claude -p --model "$MODEL" --tools "" --no-session-persistence --output-format json \
-        --setting-sources project --disable-slash-commands --strict-mcp-config --max-budget-usd 0.25 \
-        --system-prompt "$(cat "$DIR/extract-prompt.md")" 2>/dev/null)"
+  packet="$("$TM" extract-input "$ref" ${FULL:+--full})" || { echo "$ref: no packet"; continue; }
+  raw="$(printf '%s' "$packet" | "$DIR/ask.py" --tier small --model "$MODEL" --budget 0.25 --system "$DIR/extract-prompt.md")"
   REF="$ref" TM="$TM" RAW="$raw" DIR="$DIR" python3 - <<'PY'
 import json, os, re, subprocess, sys
 ref, tm, raw = os.environ["REF"], os.environ["TM"], os.environ["RAW"]

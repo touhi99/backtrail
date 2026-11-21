@@ -34,12 +34,6 @@ pub fn queue(
     let only = session_id.map(|s| {
         crate::db::resolve_ref(c, &format!("session:{}", s.trim_start_matches("session:")))
     });
-    let sorted = if only.is_some() {
-        "1"
-    } else {
-        "ifnull(s.thread,'Unsorted')!='Unsorted'"
-    };
-    let mut st = c.prepare(&format!("SELECT s.ref, s.id FROM sources s WHERE s.kind='session' AND (SELECT COUNT(*) FROM chunks WHERE source_id=s.id AND role='user')>=1 AND {sorted} AND NOT (s.ref NOT LIKE 'session:%-%' AND EXISTS (SELECT 1 FROM sources t WHERE t.kind='session' AND t.path=s.path AND t.id!=s.id)) AND NOT EXISTS (SELECT 1 FROM log l WHERE l.target=s.ref AND l.action IN ('extract','kg-extract')) AND ( SELECT COUNT(*) FROM log l WHERE l.target=s.ref AND l.action IN ('extract-failed','kg-extract-failed','compile-failed') )<2 AND NOT EXISTS ( SELECT 1 FROM chunks k WHERE k.source_id=s.id AND k.seq=0 AND (k.text LIKE 'BACKTRAIL-%' OR k.text LIKE 'Reply with%' OR k.text LIKE 'Read the file%' OR k.text LIKE 'Write a %') ) ORDER BY s.last_ts DESC")).expect("prepare query");
     let want: Option<Vec<String>> = entity.and_then(|e| entities::find(c, e)).map(|(id, _)| {
         c.prepare("SELECT alias FROM entity_aliases WHERE entity_id=?1")
             .expect("prepare query")
@@ -49,16 +43,18 @@ pub fn queue(
             .collect()
     });
     let mut out = vec![];
-    for (r, sid) in st
-        .query_map([], |x| Ok((x.get::<_, String>(0)?, x.get::<_, i64>(1)?)))
-        .expect("run query")
-        .map(|row| row.expect("decode query row"))
-    {
+    for x in crate::coverage::sessions(c) {
         if out.len() >= limit.min(room) {
             break;
         }
-        if only.as_ref().is_some_and(|o| *o != r) {
-            continue;
+        let (r, sid) = (x.source, x.id);
+        match &only {
+            Some(o) if *o != r => continue,
+            Some(_) if !(x.state.queued() || x.state == crate::coverage::State::Running) => {
+                continue;
+            }
+            None if !x.state.queued() => continue,
+            _ => {}
         }
         if let Some(al) = &want {
             let txt: String = c
@@ -109,32 +105,22 @@ fn unextracted_mentioning(c: &Connection, entity: &str) -> Vec<String> {
     .collect()
 }
 
-const RESOLVE_USD_EACH: f64 = 0.011;
-
-pub fn usd_each(c: &Connection) -> f64 {
+pub fn calls_each(c: &Connection) -> f64 {
     let v: Vec<f64> = c
-        .prepare("SELECT detail FROM log WHERE action='extract' AND detail LIKE 'usd=%'")
+        .prepare("SELECT detail FROM log WHERE action='extract' AND detail LIKE '%items=%'")
         .expect("prepare query")
         .query_map([], |r| r.get::<_, String>(0))
         .expect("run query")
         .map(|row| row.expect("decode query row"))
         .filter_map(|d| {
-            let usd: f64 = d
-                .strip_prefix("usd=")?
-                .split_whitespace()
-                .next()?
-                .parse()
-                .ok()?;
-            let items: f64 = d
-                .split_whitespace()
+            d.split_whitespace()
                 .find_map(|w| w.strip_prefix("items="))
-                .and_then(|n| n.parse().ok())
-                .unwrap_or(0.0);
-            Some(usd + items * RESOLVE_USD_EACH)
+                .and_then(|n| n.parse::<f64>().ok())
+                .map(|items| 1.0 + items)
         })
         .collect();
     if v.is_empty() {
-        0.08
+        5.0
     } else {
         v.iter().sum::<f64>() / v.len() as f64
     }
@@ -182,7 +168,13 @@ pub fn backlog(c: &Connection, entity: &str) -> usize {
     unextracted_mentioning(c, entity).len()
 }
 
-pub fn input(c: &Connection, r: &str) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Turns {
+    New,
+    All,
+}
+
+pub fn input(c: &Connection, r: &str, turns: Turns) {
     let r = &crate::db::resolve_ref(c, r);
     let Ok((sid, thread, ts)) = c.query_row("SELECT id, ifnull(thread,''), ifnull(last_ts,'') FROM sources WHERE ref=?1 AND kind='session'", params![r], |x| Ok((x.get::<_, i64>(0)?, x.get::<_, String>(1)?, x.get::<_, String>(2)?))) else { eprintln!("no such session"); std::process::exit(1) };
     println!(
@@ -212,13 +204,30 @@ pub fn input(c: &Connection, r: &str) {
     {
         println!("- {n} ({k})");
     }
-    println!("\nTURNS:");
+    let since: String = if turns == Turns::All {
+        String::new()
+    } else {
+        c
+            .query_row(
+                "SELECT ifnull(max(ts),'') FROM log WHERE target=?1 AND action IN ('extract','kg-extract','compile')",
+                params![r],
+                |x| x.get(0),
+            )
+            .unwrap_or_default()
+    };
+    if since.is_empty() {
+        println!("\nTURNS:");
+    } else {
+        println!(
+            "\nTURNS (new since this session was last read on {since}; earlier turns are already filed):"
+        );
+    }
     let mut used = 0usize;
     let mut q = c
-        .prepare("SELECT locator, role, text FROM chunks WHERE source_id=?1 ORDER BY seq")
+        .prepare("SELECT locator, role, text FROM chunks WHERE source_id=?1 AND (?2='' OR ifnull(ts,'')>?2) ORDER BY seq")
         .expect("prepare query");
     for (l, role, t) in q
-        .query_map(params![sid], |x| {
+        .query_map(params![sid, since], |x| {
             Ok((
                 x.get::<_, String>(0)?,
                 x.get::<_, String>(1)?,
@@ -229,8 +238,8 @@ pub fn input(c: &Connection, r: &str) {
         .map(|row| row.expect("decode query row"))
     {
         let user = role == "user";
-        let s = clip(&t, if user { 900 } else { 220 });
-        if used + s.len() > 22000 && !user {
+        let s = clip(&t, if user { 4000 } else { 600 });
+        if used + s.len() > 150_000 && !user {
             continue;
         }
         used += s.len();

@@ -10,9 +10,7 @@ case "$first" in
   rejected*|*"not open"*) echo "$first"; exit 0 ;;
   *)
     packet="$("$TM" finish-evidence "$id" --source "$src" --quote "$quote" 2>/dev/null)"
-    answer="$(cd "$(mktemp -d)" && printf '%s' "$packet" | claude -p --model "$VMODEL" --tools "" --no-session-persistence \
-      --setting-sources project --disable-slash-commands --strict-mcp-config --max-budget-usd 0.10 \
-      --system-prompt "$(cat "$DIR/confirm-finished-prompt.md")" 2>/dev/null | tr -d '[:space:][:punct:]' | tr '[:upper:]' '[:lower:]')"
+    answer="$(cd "$(mktemp -d)" && printf '%s' "$packet" | "$DIR/ask.py" --text --tier large --model "$VMODEL" --budget 0.10 --system "$DIR/confirm-finished-prompt.md" 2>/dev/null | tr -d '[:space:][:punct:]' | tr '[:upper:]' '[:lower:]')"
     [ "$answer" = "yes" ] && verified=(--verified) ;;
 esac
 if [ "$dry" = "--dry" ]; then

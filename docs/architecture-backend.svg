@@ -10,7 +10,7 @@
 <text x="784" y="122" class="col">MODEL PASSES</text>
 <rect x="40" y="193" width="208" height="96" rx="10" fill="#131315" stroke="#8b8b95" stroke-opacity=".75" stroke-width="1.4"/>
 <path d="M40 223V203Q40 193 50 193H238Q248 193 248 203V223Z" fill="#8b8b95" fill-opacity=".92"/>
-<text x="54" y="213" class="bt">Claude Code sessions</text>
+<text x="54" y="213" class="bt">Agent sessions</text>
 <text x="54" y="247" class="bl">Transcripts</text>
 <text x="54" y="269" class="bl">Read only</text>
 <rect x="40" y="311" width="208" height="96" rx="10" fill="#131315" stroke="#8b8b95" stroke-opacity=".75" stroke-width="1.4"/>

@@ -24,7 +24,7 @@ function Bar({ n, max, color = '#8b8b95' }: { n: number; max: number; color?: st
   return <span className="block h-1.5 w-full overflow-hidden rounded-full bg-white/[.06]"><span className="block h-full rounded-full" style={{ width: `${Math.max(6, (n / max) * 100)}%`, background: color }} /></span>
 }
 
-type Added = { entity: string; linked: number; unread: number; usdEach: number; started?: number }
+type Added = { entity: string; linked: number; unread: number; callsEach: number; started?: number }
 
 export default function Topics({ sug, onChanged }: { sug: KgSuggest | null; onChanged: () => void }) {
   const terms = sug?.entities ?? []
@@ -43,7 +43,7 @@ export default function Topics({ sug, onChanged }: { sug: KgSuggest | null; onCh
 
   const send = async (name: string, k: string, aliasOf = '') => {
     const r = await post<EntityAdded>('/api/kg/entity', { name, kind: k, alias_of: aliasOf })
-    if (r?.entity) { setAdded({ entity: r.entity, linked: r.linked ?? 0, unread: r.unread ?? 0, usdEach: r.usd_each ?? 0.02 }); setHid('') }
+    if (r?.entity) { setAdded({ entity: r.entity, linked: r.linked ?? 0, unread: r.unread ?? 0, callsEach: r.calls_each ?? 5 }); setHid('') }
     if (k === 'ignore') { setHid(name); setAdded(null) }
     setPick('')
     onChanged()
@@ -80,7 +80,7 @@ export default function Topics({ sug, onChanged }: { sug: KgSuggest | null; onCh
             <button onClick={() => setAdded(null)} title="Dismiss" className="text-mut hover:text-ink"><X size={14} /></button>
           </div>
           {added.unread > 0 && !added.started && (
-            <button className="btn primary sm mt-2.5 w-full justify-center" onClick={read}>Read {Math.min(added.unread, 30)} sessions now · about ${(Math.min(added.unread, 30) * added.usdEach).toFixed(2)}</button>
+            <button className="btn primary sm mt-2.5 w-full justify-center" onClick={read}>Read {Math.min(added.unread, 30)} sessions now · about {Math.round(Math.min(added.unread, 30) * added.callsEach)} model calls</button>
           )}
         </div>
       )}
