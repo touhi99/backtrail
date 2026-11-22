@@ -2,6 +2,7 @@ mod check;
 mod cli;
 mod clock;
 mod config;
+mod corrections;
 mod coverage;
 mod db;
 mod embed;

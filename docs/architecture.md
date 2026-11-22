@@ -173,10 +173,10 @@ one project across agents. Subagent sessions and sessions run from a temporary f
 
 ## App
 
-Routes: Home, Graph (decisions, mentions and over-time views), Items, Log, Search, Thread, Source. `/map?thread=` shows one
+Routes: Home, Graph (decisions, mentions and over-time views), Corrections, Items, Log, Search, Thread, Source. `/map?thread=` shows one
 project's items and notes. Home reads `/api/today` and `/api/thread` (one call per project in motion, for its next step
 and latest decisions); the Graph page reads `/api/kg/graph`, `/api/kg/claims`,
-`/api/kg/lineage`, `/api/kg/suggest` (terms with example quotes) and `/api/kg/growth`. `POST /api/kg/entity` returns the claims linked and the unread sessions; `POST /api/kg/extract` starts `skill/extract.sh --entity` in the background. All writes from the app go through `POST /api/*` handlers in
+`/api/kg/lineage`, `/api/kg/suggest` (terms with example quotes) and `/api/kg/growth`. Corrections reads `/api/corrections`: the latest user messages tagged as pushback in `turn_tags` (filled by `skill/corrections.sh`), each with the end of the agent reply before it, the weekly share and the threads with the highest share. `POST /api/kg/entity` returns the claims linked and the unread sessions; `POST /api/kg/extract` starts `skill/extract.sh --entity` in the background. All writes from the app go through `POST /api/*` handlers in
 `server.rs`, which call the same functions in `items/` and `kg/` as the command line.
 
 Limits: README, section "Limits", and `reference.md`, section "Scale limits".

@@ -259,3 +259,11 @@ CREATE TABLE IF NOT EXISTS kg_overrides(
   ts TEXT,
   PRIMARY KEY(target, field)
 );
+
+CREATE TABLE IF NOT EXISTS turn_tags(
+  chunk_id INTEGER PRIMARY KEY,
+  correction INTEGER NOT NULL,
+  model TEXT,
+  ts TEXT,
+  kind TEXT
+);

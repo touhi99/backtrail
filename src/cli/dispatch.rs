@@ -1,11 +1,11 @@
 use crate::{
-    check, clock, config, coverage, db, embed, finish, hooks, howto, ingest, items, kg, recall,
-    resolve, search, server, views,
+    check, clock, config, corrections, coverage, db, embed, finish, hooks, howto, ingest, items,
+    kg, recall, resolve, search, server, views,
 };
 
 use super::{Args, fail, setup};
 
-const USAGE: &str = "backtrail ingest [--force] | build | check [--pairs] | match | resolve <id> --by <id> --reason T | resolve --expired | unresolve <id> | resolve-queue [--limit N] | resolve-packet <id> | resolve-apply <file|-> | howto-queue [--limit N] [--again] | howto-packet <id> | howto-apply | artifacts [--manifest FILE] | \
+const USAGE: &str = "backtrail ingest [--force] | build | check [--pairs] | match | resolve <id> --by <id> --reason T | resolve --expired | unresolve <id> | resolve-queue [--limit N] | resolve-packet <id> | resolve-apply <file|-> | howto-queue [--limit N] [--again] | howto-packet <id> | howto-apply | corrections [--weeks N] | corrections-packet [--limit N] [--model LABEL] [--kinds] | corrections-apply | artifacts [--manifest FILE] | \
 search <q> [--thread --kind --state --from --to --text] | embed [--limit N] | log [--n N] | link A B kind | \
 relate A B kind --source REF --quote Q [--state S] | status [--all] | ended <session id> | home | skip <session ref> | show <ref> | \
 add <type> --thread --title --source --quote [--body --check --state --origin --date] | import <facts.json|-> | \
@@ -367,6 +367,18 @@ pub(super) fn run() {
         ),
         "howto-packet" => howto::packet(&c, &a.at(1, "step id")),
         "howto-apply" => howto::apply_cli(&c),
+        "corrections" => corrections::report(&c, a.num("--weeks", 8)),
+        "corrections-packet" => corrections::packet(
+            &c,
+            a.num("--limit", 40),
+            &a.text("--model"),
+            if a.has("--kinds") {
+                corrections::Pass::Kinds
+            } else {
+                corrections::Pass::Tags
+            },
+        ),
+        "corrections-apply" => corrections::apply_cli(&c),
         "resolve-queue" if a.has("--reverses") => resolve::reverse_queue(&c, a.num("--limit", 20)),
         "resolve-queue" => resolve::queue(&c, a.num("--limit", 20)),
         "artifacts" => check::artifacts(&c, a.opt("--manifest").as_deref()),

@@ -123,6 +123,7 @@ fn from_this_machine(rq: &Request) -> bool {
 fn get(c: &Connection, path: &str, q: &Query) -> Option<Value> {
     Some(match path {
         "/api/today" => views::today(c),
+        "/api/corrections" => crate::corrections::view(c),
         "/api/thread" => views::thread(c, &q.get("name")),
         "/api/focus" => views::focus(c, &q.get("thread")),
         "/api/items" => views::items(

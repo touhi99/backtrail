@@ -59,6 +59,7 @@ struct RootView: View {
                 switch store.page {
                 case .home: HomeView()
                 case .graph: GraphView()
+                case .corrections: CorrectionsView()
                 case .decisions(let name): GraphView(project: name).id(name)
                 case .thread(let name): ThreadView(name: name).id(name)
                 case .map(let name): MapView(thread: name).id(name)
@@ -118,6 +119,7 @@ struct Sidebar: View {
             NavRow(icon: "house", label: "Home", active: store.page == .home) { store.go(.home) }
             NavRow(icon: "point.3.connected.trianglepath.dotted", label: "Graph", active: store.page == .graph,
                    badge: store.toReview > 0 ? "\(store.toReview)" : nil, onBadge: { store.openTopics = true; store.go(.graph) }) { store.go(.graph) }
+            NavRow(icon: "exclamationmark.bubble", label: "Corrections", active: store.page == .corrections) { store.go(.corrections) }
 
             Text("Active threads").font(.system(size: 12)).foregroundStyle(Color.mut)
                 .padding(.horizontal, 10).padding(.top, 18).padding(.bottom, 4)

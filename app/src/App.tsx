@@ -5,6 +5,7 @@ import MapPage from '@/pages/MapPage'
 import Thread from '@/pages/Thread'
 import Source from '@/pages/Source'
 import Graph from '@/pages/Graph'
+import Corrections from '@/pages/Corrections'
 
 function MapRoute() {
   const [sp] = useSearchParams()
@@ -20,6 +21,7 @@ export default function App() {
         <Route path="/thread/:name" element={<Thread />} />
         <Route path="/source/:id" element={<Source />} />
         <Route path="/graph" element={<Graph />} />
+        <Route path="/corrections" element={<Corrections />} />
         <Route path="*" element={<Today />} />
       </Routes>
     </Shell>

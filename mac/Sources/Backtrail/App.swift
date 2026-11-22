@@ -8,6 +8,7 @@ enum Snapshot {
     static func page() -> Page {
         let p = env["BACKTRAIL_PAGE"] ?? "home"
         if p == "graph" { return .graph }
+        if p == "corrections" { return .corrections }
         if p.hasPrefix("map:") { return .map(String(p.dropFirst(4))) }
         if p.hasPrefix("thread:") { return .thread(String(p.dropFirst(7))) }
         if p.hasPrefix("decisions:") { return .decisions(String(p.dropFirst(10))) }

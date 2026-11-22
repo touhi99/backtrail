@@ -69,12 +69,13 @@ The complete CLI and the scripts that call it. Hooks, `skill/*.sh` and agents ca
 | Script | Usage |
 | --- | --- |
 | `skill/session-end.sh` | SessionEnd hook; reads the hook JSON (`session_id`) on stdin, runs `ingest`, `ended <id>`, then `sweep.sh` in the background |
-| `skill/sweep.sh` | One sweep under `<data dir>/sweep.lock`: `ingest`, `embed`, extraction of every queued session, `resolve.sh` and `resolve.sh --reverses` until their queues are empty, `finish.sh --limit 15`. Logs to `<data dir>/logs/sweep.log`. `BACKTRAIL_COMPILE_ON_END=0` skips it |
+| `skill/sweep.sh` | One sweep under `<data dir>/sweep.lock`: `ingest`, `embed`, extraction of every queued session, `resolve.sh` and `resolve.sh --reverses` until their queues are empty, `finish.sh --limit 15`, `corrections.sh --batches 3`. Logs to `<data dir>/logs/sweep.log`. `BACKTRAIL_COMPILE_ON_END=0` skips it |
 | `skill/extract.sh [--entity NAME] [--limit N] [--session ID] [--no-cap] \| <session ref>...` | One single-shot model call per session; the answer goes through `bt import -` |
 | `skill/resolve.sh [--dry] [--reverses] [--limit N] \| [--dry] [--reverses] <item id>...` | One call per proposed item (`BACKTRAIL_RESOLVE_MODEL`, default sonnet). `--reverses` judges settled decisions, and a second model confirms each reversal |
 | `skill/finish.sh [--dry] [--limit N] [step id...]` | Backlog sweep over items older than a day and not judged in the last 7 days |
 | `skill/close-step.sh <step id> <source ref> <quote> [--dry]` | Checks the quote with `bt finish --dry`, asks a second model, then closes the item with `--verified` |
 | `skill/howto.sh [--dry] [--again] [--limit N] \| [--dry] <step id>...` | Writes the check text for steps waiting on the user; `--again` includes steps judged to need none |
+| `skill/corrections.sh [--dry] [--batches N] [--size N]` | Tags user turns as correction or not, `N` turns per model call (`BACKTRAIL_CORRECTIONS_MODEL`, default haiku). `bt corrections [--weeks N]` prints the weekly rate |
 | `install.sh` | Builds the app and binary and links `bt`; `BT_NO_AGENT=1` skips the LaunchAgent, `BT_NO_MAC_APP=1` the Mac app |
 | `mac/build.sh` | Builds the Mac app and its icon into `mac/Backtrail.app` |
 

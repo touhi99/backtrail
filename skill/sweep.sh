@@ -41,6 +41,7 @@ mkdir -p "$HOME_DIR/logs"
   done
   "$TM" prs >/dev/null 2>&1
   "$DIR/finish.sh" --limit 15
+  "$DIR/corrections.sh" --batches 3
   "$TM" ingest >/dev/null 2>&1
   "$TM" status | head -1
 } >> "$LOG" 2>&1

@@ -53,6 +53,7 @@ enum API {
 enum Page: Hashable {
     case home
     case graph
+    case corrections
     case decisions(String)
     case thread(String)
     case map(String)
@@ -62,6 +63,7 @@ enum Page: Hashable {
         switch self {
         case .home: "Home"
         case .graph: "Graph"
+        case .corrections: "Corrections"
         case .decisions(let name), .thread(let name), .map(let name): name
         case .source: "Source"
         }

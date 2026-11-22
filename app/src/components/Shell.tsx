@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { House, ChevronRight, ListChecks, Plus, ScrollText, Search as SearchIcon, Share2, X } from 'lucide-react'
+import { House, ChevronRight, ListChecks, MessageSquareWarning, Plus, ScrollText, Search as SearchIcon, Share2, X } from 'lucide-react'
 import { STATE, useApi } from '@/lib/api'
 import Capture from '@/components/Capture'
 import Search from '@/pages/Search'
@@ -20,11 +20,12 @@ type Ctx = { today: Today | null; reload: () => void; capture: (thread?: string)
 const ShellCtx = createContext<Ctx>({ today: null, reload: () => {}, capture: () => {}, search: () => {} })
 export const useShell = () => useContext(ShellCtx)
 
-const TITLE: Record<string, string> = { map: 'Map', graph: 'Graph', thread: 'Thread', source: 'Source' }
+const TITLE: Record<string, string> = { map: 'Map', graph: 'Graph', corrections: 'Corrections', thread: 'Thread', source: 'Source' }
 
 const NAV = [
   { to: '/', label: 'Home', icon: House, end: true },
   { to: '/graph', label: 'Graph', icon: Share2, end: false },
+  { to: '/corrections', label: 'Corrections', icon: MessageSquareWarning, end: false },
 ]
 type Sheet = { kind: 'search'; q: string; thread: string } | { kind: 'items' } | { kind: 'log' }
 

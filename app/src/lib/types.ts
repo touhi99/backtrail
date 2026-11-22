@@ -356,3 +356,10 @@ export type DEdge = { a: string; b: string; kind: 'shared' | 'relation' | 'chang
 export type DOverview = { projects: DProject[]; edges: DEdge[] }
 export type DProjectView = { name: string; decisions: DDecision[]; links: DLink[] }
 export type DChain = { focus: string; decisions: DDecision[]; links: DLink[] }
+
+export type Corrections = {
+  weeks: { week: string; turns: number; corrections: number; kinds: Record<string, number> }[]
+  kinds: { kind: string; n: number; quotes: { chunk_id: number; source_id: number; thread: string; text: string }[] }[]
+  threads: { thread: string; turns: number; corrections: number }[]
+  untagged: number
+}
