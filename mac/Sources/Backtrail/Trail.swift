@@ -114,47 +114,52 @@ struct TrailChart: View {
                 Text(dayFmt(d)).font(.system(size: 11)).foregroundStyle(Color(hex: 0x6b6b75)).fixedSize()
                     .position(x: labelW + CGFloat(k) * dw + 4, y: top - 16).offset(x: 14)
             }
-            ForEach(Array(m.lanes.enumerated()), id: \.element.id) { i, p in
-                let c = STATE_COLOR[p.state] ?? .mut
-                let y = top + CGFloat(i) * rowH + rowH / 2
-                let dim = hover != nil && hover != p.name
-                ZStack(alignment: .topLeading) {
-                    RoundedRectangle(cornerRadius: 8).fill(hover == p.name ? Color.white.opacity(0.035) : .clear)
-                        .frame(width: w, height: rowH).position(x: w / 2, y: y)
-                    HStack(spacing: 8) {
-                        Circle().fill(c).frame(width: 8, height: 8)
-                        Text(p.name).font(.system(size: 13, weight: .medium)).foregroundStyle(Color(hex: 0xe4e4e7)).lineLimit(1)
+            VStack(spacing: 0) {
+                ForEach(m.lanes) { p in
+                    let c = STATE_COLOR[p.state] ?? .mut
+                    let mid = rowH / 2
+                    let dim = hover != nil && hover != p.name
+                    ZStack(alignment: .topLeading) {
+                        RoundedRectangle(cornerRadius: 8).fill(hover == p.name ? Color.white.opacity(0.035) : .clear)
+                            .frame(width: w, height: rowH).position(x: w / 2, y: mid)
+                        HStack(spacing: 8) {
+                            Circle().fill(c).frame(width: 8, height: 8)
+                            Text(p.name).font(.system(size: 13, weight: .medium)).foregroundStyle(Color(hex: 0xe4e4e7)).lineLimit(1)
+                        }
+                        .frame(width: labelW - 12, alignment: .leading).position(x: (labelW - 12) / 2 + 6, y: mid)
+                        .help(p.summary)
+                        let x0 = x(p.first) - 7, x1 = x(p.last) + 7
+                        Capsule().fill(c.opacity(0.12)).overlay(Capsule().strokeBorder(c.opacity(0.35), lineWidth: 1))
+                            .frame(width: max(14, x1 - x0), height: 14).position(x: (x0 + x1) / 2, y: mid)
+                        ForEach(p.sessions.keys.sorted(), id: \.self) { d in
+                            let v = p.sessions[d]!
+                            let r = min(6.5, 2.6 + CGFloat(v.count) * 0.9)
+                            Circle().fill(c).frame(width: r * 2, height: r * 2).position(x: x(d), y: mid)
+                                .help(tip(p.name, d, v, p.made[d] ?? [], p.done[d] ?? []))
+                        }
+                        ForEach(p.made.keys.sorted(), id: \.self) { d in
+                            Rectangle().fill(Color.purple).frame(width: 8, height: 8).rotationEffect(.degrees(45))
+                                .position(x: x(d), y: mid - 15)
+                                .help("Made, \(dayFmt(d))\n" + (p.made[d] ?? []).map { "\u{2022} " + $0["title"].str }.joined(separator: "\n"))
+                        }
+                        ForEach(p.done.keys.sorted(), id: \.self) { d in
+                            let n = p.done[d]!.count
+                            Text("\u{2713}\(n > 1 ? "\(n)" : "")").font(.system(size: 10, weight: .bold)).foregroundStyle(Color.accent).fixedSize()
+                                .position(x: x(d), y: mid + 17)
+                                .help("Done or decided, \(dayFmt(d))\n" + p.done[d]!.map { "\u{2022} " + $0["title"].str }.joined(separator: "\n"))
+                        }
+                        Text(STATE_NAME[p.state] ?? p.state).font(.system(size: 12, weight: .semibold)).foregroundStyle(c).fixedSize()
+                            .position(x: w - stateW + 10, y: mid).offset(x: 40)
                     }
-                    .frame(width: labelW - 12, alignment: .leading).position(x: (labelW - 12) / 2 + 6, y: y)
-                    .help(p.summary)
-                    let x0 = x(p.first) - 7, x1 = x(p.last) + 7
-                    Capsule().fill(c.opacity(0.12)).overlay(Capsule().strokeBorder(c.opacity(0.35), lineWidth: 1))
-                        .frame(width: max(14, x1 - x0), height: 14).position(x: (x0 + x1) / 2, y: y)
-                    ForEach(p.sessions.keys.sorted(), id: \.self) { d in
-                        let v = p.sessions[d]!
-                        let r = min(6.5, 2.6 + CGFloat(v.count) * 0.9)
-                        Circle().fill(c).frame(width: r * 2, height: r * 2).position(x: x(d), y: y)
-                            .help(tip(p.name, d, v, p.made[d] ?? [], p.done[d] ?? []))
-                    }
-                    ForEach(p.made.keys.sorted(), id: \.self) { d in
-                        Rectangle().fill(Color.purple).frame(width: 8, height: 8).rotationEffect(.degrees(45))
-                            .position(x: x(d), y: y - 15)
-                            .help("Made, \(dayFmt(d))\n" + (p.made[d] ?? []).map { "• " + $0["title"].str }.joined(separator: "\n"))
-                    }
-                    ForEach(p.done.keys.sorted(), id: \.self) { d in
-                        let n = p.done[d]!.count
-                        Text("✓\(n > 1 ? "\(n)" : "")").font(.system(size: 10, weight: .bold)).foregroundStyle(Color.accent).fixedSize()
-                            .position(x: x(d), y: y + 17)
-                            .help("Done or decided, \(dayFmt(d))\n" + p.done[d]!.map { "• " + $0["title"].str }.joined(separator: "\n"))
-                    }
-                    Text(STATE_NAME[p.state] ?? p.state).font(.system(size: 12, weight: .semibold)).foregroundStyle(c).fixedSize()
-                        .position(x: w - stateW + 10, y: y).offset(x: 40)
+                    .frame(width: w, height: rowH)
+                    .contentShape(Rectangle())
+                    .onTapGesture { store.go(.thread(p.name)) }
+                    .opacity(dim ? 0.45 : 1)
+                    .onHover { hover = $0 ? p.name : (hover == p.name ? nil : hover) }
                 }
-                .opacity(dim ? 0.45 : 1)
-                .contentShape(Rectangle().offset(y: y - rowH / 2).size(width: w, height: rowH))
-                .onHover { hover = $0 ? p.name : (hover == p.name ? nil : hover) }
-                .onTapGesture { store.go(.thread(p.name)) }
             }
+            .padding(.top, top)
+            .frame(width: w, alignment: .topLeading)
         }
         .frame(width: w, alignment: .topLeading)
     }
