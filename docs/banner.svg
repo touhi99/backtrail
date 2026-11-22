@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320" role="img" aria-label="Backtrail banner">
+  <defs>
+    <linearGradient id="bt-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#161618"/>
+      <stop offset="1" stop-color="#0c0c0e"/>
+    </linearGradient>
+    <linearGradient id="bt-tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#232327"/>
+      <stop offset="1" stop-color="#151517"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="320" rx="22" fill="url(#bt-bg)"/>
+  <rect x="0.75" y="0.75" width="1278.5" height="318.5" rx="21.25" fill="none" stroke="#ffffff" stroke-opacity="0.07"/>
+  <g opacity="0.45">
+    <path d="M880 236 C 940 236 950 150 1010 150 C 1070 150 1076 214 1136 214 C 1180 214 1200 180 1226 166" fill="none" stroke="#34d399" stroke-opacity="0.24" stroke-width="2"/>
+    <circle cx="880" cy="236" r="5" fill="#60a5fa" fill-opacity="0.6"/>
+    <circle cx="1010" cy="150" r="5" fill="#34d399" fill-opacity="0.6"/>
+    <circle cx="1136" cy="214" r="5" fill="#fbbf24" fill-opacity="0.6"/>
+    <circle cx="1226" cy="166" r="5" fill="#c084fc" fill-opacity="0.6"/>
+  </g>
+  <rect x="80" y="80" width="160" height="160" rx="38" fill="url(#bt-tile)" stroke="#ffffff" stroke-opacity="0.06"/>
+  <circle cx="126" cy="126" r="13" fill="none" stroke="#34d399" stroke-width="12"/>
+  <circle cx="194" cy="210" r="13" fill="none" stroke="#34d399" stroke-width="12"/>
+  <path d="M139 126 H158 a22 22 0 0 1 0 44 H140 a20 20 0 0 0 0 40 H175" fill="none" stroke="#34d399" stroke-width="14" stroke-linecap="round"/>
+  <text x="288" y="156" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="54" font-weight="700" letter-spacing="-1.4" fill="#f5f5f3">Backtrail</text>
+  <text x="288" y="200" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="22" fill="#ffffff" fill-opacity="0.6">A knowledge graph from sessions, notes and git history.</text>
+</svg>

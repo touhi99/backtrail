@@ -1,5 +1,7 @@
 # Backtrail
 
+![Backtrail banner](docs/banner.svg)
+
 Backtrail builds a knowledge graph from coding-agent sessions, notes and git history. It holds decisions, steps,
 questions and facts, each referencing the session that stated it. Decisions link to the projects, tools and models they
 are about, to the reasons behind them and to the decisions they replace. Agents propose claims; a decision is settled
