@@ -222,25 +222,12 @@ pub fn view(c: &Connection) -> Value {
     let kinds: Vec<Value> = KINDS
         .iter()
         .map(|kind| {
-            let quotes: Vec<Value> = rows(
-                c,
-                "SELECT u.id AS chunk_id, u.source_id, ifnull(src.thread,'Unsorted') AS thread, u.text
-                 FROM turn_tags t JOIN chunks u ON u.id=t.chunk_id JOIN sources src ON src.id=u.source_id
-                 WHERE t.kind=?1 AND length(u.text) < 220 ORDER BY u.ts DESC LIMIT 3",
-                &[kind],
-            )
-            .into_iter()
-            .map(|q| {
-                serde_json::json!({"chunk_id": q["chunk_id"], "source_id": q["source_id"], "thread": q["thread"],
-                                   "text": mask_keys(&head(s(&q, "text"), 200))})
-            })
-            .collect();
             let n = crate::db::count(
                 c,
                 "SELECT COUNT(*) FROM turn_tags t JOIN chunks u ON u.id=t.chunk_id WHERE t.kind=?1 AND u.ts >= ?2",
                 &[kind, &since],
             );
-            serde_json::json!({"kind": kind, "n": n, "quotes": quotes})
+            serde_json::json!({"kind": kind, "n": n})
         })
         .collect();
     let threads = rows(
@@ -257,4 +244,38 @@ pub fn view(c: &Connection) -> Value {
         &[],
     );
     serde_json::json!({"weeks": weeks, "kinds": kinds, "threads": threads, "untagged": untagged})
+}
+
+pub fn messages(c: &Connection, kind: &str, thread: &str, week: &str) -> Value {
+    let since = rows(
+        c,
+        "SELECT date(u.ts, 'weekday 0', '-6 days') AS week FROM turn_tags t JOIN chunks u ON u.id=t.chunk_id
+         GROUP BY week ORDER BY week DESC LIMIT 1 OFFSET 7",
+        &[],
+    )
+    .first()
+    .map_or(String::new(), |w| s(w, "week").to_string());
+    let filter =
+        "FROM turn_tags t JOIN chunks u ON u.id=t.chunk_id JOIN sources src ON src.id=u.source_id
+         WHERE t.correction=1 AND u.ts >= ?1
+           AND (?2 = '' OR t.kind = ?2)
+           AND (?3 = '' OR ifnull(src.thread,'Unsorted') = ?3)
+           AND (?4 = '' OR date(u.ts, 'weekday 0', '-6 days') = ?4)";
+    let args: [&dyn rusqlite::ToSql; 4] = [&since, &kind, &thread, &week];
+    let n = crate::db::count(c, &format!("SELECT COUNT(*) {filter}"), &args);
+    let items: Vec<Value> = rows(
+        c,
+        &format!(
+            "SELECT u.id AS chunk_id, u.source_id, ifnull(src.thread,'Unsorted') AS thread, t.kind, u.ts, u.text
+             {filter} ORDER BY u.ts DESC LIMIT 60"
+        ),
+        &args,
+    )
+    .into_iter()
+    .map(|q| {
+        serde_json::json!({"chunk_id": q["chunk_id"], "source_id": q["source_id"], "thread": q["thread"],
+                           "kind": q["kind"], "ts": q["ts"], "text": mask_keys(&head(s(&q, "text"), 280))})
+    })
+    .collect();
+    serde_json::json!({"n": n, "items": items})
 }

@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useApi } from '@/lib/api'
 import { Ring, Spark } from '@/components/Viz'
-import type { Corrections as Data } from '@/lib/types'
+import type { CorrectionMessages, Corrections as Data } from '@/lib/types'
 import '@/next.css'
 
 const KIND: Record<string, { label: string; color: string; hint: string }> = {
@@ -18,6 +18,7 @@ const pct = (n: number, d: number) => (d ? Math.round((n * 100) / d) : 0)
 const dayShort = (w: string) => new Date(w + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 
 type Thread = Data['threads'][number]
+type Filter = { kind?: string; thread?: string; week?: string }
 
 function treemapRows(items: Thread[], rows = 3): Thread[][] {
   const total = items.reduce((a, t) => a + t.turns, 0)
@@ -38,7 +39,18 @@ function heat(rate: number) {
 
 export default function Corrections() {
   const { data } = useApi<Data>('/api/corrections')
-  const [open, setOpen] = useState<string | null>(null)
+  const [f, setF] = useState<Filter>({})
+  const panel = useRef<HTMLElement>(null)
+  const active = Boolean(f.kind || f.thread || f.week)
+  const qs = new URLSearchParams({ kind: f.kind ?? '', thread: f.thread ?? '', week: f.week ?? '' }).toString()
+  const { data: msgs } = useApi<CorrectionMessages>(active ? `/api/corrections/messages?${qs}` : null)
+  useEffect(() => {
+    if (active) panel.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [active, qs])
+  const toggle = (next: Filter) => setF((cur) => {
+    const same = Object.entries(next).every(([k, v]) => cur[k as keyof Filter] === v)
+    return same ? Object.fromEntries(Object.keys(cur).filter((k) => !(k in next)).map((k) => [k, cur[k as keyof Filter]])) : { ...cur, ...next }
+  })
   if (!data) return null
   const weeks = data.weeks
   const now = weeks[weeks.length - 1], prev = weeks[weeks.length - 2]
@@ -46,7 +58,6 @@ export default function Corrections() {
   const delta = prev ? rate - pct(prev.corrections, prev.turns) : 0
   const kindTotal = data.kinds.reduce((a, k) => a + k.n, 0)
   const kindWeeks = weeks.filter((w) => Object.values(w.kinds).some((n) => n > 0))
-  const sel = data.kinds.find((k) => k.kind === open)
 
   if (weeks.length === 0) {
     return (
@@ -81,32 +92,31 @@ export default function Corrections() {
                 const n = ORDER.reduce((a, k) => a + (w.kinds[k] ?? 0), 0) || 1
                 return (
                   <div key={w.week} className="flex h-full flex-1 flex-col-reverse gap-[2px] overflow-hidden rounded-lg">
-                    {ORDER.map((k) => (
-                      <span key={k} title={`${KIND[k].label}: ${pct(w.kinds[k] ?? 0, n)}%`} className="block transition-opacity"
-                        style={{ height: `${pct(w.kinds[k] ?? 0, n)}%`, background: KIND[k].color, opacity: open && open !== k ? 0.18 : 1 }} />
-                    ))}
+                    {ORDER.map((k) => {
+                      const lit = (!f.kind || f.kind === k) && (!f.week || f.week === w.week)
+                      return (
+                        <button key={k} type="button" title={`${KIND[k].label}, week of ${dayShort(w.week)}: ${pct(w.kinds[k] ?? 0, n)}%`}
+                          onClick={() => toggle({ kind: k, week: w.week })} className="block w-full cursor-pointer transition-opacity hover:brightness-125"
+                          style={{ height: `${pct(w.kinds[k] ?? 0, n)}%`, background: KIND[k].color, opacity: lit ? 1 : 0.18 }} />
+                      )
+                    })}
                   </div>
                 )
               })}
             </div>
-            <div className="mt-2 flex gap-2.5">{kindWeeks.map((w) => <span key={w.week} className="flex-1 text-center text-[11.5px] text-mut">{dayShort(w.week)}</span>)}</div>
+            <div className="mt-2 flex gap-2.5">{kindWeeks.map((w) => (
+              <button key={w.week} type="button" onClick={() => toggle({ week: w.week })}
+                className={`flex-1 rounded-md py-0.5 text-center text-[11.5px] transition hover:bg-white/5 ${f.week === w.week ? 'font-semibold text-ink' : 'text-mut'}`}>{dayShort(w.week)}</button>
+            ))}</div>
             <div className="mt-4 flex flex-wrap gap-2">
               {data.kinds.filter((k) => k.n > 0).sort((a, b) => b.n - a.n).map((k) => (
-                <button key={k.kind} type="button" title={KIND[k.kind].hint} onClick={() => setOpen(open === k.kind ? null : k.kind)}
-                  className={`inline-flex h-8 items-center gap-2 rounded-[10px] border px-3 text-[13px] transition ${open === k.kind ? 'border-[#45454d] bg-white/10 text-ink' : 'border-line2 bg-white/[.04] text-soft hover:bg-white/[.08]'}`}>
+                <button key={k.kind} type="button" title={KIND[k.kind].hint} onClick={() => toggle({ kind: k.kind })}
+                  className={`inline-flex h-8 items-center gap-2 rounded-[10px] border px-3 text-[13px] transition ${f.kind === k.kind ? 'border-[#45454d] bg-white/10 text-ink' : 'border-line2 bg-white/[.04] text-soft hover:bg-white/[.08]'}`}>
                   <span className="size-2.5 rounded-[3px]" style={{ background: KIND[k.kind].color }} />{KIND[k.kind].label}<b className="tabular-nums text-ink">{pct(k.n, kindTotal)}%</b>
                 </button>
               ))}
             </div>
-            {sel ? (
-              <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-line2 bg-raised p-4">
-                {sel.quotes.map((q) => (
-                  <Link key={q.chunk_id} to={`/source/${q.source_id}?c=${q.chunk_id}`} className="border-l-[3px] pl-3 text-[14px] leading-snug hover:text-ink" style={{ borderColor: KIND[sel.kind].color }}>
-                    {q.text} <span className="text-[12px] text-mut">· {q.thread}</span>
-                  </Link>
-                ))}
-              </div>
-            ) : <span className="mt-3 text-[12px] text-mut">Click a kind to see what you said</span>}
+            <span className="mt-3 text-[12px] text-mut">Click a bar, a week, a kind or a box below to see those messages</span>
           </div>
         </section>
 
@@ -116,17 +126,51 @@ export default function Corrections() {
             {treemapRows(data.threads).map((row, i) => (
               <div key={i} className="flex min-h-0 gap-1.5" style={{ flex: row.reduce((a, t) => a + t.turns, 0) }}>
                 {row.map((t) => (
-                  <Link key={t.thread} to={`/thread/${encodeURIComponent(t.thread)}`} title={`${pct(t.corrections, t.turns)}% of ${t.turns} messages`}
-                    className="flex min-w-0 flex-col justify-end overflow-hidden rounded-xl p-3 transition hover:brightness-125" style={{ flex: t.turns, background: heat(pct(t.corrections, t.turns)) }}>
-                    <span className="truncate text-[13px] font-semibold text-ink">{t.thread}</span>
+                  <button key={t.thread} type="button" onClick={() => toggle({ thread: t.thread })} title={`${pct(t.corrections, t.turns)}% of ${t.turns} messages`}
+                    className={`flex min-w-0 flex-col items-start justify-end overflow-hidden rounded-xl p-3 text-left transition hover:brightness-125 ${f.thread === t.thread ? 'ring-2 ring-white/80' : ''}`}
+                    style={{ flex: t.turns, background: heat(pct(t.corrections, t.turns)), opacity: f.thread && f.thread !== t.thread ? 0.45 : 1 }}>
+                    <span className="w-full truncate text-[13px] font-semibold text-ink">{t.thread}</span>
                     <span className="text-[12px] tabular-nums text-soft">{pct(t.corrections, t.turns)}%</span>
-                  </Link>
+                  </button>
                 ))}
               </div>
             ))}
           </div>
         </section>
+
+        {active && (
+          <section ref={panel} className="nx-panel nx-in flex flex-col gap-3 p-5">
+            <div className="flex flex-wrap items-center gap-2">
+              {f.kind && <Chip color={KIND[f.kind]?.color} label={KIND[f.kind]?.label ?? f.kind} clear={() => setF({ ...f, kind: undefined })} />}
+              {f.thread && <Chip label={f.thread} clear={() => setF({ ...f, thread: undefined })} />}
+              {f.week && <Chip label={`week of ${dayShort(f.week)}`} clear={() => setF({ ...f, week: undefined })} />}
+              <span className="text-[13px] tabular-nums text-mut">{msgs ? `${msgs.n} message${msgs.n === 1 ? '' : 's'}` : '…'}</span>
+              <button type="button" onClick={() => setF({})} title="Clear" className="ml-auto grid size-7 place-items-center rounded-full bg-white/[.06] text-soft hover:bg-white/10">×</button>
+            </div>
+            <div className="flex max-h-[480px] flex-col gap-1 overflow-y-auto">
+              {msgs?.items.map((q) => (
+                <Link key={q.chunk_id} to={`/source/${q.source_id}?c=${q.chunk_id}`}
+                  className="flex gap-3 rounded-lg px-2 py-2 text-[14px] leading-snug text-soft transition hover:bg-white/[.04] hover:text-ink">
+                  <span className="w-[3px] shrink-0 rounded-full" style={{ background: (q.kind && KIND[q.kind]?.color) || '#52525b' }} />
+                  <span className="min-w-0 flex-1">{q.text}<span className="ml-2 text-[12px] text-mut">{q.thread} · {dayShort(q.ts.slice(0, 10))}</span></span>
+                </Link>
+              ))}
+              {msgs && msgs.n === 0 && <span className="px-2 py-3 text-[13px] text-mut">No pushback matches all of these. Remove a filter to widen it.</span>}
+              {msgs && msgs.n > msgs.items.length && <span className="px-2 pt-1 text-[12px] text-mut">Latest {msgs.items.length} of {msgs.n}</span>}
+            </div>
+          </section>
+        )}
       </div>
     </div>
+  )
+}
+
+function Chip({ label, color, clear }: { label: string; color?: string; clear: () => void }) {
+  return (
+    <span className="inline-flex h-8 items-center gap-2 rounded-[10px] border border-line2 bg-white/[.06] pl-3 pr-1.5 text-[13px] font-medium text-ink">
+      {color && <span className="size-2.5 rounded-[3px]" style={{ background: color }} />}
+      {label}
+      <button type="button" onClick={clear} title="Remove" className="grid size-5 place-items-center rounded-full text-mut hover:bg-white/10 hover:text-ink">×</button>
+    </span>
   )
 }

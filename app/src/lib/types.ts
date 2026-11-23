@@ -359,7 +359,12 @@ export type DChain = { focus: string; decisions: DDecision[]; links: DLink[] }
 
 export type Corrections = {
   weeks: { week: string; turns: number; corrections: number; kinds: Record<string, number> }[]
-  kinds: { kind: string; n: number; quotes: { chunk_id: number; source_id: number; thread: string; text: string }[] }[]
+  kinds: { kind: string; n: number }[]
   threads: { thread: string; turns: number; corrections: number }[]
   untagged: number
+}
+
+export type CorrectionMessages = {
+  n: number
+  items: { chunk_id: number; source_id: number; thread: string; kind: string | null; ts: string; text: string }[]
 }

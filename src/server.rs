@@ -124,6 +124,9 @@ fn get(c: &Connection, path: &str, q: &Query) -> Option<Value> {
     Some(match path {
         "/api/today" => views::today(c),
         "/api/corrections" => crate::corrections::view(c),
+        "/api/corrections/messages" => {
+            crate::corrections::messages(c, &q.get("kind"), &q.get("thread"), &q.get("week"))
+        }
         "/api/thread" => views::thread(c, &q.get("name")),
         "/api/focus" => views::focus(c, &q.get("thread")),
         "/api/items" => views::items(

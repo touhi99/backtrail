@@ -109,6 +109,13 @@ export default function Shell({ children }: { children: ReactNode }) {
         </aside>
 
         <main className="m-2 ml-0 flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-bg max-md:m-0 max-md:rounded-none">
+          <nav className="flex shrink-0 gap-1 border-b border-line px-3 py-2 md:hidden">
+            {NAV.map(({ to, label, icon: Icon, end }) => (
+              <NavLink key={to} to={to} end={end} className={({ isActive }) => `flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-[13px] ${isActive ? 'bg-white/[.07] font-medium text-ink' : 'text-soft'}`}>
+                <Icon size={15} />{label}
+              </NavLink>
+            ))}
+          </nav>
           <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-5">
             <h1 className="text-[15px] font-semibold">{title}</h1>
             <div className="relative ml-4 max-w-sm flex-1">
