@@ -1,0 +1,23 @@
+{
+  "name": "backtrail",
+  "version": "0.1.0",
+  "description": "Starts each Claude Code session with the project's next step and settled decisions, and adds the decisions that bear on each prompt.",
+  "author": {
+    "name": "touhi99",
+    "url": "https://github.com/touhi99"
+  },
+  "homepage": "https://github.com/touhi99/backtrail",
+  "repository": "https://github.com/touhi99/backtrail",
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "decisions",
+    "knowledge-graph",
+    "sessions",
+    "hooks"
+  ],
+  "skills": [
+    "./skill"
+  ],
+  "icon": "./.claude-plugin/icon.png"
+}
