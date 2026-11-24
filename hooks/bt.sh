@@ -7,7 +7,6 @@ if [ -z "$bt" ]; then
 fi
 case "$1" in
   brief) exec "$bt" brief ;;
-  recall) exec "$bt" recall ;;
   end)
     real="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$bt")"
     exec "$(dirname "$real")/../../skill/session-end.sh"

@@ -80,6 +80,10 @@ fn brief_short(c: &Connection) -> String {
             say!(out, "      - {}", line(s(child, "name"), &[child]));
         }
     }
+    say!(
+        out,
+        "Before changing something a project already decided, run `bt search <words>` for the decision and the line it came from."
+    );
     let mut elsewhere: BTreeMap<String, usize> = BTreeMap::new();
     for q in waiting
         .iter()

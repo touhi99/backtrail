@@ -88,7 +88,8 @@ adds the other agents' hooks ([`harnesses.md`](harnesses.md#support-by-tool)); `
 hand, for Claude Code:
 
 - `SessionStart`: `bt brief` prints one line per thread in motion. Claude runs `bt brief --thread <name>` for the project at hand.
-- `UserPromptSubmit`: `bt recall` adds up to two settled decisions that match the prompt.
+- `UserPromptSubmit`, only with `bt hooks install --recall`: `bt recall` adds up to two settled decisions that match
+  the prompt. Without it, the brief tells the agent to run `bt search` before changing a decision.
 - `SessionEnd`: `<path>/skill/session-end.sh` runs `ingest`, marks the session ended and starts `skill/sweep.sh` in
   the background. The sweep reads every queued session with `skill/extract.sh`, judges every unjudged proposed item
   with `skill/resolve.sh`, links settled decisions to older ones and to their reasons with `resolve.sh --reverses`, and

@@ -1,7 +1,7 @@
 {
   "name": "backtrail",
   "version": "0.1.0",
-  "description": "Starts each Claude Code session with the project's next step and settled decisions, and adds the decisions that bear on each prompt.",
+  "description": "Starts each Claude Code session with the project's next step and settled decisions, each with the line it came from.",
   "author": {
     "name": "touhi99",
     "url": "https://github.com/touhi99"
