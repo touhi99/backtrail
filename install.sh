@@ -57,7 +57,7 @@ if [ "$(uname)" = Darwin ] && [ -z "$BT_NO_AGENT" ]; then
   env_block=""
   [ -n "$BACKTRAIL_HOME" ] && env_block="    <key>EnvironmentVariables</key>
     <dict><key>BACKTRAIL_HOME</key><string>$BACKTRAIL_HOME</string></dict>"
-  mkdir -p "$data/logs" "$HOME/Library/LaunchAgents"
+  mkdir -p "$data/logs" "$HOME/Library/Logs/dev" "$HOME/Library/LaunchAgents"
   new_plist=$(cat <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -80,9 +80,9 @@ $env_block
     <key>ThrottleInterval</key>
     <integer>10</integer>
     <key>StandardOutPath</key>
-    <string>$data/logs/serve.log</string>
+    <string>$HOME/Library/Logs/dev/dev.backtrail.serve.log</string>
     <key>StandardErrorPath</key>
-    <string>$data/logs/serve.log</string>
+    <string>$HOME/Library/Logs/dev/dev.backtrail.serve.log</string>
 </dict>
 </plist>
 PLIST

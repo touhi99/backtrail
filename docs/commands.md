@@ -35,6 +35,8 @@ The complete CLI and the scripts that call it. Hooks, `skill/*.sh` and agents ca
 | `ended <session id>` | Mark a session ended (the SessionEnd hook runs it) |
 | `home` | Print the data directory |
 | `artifacts [--manifest list.json]` | Record publish dates and report missing or stale snapshots |
+| `stale [--all]` | Notes and artifacts a model marked stale, with the reason and the item or newer doc that outdates each; `--all` also lists the ones marked current. `check` prints the counts |
+| `stale-queue [--limit N] [--again]`, `stale-packet <ref>`, `stale-apply` | Docs to judge (new, edited, or their thread changed since the last verdict), the packet for one, and the verdict JSON on stdin. A stale verdict must cite an item or doc from the packet |
 | `extract-input <ref>` | Print one session for a model: the thread's existing items, the open steps of every thread with their ids, the entity names, and the turns |
 | `finish <step> --source REF --quote Q [--verified] [--dry]` | Close an open step from a quote found in the source. It closes only with `--verified` (a second model agreed the chunk shows the step finished); without, it is refused. `--dry` prints the model output only |
 | `finish-input <step>` | Print a step and the ten chunks written after it that are most like it, for `skill/finish.sh` |
@@ -75,6 +77,7 @@ The complete CLI and the scripts that call it. Hooks, `skill/*.sh` and agents ca
 | `skill/finish.sh [--dry] [--limit N] [step id...]` | Backlog sweep over items older than a day and not judged in the last 7 days |
 | `skill/close-step.sh <step id> <source ref> <quote> [--dry]` | Checks the quote with `bt finish --dry`, asks a second model, then closes the item with `--verified` |
 | `skill/howto.sh [--dry] [--again] [--limit N] \| [--dry] <step id>...` | Writes the check text for steps waiting on the user; `--again` includes steps judged to need none |
+| `skill/stale.sh [--dry] [--again] [--limit N] \| [--dry] <doc ref>...` | Marks notes and artifacts stale or current: one call per doc (`BACKTRAIL_STALE_MODEL`, default haiku) on the doc text, the thread's items changed since its date and newer docs on the thread |
 | `skill/corrections.sh [--dry] [--batches N] [--size N]` | Tags user turns as correction or not, `N` turns per model call (`BACKTRAIL_CORRECTIONS_MODEL`, default haiku). `bt corrections [--weeks N]` prints the weekly rate |
 | `install.sh` | Builds the app and binary and links `bt`; `BT_NO_AGENT=1` skips the LaunchAgent, `BT_NO_MAC_APP=1` the Mac app |
 | `mac/build.sh` | Builds the Mac app and its icon into `mac/Backtrail.app` |

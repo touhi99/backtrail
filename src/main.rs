@@ -5,6 +5,7 @@ mod config;
 mod corrections;
 mod coverage;
 mod db;
+mod docstale;
 mod embed;
 mod finish;
 mod hooks;

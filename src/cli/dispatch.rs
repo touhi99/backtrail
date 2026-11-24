@@ -1,11 +1,11 @@
 use crate::{
-    check, clock, config, corrections, coverage, db, embed, finish, hooks, howto, ingest, items,
-    kg, recall, resolve, search, server, views,
+    check, clock, config, corrections, coverage, db, docstale, embed, finish, hooks, howto, ingest,
+    items, kg, recall, resolve, search, server, views,
 };
 
 use super::{Args, fail, setup};
 
-const USAGE: &str = "backtrail ingest [--force] | build | check [--pairs] | match | resolve <id> --by <id> --reason T | resolve --expired | unresolve <id> | resolve-queue [--limit N] | resolve-packet <id> | resolve-apply <file|-> | howto-queue [--limit N] [--again] | howto-packet <id> | howto-apply | corrections [--weeks N] | corrections-packet [--limit N] [--model LABEL] [--kinds] | corrections-apply | artifacts [--manifest FILE] | \
+const USAGE: &str = "backtrail ingest [--force] | build | check [--pairs] | match | resolve <id> --by <id> --reason T | resolve --expired | unresolve <id> | resolve-queue [--limit N] | resolve-packet <id> | resolve-apply <file|-> | howto-queue [--limit N] [--again] | howto-packet <id> | howto-apply | stale [--all] | stale-queue [--limit N] [--again] | stale-packet <ref> | stale-apply | corrections [--weeks N] | corrections-packet [--limit N] [--model LABEL] [--kinds] | corrections-apply | artifacts [--manifest FILE] | \
 search <q> [--thread --kind --state --from --to --text] | embed [--limit N] | log [--n N] | link A B kind | \
 relate A B kind --source REF --quote Q [--state S] | status [--all] | ended <session id> | home | skip <session ref> | show <ref> | \
 add <type> --thread --title --source --quote [--body --check --state --origin --date] | import <facts.json|-> | \
@@ -25,6 +25,7 @@ const HELP: &str =
   bt hooks [status|install|remove] [--harness claude|gemini|codex|antigravity]
   bt status [--all]           which sessions are read into the trail, and why not
   bt check                    lost quotes, orphan threads, stale work, claims GitHub contradicts
+  bt stale [--all]            notes and artifacts marked stale, with the item that outdates each
   bt prs [--all]              read the GitHub state of PRs that sessions opened
 
 Every command: bt help all. Reference: docs/reference.md";
@@ -367,6 +368,25 @@ pub(super) fn run() {
         ),
         "howto-packet" => howto::packet(&c, &a.at(1, "step id")),
         "howto-apply" => howto::apply_cli(&c),
+        "stale" => docstale::report(
+            &c,
+            if a.has("--all") {
+                docstale::Show::All
+            } else {
+                docstale::Show::Stale
+            },
+        ),
+        "stale-queue" => docstale::queue(
+            &c,
+            a.num("--limit", 30),
+            if a.has("--again") {
+                docstale::Again::Include
+            } else {
+                docstale::Again::Skip
+            },
+        ),
+        "stale-packet" => docstale::packet(&c, &a.at(1, "note or artifact ref")),
+        "stale-apply" => docstale::apply_cli(&c),
         "corrections" => corrections::report(&c, a.num("--weeks", 8)),
         "corrections-packet" => corrections::packet(
             &c,

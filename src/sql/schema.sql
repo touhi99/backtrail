@@ -172,6 +172,15 @@ CREATE TABLE IF NOT EXISTS threads(
   updated TEXT
 );
 
+CREATE TABLE IF NOT EXISTS doc_stale(
+  source_id INTEGER PRIMARY KEY,
+  stale INTEGER NOT NULL,
+  reason TEXT,
+  by_refs TEXT,
+  mtime INTEGER,
+  checked TEXT
+);
+
 CREATE TABLE IF NOT EXISTS artifact_meta(
   id TEXT PRIMARY KEY,
   title TEXT,
