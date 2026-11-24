@@ -1,0 +1,15 @@
+{
+  "name": "backtrail",
+  "description": "Backtrail for Claude Code",
+  "owner": {
+    "name": "touhi99",
+    "url": "https://github.com/touhi99"
+  },
+  "plugins": [
+    {
+      "name": "backtrail",
+      "source": "./",
+      "description": "Starts each Claude Code session with the project's next step and settled decisions."
+    }
+  ]
+}

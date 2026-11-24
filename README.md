@@ -2,14 +2,11 @@
 
 ![Backtrail banner](docs/banner.svg)
 
-Backtrail builds a knowledge graph from coding-agent sessions, notes and git history. It holds decisions, steps,
-questions and facts, each referencing the session that stated it. Decisions link to the projects, tools and models they
-are about, to the reasons behind them and to the decisions they replace. Agents propose claims; a decision is settled
-when the user states it in a session, accepts it in an app or writes it in a note.
+Backtrail records the decisions made in Claude Code, Codex, Gemini CLI and Antigravity sessions, each with the line it
+came from. A new session starts with the project's next step and settled decisions, and each prompt gets the decisions
+that bear on it.
 
-Agents read the graph through hooks. A session starts with the open steps of the projects in motion, and each prompt
-receives the settled decisions that bear on it. The web and Mac apps show the graph, the trail and the decisions per
-project, over time.
+![Backtrail demo](docs/demo/demo.gif)
 
 ## Problem
 
@@ -20,10 +17,6 @@ Coding agents make it easy to work on many projects in parallel, and faster.
 - Search returns matches, not what was decided, why, or what it replaced. Reading notes or session history instead is
   more than one person can follow across many long-running projects.
 - A new session does not know what earlier sessions settled, so the agent asks again or undoes it.
-
-| | |
-| --- | --- |
-| ![Home](docs/demo/home.png) | ![Project page](docs/demo/thread.png) |
 
 ## How it works
 
@@ -58,6 +51,13 @@ bt build
 
 `install.sh` asks which agents to connect, adds Backtrail's hooks and skill to each, and on macOS installs a LaunchAgent that runs the server and builds the Mac app. Elsewhere, run `bt serve`. More:
 [`docs/reference.md`](docs/reference.md).
+
+Claude Code can use the plugin instead:
+
+```
+BT_HOOKS=0 ./install.sh
+/plugin install backtrail --marketplace touhi99/backtrail
+```
 
 ## Usage
 
