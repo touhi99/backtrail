@@ -119,7 +119,7 @@ UTF-8 JSON Lines for the inbox. The first line is the header; each further line 
 | `ts` | yes | ISO 8601 UTC with `Z`, for example `2026-11-21T07:00:00.000Z` |
 | `text` | yes | plain text of the turn |
 
-- One file per session. Rewrite the whole file when the session grows; a file is read again when its modification
+- Write each session to its own file. Rewrite the whole file when the session grows; a file is read again when its modification
   time changes, and its stored turns are replaced.
 - Leave out tool calls, tool output, system prompts, injected context and hidden reasoning. The converter format
   carries typed text only; the Claude Code reader also keeps failed tool calls. Turns shorter than 15 characters are

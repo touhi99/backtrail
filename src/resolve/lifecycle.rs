@@ -180,7 +180,7 @@ fn park_stale(c: &Connection) -> usize {
         "SELECT c.id FROM claims c LEFT JOIN sources s ON s.id=c.source_id
           WHERE c.origin!='owner' AND c.type IN ('decision','step','question')
             AND (c.state='proposed' OR (c.state='open' AND c.type='question'))
-            AND substr(COALESCE(NULLIF(c.asserted_at,''), s.first_ts, c.created),1,10) < date('now', ?1)",
+            AND MAX(substr(COALESCE(NULLIF(c.asserted_at,''), s.first_ts, c.created),1,10), substr(c.updated,1,10)) < date('now', ?1)",
         &[&format!("-{PARK_DAYS} days")],
     );
     for id in &ids {

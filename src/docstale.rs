@@ -59,6 +59,7 @@ pub fn packet(c: &Connection, doc_ref: &str) {
                 IFNULL(stale,'') AS stale
          FROM claims WHERE thread=?1 AND type IN ('decision','step')
            AND state IN ('settled','done','superseded','rejected','parked','answered')
+           AND NOT (state='superseded' AND IFNULL(answer,'') LIKE 'parked:%')
            AND substr(updated,1,10)>=?2
          ORDER BY updated DESC LIMIT 50",
         &[&thread, &day],

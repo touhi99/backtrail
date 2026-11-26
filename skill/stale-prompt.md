@@ -12,5 +12,6 @@ Rules:
 - One done step out of many open ones in a plan does not make the whole doc stale; stale means a reader acting on the doc today would be misled on its main point.
 - A doc that records history (a log, a changelog, a session note about what happened) is not stale because later work followed it.
 - A newer doc on a different subject in the same thread does not replace this one.
+- A decision marked superseded with no replacing item in the packet is not enough on its own. Count it only when the doc's main point depends on that decision and another item in the packet shows the change.
 - When the packet does not show a clear contradiction or replacement, answer stale false with a short reason and an empty `by`. A false answer is correct when unsure.
 - reason names the contradicting item or replacing doc in plain words, for example "Plan says to build the Mac menubar; d-22a2364c dropped the Mac app."
