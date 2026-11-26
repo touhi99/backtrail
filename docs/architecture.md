@@ -6,7 +6,7 @@ Describes the code as built. The full command list is in `commands.md`; everyday
 
 ## Overview
 
-One Rust binary, one SQLite file, a web app embedded in the binary and a SwiftUI Mac app (`mac/`) that reads the same
+A Rust binary with a SQLite database, a web app embedded in the binary and a SwiftUI Mac app (`mac/`) that reads the same
 JSON API. The binary writes the database; sources (session logs, notes, git history, artifact snapshots) are read.
 
 - The binary calls the embedding server (Ollama, `127.0.0.1:11434` unless `config.json` names another). Search,
