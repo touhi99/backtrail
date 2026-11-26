@@ -8,6 +8,8 @@ with `bt search` before changing what it settled.
 
 ![Backtrail demo](docs/demo/demo.gif)
 
+Walkthrough of how it works: [Backtrail intro](https://claude.ai/artifact/TarXiyewr2Uys2R2uPaU8a).
+
 ## Problem
 
 Coding agents make it easy to work on many projects in parallel, and faster.
