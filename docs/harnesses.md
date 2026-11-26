@@ -7,7 +7,7 @@ them. Each is connected in up to four ways; only the first two are needed for Ba
 | --- | --- | --- |
 | Session reader | yes | Indexes the tool's transcripts, so its sessions appear in search, projects and the brief |
 | Extraction model | yes | The CLI that reads sessions for decisions and checks them (`bt agent`); one per machine |
-| Hooks | no | Add the brief at session start and settled decisions to each prompt; read a session as soon as it ends |
+| Hooks | no | Add the brief at session start; read a session as soon as it ends. `--recall` also adds settled decisions to each prompt |
 | Skill | no | `skill/SKILL.md`, the Agent Skills format all four tools load, for filing items by hand |
 
 Without a session-end hook, the sweep, which runs every 5 minutes, reads a session once its file has not changed for
@@ -22,7 +22,7 @@ Backtrail context unless it runs `bt brief` itself.
 | Extraction model | `claude -p` | `gemini -p` | `codex exec --ephemeral` | `agy -p` |
 | Hooks file | `~/.claude/settings.json` | `~/.gemini/settings.json` | `~/.codex/hooks.json` | `~/.gemini/config/hooks.json` |
 | Session start | `SessionStart` | `SessionStart` | `SessionStart` | `SessionStart` |
-| Each prompt | `UserPromptSubmit` | `BeforeAgent` | `UserPromptSubmit` | `PreInvocation` |
+| Each prompt, with `--recall` | `UserPromptSubmit` | `BeforeAgent` | `UserPromptSubmit` | `PreInvocation` |
 | Session end | `SessionEnd` | `SessionEnd` | sweep | sweep |
 | Skill link | `~/.claude/skills/backtrail` | `~/.agents/skills/backtrail` | `~/.agents/skills/backtrail` | `~/.gemini/config/skills/backtrail` |
 | Tested | yes | no | no | no |

@@ -3,8 +3,8 @@
 ![Backtrail banner](docs/banner.svg)
 
 Backtrail records the decisions made in Claude Code, Codex, Gemini CLI and Antigravity sessions, each with the line it
-came from. A new session starts with the project's next step and settled decisions, and each prompt gets the decisions
-that bear on it.
+came from. A new session starts with the project's next step and settled decisions, and the agent looks up a decision
+with `bt search` before changing what it settled.
 
 ![Backtrail demo](docs/demo/demo.gif)
 
@@ -27,8 +27,8 @@ Coding agents make it easy to work on many projects in parallel, and faster.
 3. The user settles decisions. Claims nobody confirms are parked after 14 days.
 4. A step is marked done when a model finds it finished in a session and a second model call confirms it. The proof
    names that session's pull requests and pushes to `main`, with their state on GitHub.
-5. The next session starts with the open steps of the projects in motion, and each prompt gets up to two settled
-   decisions that match it.
+5. The next session starts with the open steps of the projects in motion. The agent runs `bt search` before changing
+   something a project already decided.
 
 ![Components](docs/architecture.svg)
 

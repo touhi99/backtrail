@@ -19,7 +19,21 @@ pub const ALL: [Harness; 4] = [
 
 const GROUP: &str = "backtrail";
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Role {
+    Brief,
+    Recall,
+    End,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PerPrompt {
+    On,
+    Off,
+}
+
 struct Hook {
+    role: Role,
     event: &'static str,
     command: String,
     extra: Value,
@@ -77,7 +91,8 @@ impl Harness {
 
     fn hooks(self, exe: &Path, end: &Path) -> Vec<Hook> {
         let bt = exe.display();
-        let hook = |event, command: String, extra| Hook {
+        let hook = |role, event, command: String, extra| Hook {
+            role,
             event,
             command,
             extra,
@@ -86,16 +101,19 @@ impl Harness {
         match self {
             Self::Claude => vec![
                 hook(
+                    Role::Brief,
                     "SessionStart",
                     format!("{bt} brief"),
                     json!({"timeout": 10, "statusMessage": "Backtrail brief"}),
                 ),
                 hook(
+                    Role::Recall,
                     "UserPromptSubmit",
                     format!("{bt} recall"),
                     json!({"timeout": 5}),
                 ),
                 hook(
+                    Role::End,
                     "SessionEnd",
                     end.display().to_string(),
                     json!({"timeout": 10}),
@@ -103,16 +121,19 @@ impl Harness {
             ],
             Self::Gemini => vec![
                 hook(
+                    Role::Brief,
                     "SessionStart",
                     format!("{bt} brief --hook {tag}"),
                     json!({"name": "backtrail-brief", "timeout": 10000}),
                 ),
                 hook(
+                    Role::Recall,
                     "BeforeAgent",
                     format!("{bt} recall --hook {tag}"),
                     json!({"name": "backtrail-recall", "timeout": 5000}),
                 ),
                 hook(
+                    Role::End,
                     "SessionEnd",
                     end.display().to_string(),
                     json!({"name": "backtrail-end", "timeout": 10000}),
@@ -120,11 +141,13 @@ impl Harness {
             ],
             Self::Codex => vec![
                 hook(
+                    Role::Brief,
                     "SessionStart",
                     format!("{bt} brief --hook {tag}"),
                     json!({"timeout": 10}),
                 ),
                 hook(
+                    Role::Recall,
                     "UserPromptSubmit",
                     format!("{bt} recall --hook {tag}"),
                     json!({"timeout": 5}),
@@ -132,11 +155,13 @@ impl Harness {
             ],
             Self::Antigravity => vec![
                 hook(
+                    Role::Brief,
                     "SessionStart",
                     format!("{bt} brief --hook {tag}"),
                     json!({}),
                 ),
                 hook(
+                    Role::Recall,
                     "PreInvocation",
                     format!("{bt} recall --hook {tag}"),
                     json!({}),
@@ -306,7 +331,7 @@ fn paths() -> anyhow::Result<(PathBuf, PathBuf, PathBuf)> {
     Ok((exe, skill.join("session-end.sh"), skill))
 }
 
-fn one(h: Harness, action: &str) -> anyhow::Result<()> {
+fn one(h: Harness, action: &str, per_prompt: PerPrompt) -> anyhow::Result<()> {
     let (exe, end, skill) = paths()?;
     let path = h.settings();
     let raw = std::fs::read_to_string(&path).ok();
@@ -319,10 +344,10 @@ fn one(h: Harness, action: &str) -> anyhow::Result<()> {
     println!("{} ({})", h.name(), path.display());
     if action == "status" {
         for hook in &hooks {
-            let state = if has(&v, h, hook) {
-                "installed"
-            } else {
-                "not installed"
+            let state = match (has(&v, h, hook), hook.role) {
+                (true, _) => "installed",
+                (false, Role::Recall) => "off (agents run `bt search` when they need a decision)",
+                (false, Role::Brief | Role::End) => "not installed",
             };
             println!("  {}: {state}", hook.event);
         }
@@ -335,6 +360,21 @@ fn one(h: Harness, action: &str) -> anyhow::Result<()> {
     }
     let mut changed = false;
     for hook in &hooks {
+        if action == "install" && hook.role == Role::Recall && per_prompt == PerPrompt::Off {
+            if drop_hook(&mut v, h, hook) {
+                changed = true;
+                println!(
+                    "  {}: removed; pass --recall to keep decisions on each prompt",
+                    hook.event
+                );
+            } else {
+                println!(
+                    "  {}: off; pass --recall to add decisions to each prompt",
+                    hook.event
+                );
+            }
+            continue;
+        }
         if action == "install" {
             if has(&v, h, hook) {
                 println!("  {}: already installed", hook.event);
@@ -382,7 +422,7 @@ pub fn run(args: &[String]) {
         .map_or("status", String::as_str);
     if !["status", "install", "remove"].contains(&action) {
         eprintln!(
-            "usage: backtrail hooks [status|install|remove] [--harness claude|gemini|codex|antigravity]..."
+            "usage: backtrail hooks [status|install|remove] [--harness claude|gemini|codex|antigravity]... [--recall]"
         );
         std::process::exit(1);
     }
@@ -406,8 +446,13 @@ pub fn run(args: &[String]) {
             vec![Harness::Claude]
         };
     }
+    let per_prompt = if args.iter().any(|a| a == "--recall") {
+        PerPrompt::On
+    } else {
+        PerPrompt::Off
+    };
     for h in chosen {
-        if let Err(e) = one(h, action) {
+        if let Err(e) = one(h, action, per_prompt) {
             eprintln!("{}: {e}", h.name());
             std::process::exit(1);
         }

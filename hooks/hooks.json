@@ -1,14 +1,33 @@
 {
-  "description": "Backtrail brief at session start, settled decisions per prompt, indexing at session end",
+  "description": "Backtrail brief at session start and indexing at session end",
   "hooks": {
     "SessionStart": [
-      { "matcher": "startup", "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/bt.sh", "args": ["brief"], "timeout": 10 }] }
-    ],
-    "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/bt.sh", "args": ["recall"], "timeout": 5 }] }
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/bt.sh",
+            "args": [
+              "brief"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
     ],
     "SessionEnd": [
-      { "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/bt.sh", "args": ["end"] }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/bt.sh",
+            "args": [
+              "end"
+            ]
+          }
+        ]
+      }
     ]
   }
 }

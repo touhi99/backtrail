@@ -111,7 +111,8 @@ Hooks, for each connected agent (events per agent: `harnesses.md`, "Support by t
 - SessionStart runs `bt brief`, which rescans and prints open questions and threads in motion; embedding is left
   to the timer and the session end. `bt brief --thread <name>` adds the project's latest settled decisions, settled
   ones only.
-- UserPromptSubmit runs `bt recall` (`recall.rs`), with no rescan and no model call. It scores settled decisions in
+- UserPromptSubmit runs `bt recall` (`recall.rs`) only when installed with `bt hooks install --recall`; by default
+  the agent runs `bt search` itself. Recall makes no rescan and no model call. It scores settled decisions in
   force by the rare words they share with the prompt (inverse frequency over decision titles) plus a bonus when the
   prompt names a project the decision is about. A decision outside the session's project needs that bonus. The
   session's project is its thread when that thread is a project, else the thread holding 80% of the sessions from
